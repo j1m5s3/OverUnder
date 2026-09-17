@@ -1,0 +1,28 @@
+{
+  "openapi": "3.1.0",
+  "info": { "title": "OverUnder API", "version": "0.1.0" },
+  "paths": {
+    "/health": { "get": { "responses": { "200": { "description": "ok" } } } },
+    "/api/v1/auth/nonce/{address}": { "get": { "responses": { "200": { "description": "nonce" } } } },
+    "/api/v1/auth/siwe": { "post": { "responses": { "200": { "description": "jwt" } } } },
+    "/api/v1/auth/privy": { "post": { "responses": { "200": { "description": "jwt" } } } },
+    "/api/v1/markets": {
+      "get": { "parameters": [{ "name": "parentId", "in": "query", "schema": { "type": "string" } }], "responses": { "200": { "description": "list" } } },
+      "post": { "responses": { "200": { "description": "created" } } }
+    },
+    "/api/v1/markets/{condition_id}": { "get": { "responses": { "200": { "description": "market" } } } },
+    "/api/v1/markets/{condition_id}/pause": { "post": { "responses": { "200": { "description": "paused" } } } },
+    "/api/v1/orders": { "post": { "responses": { "200": { "description": "posted" } } } },
+    "/api/v1/orders/{order_hash}": { "delete": { "responses": { "200": { "description": "cancelled" } } } },
+    "/api/v1/orderbook/{condition_id}": { "get": { "responses": { "200": { "description": "book" } } } },
+    "/api/v1/trades/{condition_id}": { "get": { "responses": { "200": { "description": "trades" } } } },
+    "/api/v1/amm/{market_id}/quote": { "get": { "responses": { "200": { "description": "quote" } } } },
+    "/api/v1/ramps/onramp-url": { "get": { "responses": { "200": { "description": "url" } } } },
+    "/api/v1/ramps/offramp-url": { "get": { "responses": { "200": { "description": "url" } } } },
+    "/api/v1/oracle/attest": { "post": { "responses": { "200": { "description": "ok" } } } },
+    "/api/v1/oracle/{market_id}/status": { "get": { "responses": { "200": { "description": "status" } } } },
+    "/api/v1/oracle/vote": { "post": { "responses": { "200": { "description": "ok" } } } },
+    "/api/v1/portfolio/{address}": { "get": { "responses": { "200": { "description": "portfolio" } } } },
+    "/api/v1/fee-vault/nav": { "get": { "responses": { "200": { "description": "nav" } } } }
+  }
+}

@@ -1,0 +1,27 @@
+[project]
+src = "src"
+tests = "tests"
+script = "script"
+py_version = "3.11"
+name = "overunder"
+version = "0.1.0"
+compiler = "vyper"
+
+[networks.anvil]
+url = "http://127.0.0.1:8545"
+chain_id = 31337
+prompt_live = false
+save_to_config = false
+default_account_name = "anvil1"
+
+[networks.base-sepolia]
+url = "${BASE_SEPOLIA_RPC_URL}"
+chain_id = 84532
+prompt_live = true
+save_to_config = true
+
+[networks.base]
+url = "https://mainnet.base.org"
+chain_id = 8453
+prompt_live = true
+save_to_config = true

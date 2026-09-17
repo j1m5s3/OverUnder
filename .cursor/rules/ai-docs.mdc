@@ -1,0 +1,12 @@
+---
+description: Always read AGENTS.md first; keep docs pointers fresh
+alwaysApply: true
+---
+
+# OverUnder docs
+
+- Read `AGENTS.md` then `docs/README.md` before editing product code.
+- Cite code as `[path : Lstart-Lend]`. Never dump full files into docs.
+- Tag facts `[SHIPPED]`, `[STUB]`, or `[PHASE2]`.
+- If you move a cited function, update that doc's `pointers` and `last_verified`.
+- Gaps go in `docs/TODOS.md` as `OU-T###` YAML items.

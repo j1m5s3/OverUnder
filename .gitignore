@@ -1,0 +1,48 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+dist/
+build/
+
+# Node
+node_modules/
+web/.next/
+web/out/
+*.log
+npm-debug.log*
+
+# Vyper / Moccasin
+contracts/.moccasin/
+contracts/out/
+contracts/.venv/
+*.vy.ir.json
+
+# Env / secrets
+.env
+.env.local
+*.pem
+
+# Local db / pytest
+*.db
+.pytest_cache/
+overunder.db
+backend/overunder.db
+
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Deploy artifacts (keep 31337 template tracked if present)
+contracts/deployments/*.json
+!contracts/deployments/.gitkeep
