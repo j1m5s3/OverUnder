@@ -43,7 +43,7 @@ export function MarketDetail({ conditionId }: { conditionId: string }) {
   return (
     <div>
       <h1>{market.question}</h1>
-      <AmmSwap conditionId={market.conditionId} initialSide={initialSide} />
+      <AmmSwap key={initialSide ?? "yes"} conditionId={market.conditionId} initialSide={initialSide} />
       <OraclePanel conditionId={market.conditionId} />
     </div>
   );
