@@ -76,8 +76,8 @@ echo -n "your-jwt-secret-32-bytes-or-more" | \
   --data-file=- \
   --project=overunder-509107
 
-# Example: Add database URL (Cloud SQL or external PostgreSQL)
-echo -n "postgresql://user:pass@host/overunder" | \
+# Example: Add database URL (Cloud SQL unix socket for overunder-pg instance)
+echo -n "postgresql+asyncpg://user:pass@/overunder?host=/cloudsql/overunder-509107:us-central1:overunder-pg" | \
   gcloud secrets versions add OU_DATABASE_URL \
   --data-file=- \
   --project=overunder-509107
@@ -300,10 +300,30 @@ The web image is built with `NEXT_PUBLIC_API_URL` baked in at build time. If you
 The workflow maps `OU_DATABASE_URL` from Secret Manager. For MVP:
 
 - **SQLite** (`sqlite+aiosqlite:///./overunder.db`) works locally but is ephemeral on Cloud Run (file disappears on redeploy)
-- **Cloud SQL** (PostgreSQL) recommended for persistent data:
+- **Cloud SQL** (PostgreSQL) recommended for persistent data
+
+### Cloud SQL Connection (overunder-pg instance)
+
+The deployed API connects to Cloud SQL instance **`overunder-pg`** in `us-central1`.
+
+**Connection String Format** (unix socket):
+```
+postgresql+asyncpg://USER:PASSWORD@/overunder?host=/cloudsql/overunder-509107:us-central1:overunder-pg
+```
+
+**Important**:
+- Replace `USER` and `PASSWORD` with actual database credentials (never commit real passwords to the repo)
+- The unix socket form (`host=/cloudsql/...`) **requires** `--add-cloudsql-instances=overunder-509107:us-central1:overunder-pg` on the Cloud Run deploy command
+- The workflow already includes this flag for the API service
+- TCP connections (e.g. `postgresql://USER:PASSWORD@IP:5432/overunder`) do not require the `--add-cloudsql-instances` flag but are less secure
+
+### Creating a New Cloud SQL Instance (if needed)
+
+If you need to create a different Cloud SQL instance:
+
   ```bash
-  # Create Cloud SQL instance (if needed)
-  gcloud sql instances create overunder-db \
+  # Create Cloud SQL instance
+  gcloud sql instances create overunder-pg \
     --database-version=POSTGRES_15 \
     --tier=db-f1-micro \
     --region=us-central1 \
@@ -311,27 +331,22 @@ The workflow maps `OU_DATABASE_URL` from Secret Manager. For MVP:
   
   # Create database
   gcloud sql databases create overunder \
-    --instance=overunder-db \
+    --instance=overunder-pg \
     --project=overunder-509107
   
   # Set root password
   gcloud sql users set-password postgres \
-    --instance=overunder-db \
+    --instance=overunder-pg \
     --password=SECURE_PASSWORD \
     --project=overunder-509107
   
   # Get connection name
-  gcloud sql instances describe overunder-db \
+  gcloud sql instances describe overunder-pg \
     --format='value(connectionName)' \
     --project=overunder-509107
   ```
 
-  Then update `OU_DATABASE_URL` secret with:
-  ```
-  postgresql+asyncpg://postgres:PASSWORD@/overunder?host=/cloudsql/overunder-509107:us-central1:overunder-db
-  ```
-
-  **Note**: When using Cloud SQL unix socket URLs (`host=/cloudsql/...`), you must add `--add-cloudsql-instances=overunder-509107:us-central1:overunder-db` to the Cloud Run deploy command. The current workflow does not include this flag — add it to the "Deploy API to Cloud Run" step if using unix sockets. TCP connections (e.g. `postgresql://postgres:PASSWORD@IP:5432/overunder`) do not require this flag.
+  Then update `OU_DATABASE_URL` secret with the connection string above.
 
 ## Project Number vs Project ID
 
