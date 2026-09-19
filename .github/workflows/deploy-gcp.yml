@@ -94,6 +94,7 @@ jobs:
             --platform=managed \
             --region=${{ env.GCP_REGION }} \
             --allow-unauthenticated \
+            --add-cloudsql-instances=overunder-509107:us-central1:overunder-pg \
             --set-secrets=JWT_SECRET=OU_JWT_SECRET:latest,DATABASE_URL=OU_DATABASE_URL:latest,ANVIL_RPC_URL=OU_ANVIL_RPC_URL:latest,PRIVY_APP_SECRET=OU_PRIVY_APP_SECRET:latest,MOONPAY_SECRET=OU_MOONPAY_SECRET:latest,OPERATOR_PRIVATE_KEY=OU_OPERATOR_PRIVATE_KEY:latest,RELAYER_PRIVATE_KEY=OU_RELAYER_PRIVATE_KEY:latest \
             --set-env-vars="CHAIN_ID=84532,PRIVY_APP_ID=${{ vars.PRIVY_APP_ID || '' }},USDC_ADDRESS=${{ vars.USDC_ADDRESS || '' }},CTF_ADDRESS=${{ vars.CTF_ADDRESS || '' }},FACTORY_ADDRESS=${{ vars.FACTORY_ADDRESS || '' }},EXCHANGE_ADDRESS=${{ vars.EXCHANGE_ADDRESS || '' }},AMM_ADDRESS=${{ vars.AMM_ADDRESS || '' }},ORACLE_ADDRESS=${{ vars.ORACLE_ADDRESS || '' }},FEE_VAULT_ADDRESS=${{ vars.FEE_VAULT_ADDRESS || '' }},OU_TOKEN_ADDRESS=${{ vars.OU_TOKEN_ADDRESS || '' }},COINBASE_ONRAMP_APP_ID=${{ vars.COINBASE_ONRAMP_APP_ID || '' }}" \
             --project=${{ env.GCP_PROJECT_ID }}
