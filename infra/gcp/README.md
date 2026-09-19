@@ -22,39 +22,46 @@ The following resources are already created in GCP — **do not recreate via ter
 
 The following secret names exist with **empty versions** (James fills later):
 
-- `OU_JWT_SECRET` — JWT signing key (HS256, 32+ bytes recommended)
-- `OU_DATABASE_URL` — PostgreSQL or SQLite connection string
-- `OU_ANVIL_RPC_URL` — Base Sepolia RPC endpoint (chain_id 84532)
+- `OU_JWT_SECRET` — JWT signing key (HS256, 32+ bytes recommended) **[REQUIRED]**
+- `OU_DATABASE_URL` — PostgreSQL connection string (must NOT be SQLite; Cloud Run needs persistent DB) **[REQUIRED]**
+- `OU_ANVIL_RPC_URL` — Base Sepolia RPC endpoint (chain_id 84532) **[REQUIRED]**
 - `OU_PRIVY_APP_SECRET` — Privy app secret for auth validation
-- `OU_MOONPAY_SECRET` — MoonPay API secret (PHASE2)
-- `OU_OPERATOR_PRIVATE_KEY` — EOA private key for market operations (0x-prefixed hex)
-- `OU_RELAYER_PRIVATE_KEY` — EOA private key for CLOB settlement (0x-prefixed hex)
+- `OU_MOONPAY_SECRET` — MoonPay API secret (mapped to MOONPAY_SECRET env; PHASE2)
+- `OU_OPERATOR_PRIVATE_KEY` — EOA private key for market operations (0x-prefixed hex; **Sepolia smoke only**)
+- `OU_RELAYER_PRIVATE_KEY` — EOA private key for CLOB settlement (0x-prefixed hex; **Sepolia smoke only**)
+
+**IMPORTANT**: The preflight check will **fail** if:
+- `OU_JWT_SECRET`, `OU_ANVIL_RPC_URL`, or `OU_DATABASE_URL` have no versions
+- `OU_DATABASE_URL` contains `sqlite` or `aiosqlite` (Cloud Run requires Cloud SQL or external PostgreSQL)
 
 ## Deployment
 
-Deployment is automated via `.github/workflows/deploy-gcp.yml` on push to `feat/mvp-docs` or manual trigger.
+Deployment is automated via `.github/workflows/deploy-gcp.yml` using **manual workflow dispatch only**.
+
+To deploy:
+1. Navigate to GitHub Actions tab: `https://github.com/j1m5s3/OverUnder/actions/workflows/deploy-gcp.yml`
+2. Click "Run workflow" → Select branch → "Run workflow" button
 
 The workflow:
 1. Authenticates using Workload Identity Federation (no JSON keys)
-2. Builds `backend/Dockerfile` and `web/Dockerfile`
-3. Pushes images to Artifact Registry with git SHA and `latest` tags
-4. Deploys to Cloud Run with Secret Manager secrets and environment variables
-5. Both services allow unauthenticated access (CORS on API, public web)
+2. Runs preflight checks on Secret Manager secrets (DATABASE_URL must be PostgreSQL, not SQLite)
+3. Builds and pushes `backend/Dockerfile` to Artifact Registry
+4. Deploys API to Cloud Run and captures the deployed URL
+5. Builds `web/Dockerfile` with the **real API URL** as build arg
+6. Pushes web image and deploys to Cloud Run
+7. Both services allow unauthenticated access (CORS on API, public web)
 
 ### Required GitHub Configuration
 
 **Repository Secrets** (set at `https://github.com/j1m5s3/OverUnder/settings/secrets/actions`):
-- `GCP_PROJECT_NUMBER` — GCP project number for WIF provider path (not project id)
+- `GCP_PROJECT_NUMBER` — GCP project number for WIF provider path (not project id) **[REQUIRED]**
 
 **Repository Variables** (optional, set at `/settings/variables/actions`):
 - `PRIVY_APP_ID` — Privy app identifier
-- `NEXT_PUBLIC_API_URL` — API URL for Next.js build (defaults to placeholder)
 - Contract addresses: `USDC_ADDRESS`, `CTF_ADDRESS`, `FACTORY_ADDRESS`, `EXCHANGE_ADDRESS`, `AMM_ADDRESS`, `ORACLE_ADDRESS`, `FEE_VAULT_ADDRESS`, `OU_TOKEN_ADDRESS`
 - `COINBASE_ONRAMP_APP_ID` — Coinbase Pay app id
 
-If contract addresses are not set as GitHub variables, you may alternatively:
-- Create `deployments/84532.json` with deployment addresses
-- Update the workflow to read from this file and set env vars
+**Note**: `NEXT_PUBLIC_API_URL` is **not** used as a GitHub variable. The workflow automatically captures the deployed API URL and rebuilds the web image with it.
 
 ## Operations
 
@@ -211,39 +218,82 @@ See `infra/gcp/cloudrun.env.example` for complete list.
 ### Frontend (overunder-web)
 
 **Build-time**:
-- `NEXT_PUBLIC_API_URL` — Backend API URL (set during build)
+- `NEXT_PUBLIC_API_URL` — Backend API URL (automatically captured from deployed API service; rebuilt on each deploy)
 
 **Runtime**:
 - `PORT` — Cloud Run sets this (default 8080)
+- No secrets; web is a static Next.js build
 
 ## Security Notes
 
-### API Service
+### ⚠️ Sepolia Smoke Configuration Only
 
-The API is deployed with `--allow-unauthenticated` for MVP smoke testing. This means:
-- Any client can call the API without GCP IAM authentication
-- CORS is configured to allow all origins in `backend/app/main.py`
-- For production, consider:
-  - Removing `--allow-unauthenticated` and using Cloud Run IAM
-  - Adding Cloud Armor WAF rules
-  - Restricting CORS origins to known frontends
-  - Rate limiting via Cloud Endpoints or API Gateway
+This deployment configuration is **Base Sepolia testnet smoke testing only**:
 
-### Private Keys
+- `--allow-unauthenticated` on both API and Web services (any client can call)
+- CORS allows all origins in `backend/app/main.py`
+- `OPERATOR_PRIVATE_KEY` and `RELAYER_PRIVATE_KEY` are mounted directly in the Cloud Run process
+- Contract addresses and RPC are Base Sepolia (chain_id 84532)
 
-- Operator and relayer private keys are stored in Secret Manager
+### Before Mainnet (Base)
+
+**Lock down API access**:
+1. Remove `--allow-unauthenticated` from API service:
+   ```bash
+   gcloud run services update overunder-api \
+     --no-allow-unauthenticated \
+     --region=us-central1 \
+     --project=overunder-509107
+   ```
+2. Grant Cloud Run Invoker role to web service identity:
+   ```bash
+   gcloud run services add-iam-policy-binding overunder-api \
+     --member="serviceAccount:<web-service-account>@overunder-509107.iam.gserviceaccount.com" \
+     --role="roles/run.invoker" \
+     --region=us-central1 \
+     --project=overunder-509107
+   ```
+3. Restrict CORS origins in `backend/app/main.py` to known frontends only
+4. Add Cloud Armor WAF rules and rate limiting
+5. Use API Gateway or Cloud Endpoints for request validation
+
+**Upgrade private key management**:
+- Move operator/relayer keys to Cloud KMS or multi-sig wallet (Gnosis Safe)
+- Implement timelock for market operations
+- Use dedicated relayer service with nonce/gas manager (not in-process keys)
+
+**Additional hardening**:
+- Enable VPC Connector for Cloud Run (private network)
+- Set up Cloud Logging alerts for suspicious activity
+- Configure Secret Manager rotation policies
+- Review IAM bindings and remove overly broad permissions
+
+### Private Keys (Current)
+
+- Operator and relayer private keys are stored in Secret Manager and mounted as env vars
 - These keys control on-chain market creation, pausing, and CLOB settlement
+- **This is acceptable for Sepolia smoke testing only**
 - Rotate keys if compromised
-- Consider multi-sig or timelock upgrades for production (PHASE2)
+- For production, use Cloud KMS or hardware security modules
 
 ### Contract Deployment
 
 Contract deployment is **separate** from app deployment:
 1. Deploy contracts to Base Sepolia using Foundry/Hardhat
-2. Record addresses in GitHub variables or `deployments/84532.json`
-3. Redeploy Cloud Run services to pick up new addresses
+2. Record addresses in GitHub variables (see Required Setup section)
+3. Redeploy via workflow dispatch to pick up new addresses
 
-The current workflow does **not** deploy contracts — only the FastAPI backend and Next.js frontend.
+The workflow does **not** deploy contracts — only the FastAPI backend and Next.js frontend.
+
+### Web Rebuild After API URL Changes
+
+The web image is built with `NEXT_PUBLIC_API_URL` baked in at build time. If you manually change the API service URL or deploy to a different region:
+
+1. The web image must be rebuilt with the new API URL
+2. The workflow handles this automatically: it deploys API first, captures the URL, then rebuilds web
+3. If you manually deploy API separately (e.g. `gcloud run deploy overunder-api ...`), run the full workflow again to rebuild web with the updated URL
+
+**Note**: Changing the API service name or region after initial deployment will require updating the workflow's `API_SERVICE_NAME` or `GCP_REGION` env vars and re-running the workflow.
 
 ## Database
 

@@ -1,9 +1,8 @@
 name: Deploy to GCP Cloud Run
 
+# Manual dispatch only until stable
+# To run: GitHub Actions tab → Deploy to GCP Cloud Run → Run workflow
 on:
-  push:
-    branches:
-      - feat/mvp-docs
   workflow_dispatch:
 
 env:
@@ -38,21 +37,56 @@ jobs:
       - name: Configure Docker for Artifact Registry
         run: gcloud auth configure-docker us-central1-docker.pkg.dev --quiet
       
+      - name: Preflight check required secrets
+        run: |
+          echo "Checking Secret Manager secrets..."
+          
+          # Check OU_JWT_SECRET has at least one version
+          if ! gcloud secrets versions list OU_JWT_SECRET --project=${{ env.GCP_PROJECT_ID }} --limit=1 --format="value(name)" 2>/dev/null | grep -q .; then
+            echo "ERROR: Secret OU_JWT_SECRET has no versions. Please add a version before deploying."
+            exit 1
+          fi
+          
+          # Check OU_ANVIL_RPC_URL has at least one version
+          if ! gcloud secrets versions list OU_ANVIL_RPC_URL --project=${{ env.GCP_PROJECT_ID }} --limit=1 --format="value(name)" 2>/dev/null | grep -q .; then
+            echo "ERROR: Secret OU_ANVIL_RPC_URL has no versions. Please add a version before deploying."
+            exit 1
+          fi
+          
+          # Check OU_DATABASE_URL has at least one version
+          if ! gcloud secrets versions list OU_DATABASE_URL --project=${{ env.GCP_PROJECT_ID }} --limit=1 --format="value(name)" 2>/dev/null | grep -q .; then
+            echo "ERROR: Secret OU_DATABASE_URL has no versions. Please add a version before deploying."
+            exit 1
+          fi
+          
+          # Check OU_DATABASE_URL is NOT sqlite/aiosqlite (Cloud Run needs persistent DB)
+          DB_URL=$(gcloud secrets versions access latest --secret=OU_DATABASE_URL --project=${{ env.GCP_PROJECT_ID }} 2>/dev/null || echo "")
+          if [ -z "$DB_URL" ]; then
+            echo "ERROR: Secret OU_DATABASE_URL is empty. Cloud Run requires Cloud SQL or external PostgreSQL."
+            echo "SQLite is ephemeral on Cloud Run (data lost on redeploy)."
+            exit 1
+          fi
+          if echo "$DB_URL" | grep -qiE "sqlite|aiosqlite"; then
+            echo "ERROR: Secret OU_DATABASE_URL contains 'sqlite' or 'aiosqlite'."
+            echo "Cloud Run requires persistent database (Cloud SQL or external PostgreSQL)."
+            echo "Current value starts with: $(echo "$DB_URL" | head -c 30)..."
+            echo ""
+            echo "Expected format: postgresql://user:pass@host/dbname or postgresql+asyncpg://..."
+            exit 1
+          fi
+          if ! echo "$DB_URL" | grep -qiE "^postgres"; then
+            echo "WARNING: Secret OU_DATABASE_URL does not start with 'postgresql://' or 'postgres://'."
+            echo "Current value starts with: $(echo "$DB_URL" | head -c 30)..."
+            echo "Proceeding anyway, but verify this is a valid database URL."
+          fi
+          
+          echo "Preflight checks passed."
+      
       - name: Build and push API image
         run: |
           docker build -t ${{ env.ARTIFACT_REGISTRY }}/api:${{ github.sha }} -t ${{ env.ARTIFACT_REGISTRY }}/api:latest ./backend
           docker push ${{ env.ARTIFACT_REGISTRY }}/api:${{ github.sha }}
           docker push ${{ env.ARTIFACT_REGISTRY }}/api:latest
-      
-      - name: Build and push Web image
-        run: |
-          docker build \
-            --build-arg NEXT_PUBLIC_API_URL=${{ vars.NEXT_PUBLIC_API_URL || 'https://overunder-api-REPLACE.run.app' }} \
-            -t ${{ env.ARTIFACT_REGISTRY }}/web:${{ github.sha }} \
-            -t ${{ env.ARTIFACT_REGISTRY }}/web:latest \
-            ./web
-          docker push ${{ env.ARTIFACT_REGISTRY }}/web:${{ github.sha }}
-          docker push ${{ env.ARTIFACT_REGISTRY }}/web:latest
       
       - name: Deploy API to Cloud Run
         run: |
@@ -61,9 +95,26 @@ jobs:
             --platform=managed \
             --region=${{ env.GCP_REGION }} \
             --allow-unauthenticated \
-            --set-secrets=JWT_SECRET=OU_JWT_SECRET:latest,DATABASE_URL=OU_DATABASE_URL:latest,ANVIL_RPC_URL=OU_ANVIL_RPC_URL:latest,PRIVY_APP_SECRET=OU_PRIVY_APP_SECRET:latest,OPERATOR_PRIVATE_KEY=OU_OPERATOR_PRIVATE_KEY:latest,RELAYER_PRIVATE_KEY=OU_RELAYER_PRIVATE_KEY:latest \
+            --set-secrets=JWT_SECRET=OU_JWT_SECRET:latest,DATABASE_URL=OU_DATABASE_URL:latest,ANVIL_RPC_URL=OU_ANVIL_RPC_URL:latest,PRIVY_APP_SECRET=OU_PRIVY_APP_SECRET:latest,MOONPAY_SECRET=OU_MOONPAY_SECRET:latest,OPERATOR_PRIVATE_KEY=OU_OPERATOR_PRIVATE_KEY:latest,RELAYER_PRIVATE_KEY=OU_RELAYER_PRIVATE_KEY:latest \
             --set-env-vars="CHAIN_ID=84532,PRIVY_APP_ID=${{ vars.PRIVY_APP_ID || '' }},USDC_ADDRESS=${{ vars.USDC_ADDRESS || '' }},CTF_ADDRESS=${{ vars.CTF_ADDRESS || '' }},FACTORY_ADDRESS=${{ vars.FACTORY_ADDRESS || '' }},EXCHANGE_ADDRESS=${{ vars.EXCHANGE_ADDRESS || '' }},AMM_ADDRESS=${{ vars.AMM_ADDRESS || '' }},ORACLE_ADDRESS=${{ vars.ORACLE_ADDRESS || '' }},FEE_VAULT_ADDRESS=${{ vars.FEE_VAULT_ADDRESS || '' }},OU_TOKEN_ADDRESS=${{ vars.OU_TOKEN_ADDRESS || '' }},COINBASE_ONRAMP_APP_ID=${{ vars.COINBASE_ONRAMP_APP_ID || '' }}" \
             --project=${{ env.GCP_PROJECT_ID }}
+      
+      - name: Capture API URL
+        id: api_url
+        run: |
+          API_URL=$(gcloud run services describe ${{ env.API_SERVICE_NAME }} --platform=managed --region=${{ env.GCP_REGION }} --format='value(status.url)' --project=${{ env.GCP_PROJECT_ID }})
+          echo "url=$API_URL" >> $GITHUB_OUTPUT
+          echo "API deployed at: $API_URL"
+      
+      - name: Build and push Web image with real API URL
+        run: |
+          docker build \
+            --build-arg NEXT_PUBLIC_API_URL=${{ steps.api_url.outputs.url }} \
+            -t ${{ env.ARTIFACT_REGISTRY }}/web:${{ github.sha }} \
+            -t ${{ env.ARTIFACT_REGISTRY }}/web:latest \
+            ./web
+          docker push ${{ env.ARTIFACT_REGISTRY }}/web:${{ github.sha }}
+          docker push ${{ env.ARTIFACT_REGISTRY }}/web:latest
       
       - name: Deploy Web to Cloud Run
         run: |
