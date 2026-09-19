@@ -4,6 +4,7 @@ import asyncio
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.aa.router import router as aa_router
 from app.amm.router import router as amm_router
 from app.auth.router import router as auth_router
 from app.db import Base, engine
@@ -51,6 +52,7 @@ def create_app() -> FastAPI:
     app.include_router(ramps_router, prefix="/api/v1")
     app.include_router(oracle_router, prefix="/api/v1")
     app.include_router(portfolio_router, prefix="/api/v1")
+    app.include_router(aa_router, prefix="/api/v1")
 
     @app.get("/health")
     async def health():

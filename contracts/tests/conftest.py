@@ -64,10 +64,24 @@ def deploy_protocol():
         operator,
         generator,
     )
+    entrypoint = boa.load("src/MockEntryPoint.vy")
+    paymaster = boa.load(
+        "src/OverUnderPaymaster.vy",
+        entrypoint.address,
+        operator,
+        usdc.address,
+        ctf.address,
+        amm.address,
+        exchange.address,
+        oracle.address,
+        vault.address,
+    )
     with boa.env.prank(operator):
         oracle.setFactory(factory.address)
         amm.setFactory(factory.address)
-
+        # Fund paymaster with 1 ETH for testing
+        entrypoint.depositTo(paymaster.address, value=10**18)
+    
     return {
         "usdc": usdc,
         "ou": ou,
@@ -77,6 +91,8 @@ def deploy_protocol():
         "exchange": exchange,
         "amm": amm,
         "factory": factory,
+        "entrypoint": entrypoint,
+        "paymaster": paymaster,
         "accounts": accounts,
         "chain_id": chain_id(),
     }
