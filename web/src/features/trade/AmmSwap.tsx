@@ -23,9 +23,9 @@ const CTF_ABI = parseAbi([
   "function positionId(bytes32 conditionId, uint8 outcome) external view returns (uint256)",
 ]);
 
-export function AmmSwap({ conditionId }: { conditionId: string }) {
+export function AmmSwap({ conditionId, initialSide }: { conditionId: string; initialSide?: "yes" | "no" }) {
   const [mode, setMode] = useState<"buy" | "sell">("buy");
-  const [outcome, setOutcome] = useState<"yes" | "no">("yes");
+  const [outcome, setOutcome] = useState<"yes" | "no">(initialSide || "yes");
   const [amount, setAmount] = useState("1.00");
   const [quote, setQuote] = useState<any>(null);
   const [status, setStatus] = useState("");
