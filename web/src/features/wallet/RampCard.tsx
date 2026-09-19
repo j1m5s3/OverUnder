@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useConnect } from "wagmi";
 import { api } from "@/shared/api/client";
 
 interface KycStatus {
@@ -16,21 +17,22 @@ interface KycCheckResponse {
 }
 
 export function RampCard({ address }: { address: string }) {
-  const [moonpayUrl, setMoonpayUrl] = useState("");
-  const [coinbaseUrl, setCoinbaseUrl] = useState("");
   const [kycStatus, setKycStatus] = useState<KycStatus | null>(null);
   const [kycCheck, setKycCheck] = useState<KycCheckResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [amount, setAmount] = useState("100");
+  const { connect, connectors } = useConnect();
+
+  const humanizeStatus = (status: string) => {
+    return status
+      .split("_")
+      .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+      .join(" ");
+  };
 
   useEffect(() => {
     if (!address) return;
-
-    // Get Coinbase fallback URL
-    api(`/api/v1/ramps/onramp-url?address=${address}&usdc_amount=${amount}`)
-      .then((r) => setCoinbaseUrl(r.url))
-      .catch(() => setCoinbaseUrl(""));
 
     // Get KYC status
     api(`/api/v1/kyc/status`, {
@@ -38,7 +40,7 @@ export function RampCard({ address }: { address: string }) {
     })
       .then((r) => setKycStatus(r))
       .catch(() => setKycStatus(null));
-  }, [address, amount]);
+  }, [address]);
 
   const handleBuyUSDC = async () => {
     setLoading(true);
@@ -59,7 +61,7 @@ export function RampCard({ address }: { address: string }) {
 
       if (!checkResponse.allowed) {
         setError(
-          `KYC required: ${checkResponse.reason}. Please complete KYC verification.`
+          `Verification required: ${checkResponse.reason}. Please complete identity verification.`
         );
         setLoading(false);
         return;
@@ -82,13 +84,18 @@ export function RampCard({ address }: { address: string }) {
           return;
         }
       } catch (moonpayError) {
-        console.warn("MoonPay not available, falling back to Coinbase");
+        console.warn("Primary payment provider not available, trying alternative");
       }
 
       // Fallback to Coinbase
-      if (coinbaseUrl) {
-        window.open(coinbaseUrl, "_blank");
-      } else {
+      try {
+        const coinbaseResponse = await api(`/api/v1/ramps/onramp-url?address=${address}&usdc_amount=${amount}`);
+        if (coinbaseResponse.url) {
+          window.open(coinbaseResponse.url, "_blank");
+        } else {
+          setError("No ramp providers available");
+        }
+      } catch {
         setError("No ramp providers available");
       }
     } catch (err) {
@@ -100,16 +107,16 @@ export function RampCard({ address }: { address: string }) {
 
   return (
     <div className="card">
-      <h3>Buy USDC</h3>
+      <h3>Add Money</h3>
       <p className="muted">
-        Purchase USDC on Base with MoonPay or Coinbase Onramp.
+        Add funds to your wallet to place bets.
       </p>
 
       {address ? (
         <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
           <div>
             <label htmlFor="amount" style={{ display: "block", marginBottom: "0.5rem" }}>
-              Amount (USD):
+              Amount ($):
             </label>
             <input
               id="amount"
@@ -124,7 +131,7 @@ export function RampCard({ address }: { address: string }) {
 
           {kycStatus && kycStatus.status !== "not_started" && (
             <p className="muted">
-              KYC Status: {kycStatus.status}
+              Verification Status: {humanizeStatus(kycStatus.status)}
               {kycStatus.jurisdiction && ` (${kycStatus.jurisdiction})`}
             </p>
           )}
@@ -136,23 +143,16 @@ export function RampCard({ address }: { address: string }) {
             onClick={handleBuyUSDC}
             disabled={loading || !address}
           >
-            {loading ? "Processing..." : "Buy USDC"}
+            {loading ? "Processing..." : "Add Money"}
           </button>
-
-          {coinbaseUrl && (
-            <a
-              className="btn"
-              href={coinbaseUrl}
-              target="_blank"
-              rel="noreferrer"
-              style={{ opacity: 0.7 }}
-            >
-              Coinbase Onramp (Fallback)
-            </a>
-          )}
         </div>
       ) : (
-        <p className="muted">Connect wallet to buy USDC.</p>
+        <button 
+          className="btn"
+          onClick={() => connect({ connector: connectors[0] })}
+        >
+          Connect to Add Money
+        </button>
       )}
     </div>
   );
