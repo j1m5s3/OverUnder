@@ -12,8 +12,6 @@ from app.config import get_settings
 from app.models import Order, Trade
 
 settings = get_settings()
-ROOT = Path(__file__).resolve().parents[3]
-DEPLOY = ROOT / "contracts" / "deployments" / f"{settings.chain_id}.json"
 
 
 def _remaining(o: Order) -> int:
@@ -87,17 +85,22 @@ async def try_match(db: AsyncSession, incoming: Order) -> list[dict]:
 
 def _submit_match(taker: Order, maker: Order, qty: int) -> str:
     """Push matchOrders when a relayer key and RPC are configured; otherwise record off-chain."""
-    if not settings.relayer_private_key or not DEPLOY.exists():
+    if not settings.relayer_private_key:
         return ""
     try:
         from web3 import Web3
         from eth_account import Account
+        from app.contract_addresses import get_contract_addresses, load_abi, get_abi_path
 
+        addresses = get_contract_addresses()
+        if "Exchange" not in addresses:
+            return ""
+        
         w3 = Web3(Web3.HTTPProvider(settings.anvil_rpc_url))
         if not w3.is_connected():
             return ""
-        abi = json.loads((ROOT / "backend" / "app" / "abi" / "Exchange.json").read_text())
-        addr = json.loads(DEPLOY.read_text())["Exchange"]
+        abi = load_abi("Exchange")
+        addr = addresses["Exchange"]
         acct = Account.from_key(settings.relayer_private_key)
         contract = w3.eth.contract(address=Web3.to_checksum_address(addr), abi=abi)
 
