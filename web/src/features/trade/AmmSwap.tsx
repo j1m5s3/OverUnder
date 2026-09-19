@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { api } from "@/shared/api/client";
 import { useAccount, useConnect, useWriteContract, usePublicClient } from "wagmi";
 import { parseAbi } from "viem";
@@ -43,21 +43,37 @@ export function AmmSwap({ conditionId }: { conditionId: string }) {
   const ctfAddress = process.env.NEXT_PUBLIC_CTF_ADDRESS as `0x${string}` | undefined;
   
   const envConfigured = ammAddress && usdcAddress && ctfAddress;
+  
+  const requestIdRef = useRef(0);
+
+  useEffect(() => {
+    requestIdRef.current++;
+    setQuote(null);
+    setQuoting(true);
+    
+    const debounceTimer = setTimeout(() => {
+      refresh();
+    }, 300);
+    
+    return () => clearTimeout(debounceTimer);
+  }, [amount, outcome, mode, conditionId]);
 
   async function refresh() {
     if (!envConfigured) {
       setStatus("trading isn't configured on this deploy");
+      setQuoting(false);
       return;
     }
     
-    setQuoting(true);
-    setStatus("quoting...");
+    const requestId = requestIdRef.current;
+    setStatus("");
     
     try {
       const amountNum = parseFloat(amount);
       if (isNaN(amountNum) || amountNum <= 0) {
-        setStatus("enter a valid amount");
-        setQuoting(false);
+        if (requestId === requestIdRef.current) {
+          setQuoting(false);
+        }
         return;
       }
       
@@ -73,12 +89,20 @@ export function AmmSwap({ conditionId }: { conditionId: string }) {
           `/api/v1/amm/${encodeURIComponent(conditionId)}/quote?sell_yes=${outcome === "yes"}&token_amount=${microAmount}`,
         );
       }
-      setQuote(q);
-      setStatus("");
+      
+      if (requestId === requestIdRef.current) {
+        setQuote(q);
+        setStatus("");
+      }
     } catch (e: any) {
-      setStatus(e.message);
+      if (requestId === requestIdRef.current) {
+        setQuote(null);
+        setStatus(e.message);
+      }
     } finally {
-      setQuoting(false);
+      if (requestId === requestIdRef.current) {
+        setQuoting(false);
+      }
     }
   }
 
@@ -92,6 +116,11 @@ export function AmmSwap({ conditionId }: { conditionId: string }) {
 
     if (!envConfigured) {
       setStatus("trading isn't configured on this deploy");
+      return;
+    }
+
+    if (!quote) {
+      setStatus("waiting for quote...");
       return;
     }
 
@@ -218,72 +247,72 @@ export function AmmSwap({ conditionId }: { conditionId: string }) {
     }
   }
 
-  function formatQuote() {
+  function formatPayout() {
     if (!quote) return null;
     
-    const action = mode === "buy" ? "buy" : "sell";
-    const outcomeLabel = outcome;
-    const slippagePercent = parseFloat(slippage);
+    const stakeNum = parseFloat(amount);
+    if (isNaN(stakeNum)) return null;
     
     if (mode === "buy" && quote.tokensOut) {
-      const tokensOut = (quote.tokensOut / 1_000_000).toFixed(2);
-      const minOut = ((quote.tokensOut * (100 - slippagePercent)) / 100 / 1_000_000).toFixed(2);
-      return `${action} ${outcomeLabel} · you get ~${tokensOut} ${outcomeLabel} / fee 1% / min after slip ~${minOut}`;
+      const tokensOut = quote.tokensOut / 1_000_000;
+      const profit = tokensOut - stakeNum;
+      return `stake $${stakeNum.toFixed(2)} → to win ~$${profit.toFixed(2)}`;
     } else if (mode === "sell" && quote.usdcOut) {
       const usdcOut = (quote.usdcOut / 1_000_000).toFixed(2);
-      const minUsdc = ((quote.usdcOut * (100 - slippagePercent)) / 100 / 1_000_000).toFixed(2);
-      return `${action} ${outcomeLabel} · you get ~${usdcOut} usdc / fee 1% / min after slip ~${minUsdc}`;
+      return `receive ~$${usdcOut}`;
     }
     
     return null;
   }
 
   const executeLabel = !address 
-    ? `connect to ${mode}` 
-    : `${mode} ${outcome}`;
+    ? mode === "buy" 
+      ? `connect to buy ${outcome}`
+      : `connect to sell ${outcome}`
+    : mode === "buy"
+      ? `buy ${outcome}`
+      : `sell ${outcome}`;
 
   const amountLabel = mode === "buy" 
-    ? "amount (usdc)" 
+    ? "stake ($)" 
     : `amount (${outcome})`;
 
   return (
     <div className="card">
       <h3>Trade</h3>
       <p className="muted">1% fee</p>
-      
-      <div className="row">
-        <button className={mode === "buy" ? "btn" : "btn ghost"} onClick={() => { setMode("buy"); setQuote(null); }}>
-          Buy
-        </button>
-        <button className={mode === "sell" ? "btn" : "btn ghost"} onClick={() => { setMode("sell"); setQuote(null); }}>
-          Sell
-        </button>
-      </div>
 
       <div className="row">
-        <button className={outcome === "yes" ? "btn yes" : "btn ghost"} onClick={() => { setOutcome("yes"); setQuote(null); }}>
+        <button className={outcome === "yes" ? "btn yes" : "btn ghost"} onClick={() => setOutcome("yes")}>
           Yes
         </button>
-        <button className={outcome === "no" ? "btn no" : "btn ghost"} onClick={() => { setOutcome("no"); setQuote(null); }}>
+        <button className={outcome === "no" ? "btn no" : "btn ghost"} onClick={() => setOutcome("no")}>
           No
         </button>
       </div>
 
       <label className="muted">{amountLabel}</label>
-      <input value={amount} onChange={(e) => { setAmount(e.target.value); setQuote(null); }} />
+      <input value={amount} onChange={(e) => setAmount(e.target.value)} />
       
-      <button className="btn" style={{ marginTop: 12 }} onClick={refresh} disabled={quoting}>
-        get quote
-      </button>
+      {quoting && (
+        <p className="muted" style={{ marginTop: 12 }}>quoting...</p>
+      )}
       
-      {quote && formatQuote() ? (
+      {!quoting && formatPayout() && (
         <>
-          <p className="muted" style={{ marginTop: 12 }}>{formatQuote()}</p>
-          <button className="btn" onClick={handleExecute} disabled={!quote || !envConfigured}>
-            {executeLabel}
-          </button>
+          <p className="muted" style={{ marginTop: 12 }}>{formatPayout()}</p>
+          <p className="muted" style={{ marginTop: 4, fontSize: 12 }}>includes 1% fee</p>
         </>
-      ) : null}
+      )}
+      
+      <button 
+        className="btn" 
+        style={{ marginTop: 12 }} 
+        onClick={handleExecute} 
+        disabled={!envConfigured || (address && (!quote || quoting))}
+      >
+        {executeLabel}
+      </button>
       
       <div style={{ marginTop: 16 }}>
         <button 
@@ -295,7 +324,15 @@ export function AmmSwap({ conditionId }: { conditionId: string }) {
         </button>
         {showAdvanced && (
           <div style={{ marginTop: 8 }}>
-            <label className="muted">slippage tolerance (%)</label>
+            <div className="row">
+              <button className={mode === "buy" ? "btn" : "btn ghost"} onClick={() => setMode("buy")}>
+                Buy
+              </button>
+              <button className={mode === "sell" ? "btn" : "btn ghost"} onClick={() => setMode("sell")}>
+                Sell
+              </button>
+            </div>
+            <label className="muted" style={{ marginTop: 8 }}>slippage tolerance (%)</label>
             <input value={slippage} onChange={(e) => setSlippage(e.target.value)} />
           </div>
         )}
