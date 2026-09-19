@@ -1,25 +1,63 @@
-# OverUnder Flutter carryover contract
+# OverUnder Flutter
 
-Do not implement the Flutter app in this MVP. When mobile work starts, mirror the web feature modules 1:1.
+Flutter mobile app for OverUnder prediction markets on Base.
 
-## Feature map
+## Architecture
 
-| Web module | Flutter destination |
-| --- | --- |
-| `web/src/features/markets` | `lib/features/markets` |
-| `web/src/features/trade` | `lib/features/trade` |
-| `web/src/features/wallet` | `lib/features/wallet` |
-| `web/src/features/oracle` | `lib/features/oracle` |
+Mirrors web AMM-first architecture:
+- `lib/features/markets` - Market list and detail screens
+- `lib/features/trade` - AMM swap widget (no CLOB OrderTicket)
+- `lib/features/wallet` - Wallet connection, balances, ramps
+- `lib/features/oracle` - Oracle status and attestations
 
-## Shared contracts
+## Shared Contracts
 
-- Theme: consume [`shared/design-tokens/tokens.json`](../shared/design-tokens/tokens.json) (colors, spacing, type).
-- API: generate a Dart client from [`shared/openapi.json`](../shared/openapi.json).
-- Chain: same Base USDC + contract addresses as web (`contracts/deployments/<chainId>.json`).
+- **Theme**: Generated from `shared/design-tokens/tokens.json` → `lib/theme/app_theme.dart`
+- **API**: Client built from `shared/openapi.json` → `lib/services/api_client.dart`
+- **Chain**: Uses `contracts/deployments/<chainId>.json` for contract addresses
+
+## Local Development
+
+```bash
+# Install dependencies
+flutter pub get
+
+# Run on device/simulator against local API
+flutter run
+
+# Build for production
+flutter build apk  # Android
+flutter build ios  # iOS
+```
 
 ## Screens
 
-1. Market list (primaries + wildcard chips)
-2. Market detail: CLOB ticket on type 0, AMM buy/sell on type 1
-3. Wallet: Privy/email + EOA + Coinbase Onramp URL from `GET /api/v1/ramps/onramp-url`
-4. Oracle status: attestations, unanimity, fallback votes
+1. **Market List**: Browse primaries and wildcard markets
+2. **Market Detail**: View market info + AMM swap interface
+3. **Wallet**: Connect wallet, view balances, buy USDC via MoonPay/Coinbase
+4. **Oracle Status**: View attestations, unanimity, and resolution status
+
+## Features Implemented
+
+- ✅ Market list with primary/wildcard chips
+- ✅ Market detail with AMM swap (buy/sell tokens)
+- ✅ Quote fetching from `/api/v1/amm/{id}/quote`
+- ✅ Wallet screen with NAV display
+- ✅ Ramp integration (MoonPay/Coinbase fallback)
+- ✅ Oracle status widget with agent attestations
+- ✅ Theme generated from design tokens
+- ✅ API client from OpenAPI spec
+
+## Not Implemented (AMM-First)
+
+- ❌ CLOB OrderTicket (no `POST /orders` in mobile)
+- ❌ Orderbook depth view
+- ❌ Limit order management
+
+## Phase 2
+
+- [ ] Privy wallet integration
+- [ ] WalletConnect support
+- [ ] Transaction signing
+- [ ] Push notifications for market resolution
+- [ ] Portfolio tracking

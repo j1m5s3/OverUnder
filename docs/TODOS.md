@@ -20,7 +20,7 @@ Machine registry below. Human index:
 - [PHASE2] OU-T003 Centralized production relayer
 - [SHIPPED] OU-T004 OU emissions from treasury (no FeeVault mint)
 - [SHIPPED] OU-T005 Live LLM agents; MockSearch tests-only
-- [PHASE2] OU-T006 Flutter from `mobile/README.md`
+- [SHIPPED] OU-T006 Flutter from `mobile/README.md`
 - [SHIPPED] OU-T007 MoonPay + KYC
 
 YAML status values: `open` | `blocked` | `done`.
@@ -78,12 +78,17 @@ todos:
       - "[oracles/consensus/coordinator.py : L36-52]"
   - id: OU-T006
     title: Flutter app from mobile carryover contract
-    status: open
+    status: done
     area: web
     phase: 2
     summary: Implement lib/features/* mirroring web; consume tokens.json and openapi.json.
     pointers:
-      - "[mobile/README.md : L1-25]"
+      - "[mobile/README.md : L1-70]"
+      - "[mobile/lib/main.dart : L1-72]"
+      - "[mobile/lib/theme/app_theme.dart : L1-92]"
+      - "[mobile/lib/services/api_client.dart : L1-137]"
+      - "[mobile/lib/features/markets/market_list_screen.dart : L1-154]"
+      - "[mobile/lib/features/trade/amm_swap_widget.dart : L1-186]"
   - id: OU-T007
     title: MoonPay widget plus KYC gating
     status: done
