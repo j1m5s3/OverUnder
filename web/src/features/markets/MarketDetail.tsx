@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from "react";
 import { api } from "@/shared/api/client";
-import { OrderTicket } from "@/features/trade/OrderTicket";
 import { AmmSwap } from "@/features/trade/AmmSwap";
 import { OraclePanel } from "@/features/oracle/OraclePanel";
 import type { Market } from "./MarketList";
@@ -31,9 +30,9 @@ export function MarketDetail({ conditionId }: { conditionId: string }) {
   if (!market) return <p>Loading…</p>;
   return (
     <div>
-      <div className="muted">{market.marketType === 0 ? "PRIMARY · CLOB" : "WILDCARD · AMM"}</div>
+      <div className="muted">{market.marketType === 0 ? "PRIMARY · AMM" : "WILDCARD · AMM"}</div>
       <h1>{market.question}</h1>
-      {market.marketType === 1 ? <AmmSwap conditionId={market.conditionId} /> : <OrderTicket conditionId={market.conditionId} />}
+      <AmmSwap conditionId={market.conditionId} />
       <OraclePanel conditionId={market.conditionId} />
     </div>
   );

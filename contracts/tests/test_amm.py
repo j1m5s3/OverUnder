@@ -16,7 +16,9 @@ def _seeded_wildcard(proto, seed=200_000_000):
     generator = proto["accounts"]["generator"]
     close = boa.env.timestamp + 10_000
     with boa.env.prank(operator):
-        parent = factory.createPrimaryMarket(b"\x41" * 32, close, "Chiefs vs Broncos")
+        usdc.faucet(seed)
+        usdc.approve(factory.address, seed)
+        parent = factory.createPrimaryMarket(b"\x41" * 32, close, "Chiefs vs Broncos", seed)
     with boa.env.prank(generator.address):
         usdc.faucet(seed)
         usdc.approve(factory.address, seed)

@@ -79,9 +79,14 @@ def _create(questionId: bytes32, parent: bytes32, closeTime: uint256, marketType
     return cid
 
 @external
-def createPrimaryMarket(questionId: bytes32, closeTime: uint256, question: String[256]) -> bytes32:
+def createPrimaryMarket(questionId: bytes32, closeTime: uint256, question: String[256], seedUsdc: uint256) -> bytes32:
     assert msg.sender == self.operator, "not operator"
-    return self._create(questionId, empty(bytes32), closeTime, 0, question)
+    assert seedUsdc > 0, "seed required"
+    cid: bytes32 = self._create(questionId, empty(bytes32), closeTime, 0, question)
+    assert extcall IERC20(self.usdc).transferFrom(msg.sender, self, seedUsdc)
+    assert extcall IERC20(self.usdc).approve(self.amm, seedUsdc)
+    extcall IAMM(self.amm).seedPool(cid, seedUsdc)
+    return cid
 
 @external
 def createWildcardMarket(questionId: bytes32, parentConditionId: bytes32, closeTime: uint256, question: String[256], seedUsdc: uint256) -> bytes32:

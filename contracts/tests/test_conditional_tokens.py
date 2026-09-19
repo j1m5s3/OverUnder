@@ -19,7 +19,9 @@ def test_split_merge_redeem(proto):
     close = boa.env.timestamp + 3600
     qid = b"\x11" * 32
     with boa.env.prank(operator):
-        cid = factory.createPrimaryMarket(qid, close, "Chiefs vs Broncos")
+        usdc.faucet(10_000_000)
+        usdc.approve(factory.address, 10_000_000)
+        cid = factory.createPrimaryMarket(qid, close, "Chiefs vs Broncos", 10_000_000)
 
     with boa.env.prank(user):
         usdc.faucet(1_000_000)
@@ -48,7 +50,9 @@ def test_redeem_after_payout(proto):
 
     close = boa.env.timestamp + 10
     with boa.env.prank(operator):
-        cid = factory.createPrimaryMarket(b"\x22" * 32, close, "Yes or no")
+        usdc.faucet(10_000_000)
+        usdc.approve(factory.address, 10_000_000)
+        cid = factory.createPrimaryMarket(b"\x22" * 32, close, "Yes or no", 10_000_000)
 
     with boa.env.prank(user):
         usdc.faucet(100)

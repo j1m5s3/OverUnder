@@ -50,7 +50,9 @@ def test_clob_fill_takes_taker_fee(proto):
 
     close = boa.env.timestamp + 10_000
     with boa.env.prank(operator):
-        cid = factory.createPrimaryMarket(b"\x33" * 32, close, "Chiefs win")
+        usdc.faucet(10_000_000)
+        usdc.approve(factory.address, 10_000_000)
+        cid = factory.createPrimaryMarket(b"\x33" * 32, close, "Chiefs win", 10_000_000)
 
     amount = 1_000_000
     price = 1_000_000
@@ -92,7 +94,9 @@ def test_cancel_order(proto):
     operator = proto["accounts"]["operator"].address
     close = boa.env.timestamp + 10_000
     with boa.env.prank(operator):
-        cid = factory.createPrimaryMarket(b"\x34" * 32, close, "Cancel me")
+        usdc.faucet(10_000_000)
+        usdc.approve(factory.address, 10_000_000)
+        cid = factory.createPrimaryMarket(b"\x34" * 32, close, "Cancel me", 10_000_000)
 
     with boa.env.prank(seller.address):
         usdc.faucet(10)

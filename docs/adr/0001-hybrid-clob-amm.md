@@ -2,31 +2,36 @@
 title: Hybrid CLOB and AMM
 status: SHIPPED
 area: contracts
-summary: Primaries use an off-chain CLOB with on-chain EIP-712 settlement; wildcards use a CPMM.
-last_verified: 2026-09-16
+summary: AMM-first MVP with CPMM on all markets; CLOB deferred to Phase 2.
+last_verified: 2026-09-19
 pointers:
+  - "[contracts/src/MarketFactory.vy : L82-90]"
+  - "[contracts/src/MarketAMM.vy : L40]"
+  - "[contracts/src/MarketAMM.vy : L103-140]"
   - "[contracts/src/Exchange.vy : L33]"
   - "[contracts/src/Exchange.vy : L128-159]"
-  - "[contracts/src/MarketAMM.vy : L40]"
-  - "[contracts/src/MarketFactory.vy : L81-94]"
 ---
 
 ## Status
 
-Accepted 2026-09-16.
+Revised 2026-09-19. Original CLOB-primary path deferred to Phase 2.
 
 ## Context
 
-Polymarket-class books need tight spreads on liquid events and standalone liquidity on long-tail children. A single AMM on NFL game winners would leak value to LPs and invent prices; a CLOB on every “Kelce fumble” child would be empty.
+Polymarket-class books need tight spreads on liquid events and standalone liquidity on long-tail children. A single AMM on NFL game winners would leak value to LPs and invent prices; a CLOB on every "Kelce fumble" child would be empty.
+
+Original design used CLOB for primaries and AMM for wildcards. MVP path now uses AMM for all markets to ship faster without relayer infrastructure.
 
 ## Decision
 
-- Type 0 primaries: off-chain matching, on-chain `Exchange.matchOrders`, 75 bps taker. [contracts/src/Exchange.vy : L33] [contracts/src/Exchange.vy : L128-159]
-- Type 1 wildcards: `MarketAMM` CPMM seeded at creation, 100 bps (50/50 vault/LP). [contracts/src/MarketAMM.vy : L40] [contracts/src/MarketFactory.vy : L86-94]
-- Both share ConditionalTokens + ConsensusOracle so resolution and redeem are identical.
+- **Type 0 primaries**: `MarketAMM` CPMM seeded at creation (seed required), 100 bps (50/50 vault/LP). [contracts/src/MarketFactory.vy : L82-90] [contracts/src/MarketAMM.vy : L40]
+- **Type 1 wildcards**: `MarketAMM` CPMM seeded at creation, 100 bps (50/50 vault/LP). [contracts/src/MarketAMM.vy : L40] [contracts/src/MarketFactory.vy : L86-94]
+- [PHASE2] CLOB via `Exchange.matchOrders` with off-chain matcher, 75 bps taker. [contracts/src/Exchange.vy : L33] [contracts/src/Exchange.vy : L128-159]
+- Both market types share ConditionalTokens + ConsensusOracle so resolution and redeem are identical.
 
 ## Consequences
 
-- Operators and market makers can quote primaries without inventory in an AMM.
-- Wildcards are immediately tradable after a USDC seed.
-- Negative: two fee schedules and two UIs; a user who confuses CLOB price (1e6 = $1) with AMM quote (tokens out) will mis-size. Liquidity cannot move automatically from a primary book into its children.
+- Every live market has immediate liquidity from operator seed; no external market makers required for MVP.
+- Single fee schedule (100 bps) and single UX (AMM swap with slippage) across all markets.
+- Negative: Operator must provide seed capital for every primary. No tight spreads from professional makers until Phase 2 CLOB.
+- Positive: Simpler MVP; no relayer signing, no EIP-712 order UX, faster ship.

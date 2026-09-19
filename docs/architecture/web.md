@@ -35,10 +35,10 @@ Next.js App Router under `web/`. Feature folders are the Flutter carryover map.
 
 ## Trade
 
-- [STUB] OrderTicket posts unsigned orders (`signature: "0x"`, synthetic `orderHash`). [web/src/features/trade/OrderTicket.tsx : L18-39]
-- [SHIPPED] OrderTicket loads the off-chain book and shows 75 bps copy.
-- [STUB] AmmSwap quotes only; it does not send `buyWithUSDC`. [web/src/features/trade/AmmSwap.tsx : L11-16]
-- [PHASE2] EIP-712 typed-data sign for Exchange orders, allowance UX (USDC + setApprovalForAll), AMM swap via wallet, and smart-wallet batching (approve+swap).
+- [SHIPPED] AmmSwap executes wallet swaps: approve USDC, `buyWithUSDC` with slippage protection. [web/src/features/trade/AmmSwap.tsx : L81-102]
+- [SHIPPED] AmmSwap is the only ticket; used for all markets (primaries and wildcards).
+- [PHASE2] OrderTicket posts unsigned orders (`signature: "0x"`, synthetic `orderHash`). [web/src/features/trade/OrderTicket.tsx : L18-39]
+- [PHASE2] EIP-712 typed-data sign for Exchange orders, allowance UX (USDC + setApprovalForAll), and smart-wallet batching (approve+swap).
 
 ## Oracle UI
 
