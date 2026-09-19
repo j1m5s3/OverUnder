@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 import secrets
 import jwt
 import httpx
+import json
 from datetime import datetime, timedelta, timezone
 from eth_account.messages import encode_defunct
 from eth_account import Account
@@ -170,9 +171,16 @@ async def privy(body: PrivyVerify, db: AsyncSession = Depends(get_db)):
         raise HTTPException(401, f"Privy token verification failed: {e}")
     
     linked_accounts = claims.get("linked_accounts", [])
+    
+    if isinstance(linked_accounts, str):
+        try:
+            linked_accounts = json.loads(linked_accounts)
+        except json.JSONDecodeError:
+            raise HTTPException(401, "Invalid linked_accounts format in Privy claims")
+    
     wallet_address = None
     for account in linked_accounts:
-        if account.get("type") == "wallet":
+        if isinstance(account, dict) and account.get("type") == "wallet":
             wallet_address = account.get("address")
             break
     
