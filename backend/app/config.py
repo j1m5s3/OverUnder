@@ -31,6 +31,7 @@ class Settings(BaseSettings):
     consensus_window_seconds: int = 86400
     wildcard_seed_usdc: int = 200
     jwt_ttl_seconds: int = 60 * 60 * 24 * 7
+    auth_anvil_bypass: bool = False
 
 
 @lru_cache
