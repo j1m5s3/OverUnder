@@ -47,6 +47,7 @@ export function AmmSwap({ conditionId }: { conditionId: string }) {
   const requestIdRef = useRef(0);
 
   useEffect(() => {
+    requestIdRef.current++;
     setQuote(null);
     setQuoting(true);
     
@@ -64,13 +65,15 @@ export function AmmSwap({ conditionId }: { conditionId: string }) {
       return;
     }
     
-    const requestId = ++requestIdRef.current;
+    const requestId = requestIdRef.current;
     setStatus("");
     
     try {
       const amountNum = parseFloat(amount);
       if (isNaN(amountNum) || amountNum <= 0) {
-        setQuoting(false);
+        if (requestId === requestIdRef.current) {
+          setQuoting(false);
+        }
         return;
       }
       
