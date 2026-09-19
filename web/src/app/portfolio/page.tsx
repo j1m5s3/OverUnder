@@ -1,29 +1,39 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { api } from "@/shared/api/client";
+import { useAccount, useConnect } from "wagmi";
+import Link from "next/link";
 
 export default function PortfolioPage() {
-  const [address, setAddress] = useState("");
-  const [data, setData] = useState<any>(null);
+  const { isConnected } = useAccount();
+  const { connect, connectors } = useConnect();
 
-  useEffect(() => {
-    const stored = localStorage.getItem("ou_address") || "";
-    setAddress(stored);
-    if (stored) {
-      api(`/api/v1/portfolio/${stored}`).then(setData).catch(() => setData(null));
-    }
-  }, []);
+  if (!isConnected) {
+    return (
+      <div>
+        <h1>Portfolio</h1>
+        <div className="card" style={{ textAlign: "center", padding: "48px 24px" }}>
+          <p className="muted" style={{ marginBottom: "16px" }}>
+            Connect to see your bets.
+          </p>
+          <button className="btn" onClick={() => connect({ connector: connectors[0] })}>
+            Connect Wallet
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div>
       <h1>Portfolio</h1>
-      <p className="muted">{address || "Connect a wallet to load positions."}</p>
-      {data ? (
-        <pre className="card">{JSON.stringify(data, null, 2)}</pre>
-      ) : (
-        <p className="muted">No positions yet.</p>
-      )}
+      <div className="card" style={{ textAlign: "center", padding: "48px 24px" }}>
+        <p className="muted" style={{ marginBottom: "16px" }}>
+          No open bets.
+        </p>
+        <Link href="/">
+          <button className="btn">Browse Markets</button>
+        </Link>
+      </div>
     </div>
   );
 }
