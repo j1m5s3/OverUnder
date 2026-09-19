@@ -40,22 +40,51 @@ async def index_once() -> None:
         end = w3.eth.block_number
         if end < start:
             return
-        logs = factory.events.MarketCreated().get_logs(from_block=start, to_block=end)
-        for ev in logs:
-            args = ev["args"]
-            cid = "0x" + args["conditionId"].hex()
-            parent = "0x" + args["parentConditionId"].hex()
-            existing = await db.get(Market, cid)
-            if existing is None:
-                db.add(
-                    Market(
-                        condition_id=cid,
-                        parent_condition_id="" if parent == "0x" + "00" * 32 else parent,
-                        question=args["question"],
-                        market_type=args["marketType"],
-                        close_time=args["closeTime"],
+        
+        created_logs = factory.events.MarketCreated().get_logs(from_block=start, to_block=end)
+        paused_logs = factory.events.MarketPaused().get_logs(from_block=start, to_block=end)
+        
+        all_events = []
+        for ev in created_logs:
+            all_events.append({
+                "type": "created",
+                "blockNumber": ev["blockNumber"],
+                "logIndex": ev["logIndex"],
+                "args": ev["args"],
+            })
+        for ev in paused_logs:
+            all_events.append({
+                "type": "paused",
+                "blockNumber": ev["blockNumber"],
+                "logIndex": ev["logIndex"],
+                "args": ev["args"],
+            })
+        
+        all_events.sort(key=lambda x: (x["blockNumber"], x["logIndex"]))
+        
+        for event in all_events:
+            if event["type"] == "created":
+                args = event["args"]
+                cid = "0x" + args["conditionId"].hex()
+                parent = "0x" + args["parentConditionId"].hex()
+                existing = await db.get(Market, cid)
+                if existing is None:
+                    db.add(
+                        Market(
+                            condition_id=cid,
+                            parent_condition_id="" if parent == "0x" + "00" * 32 else parent,
+                            question=args["question"],
+                            market_type=args["marketType"],
+                            close_time=args["closeTime"],
+                        )
                     )
-                )
+            elif event["type"] == "paused":
+                args = event["args"]
+                cid = "0x" + args["conditionId"].hex()
+                existing = await db.get(Market, cid)
+                if existing is not None:
+                    existing.paused = args["paused"]
+        
         cp.last_block = end
         await db.commit()
 

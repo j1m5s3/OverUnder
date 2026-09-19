@@ -1,4 +1,5 @@
 from contextlib import asynccontextmanager
+import asyncio
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -11,13 +12,27 @@ from app.oracle.router import router as oracle_router
 from app.orderbook.router import router as orderbook_router
 from app.portfolio.router import router as portfolio_router
 from app.ramps.router import router as ramps_router
+from app.indexer.listener import run_indexer_loop
+from app.config import get_settings
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-    yield
+    
+    settings = get_settings()
+    interval = getattr(settings, 'indexer_interval_seconds', 5.0)
+    indexer_task = asyncio.create_task(run_indexer_loop(interval))
+    
+    try:
+        yield
+    finally:
+        indexer_task.cancel()
+        try:
+            await indexer_task
+        except asyncio.CancelledError:
+            pass
 
 
 def create_app() -> FastAPI:
