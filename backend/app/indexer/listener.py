@@ -3,36 +3,45 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
-from pathlib import Path
 
 from sqlalchemy import select
 
 from app.config import get_settings
+from app.contract_addresses import get_contract_addresses, load_abi
 from app.db import SessionLocal
 from app.models import Checkpoint, Market
 
 logger = logging.getLogger(__name__)
 
-settings = get_settings()
-ROOT = Path(__file__).resolve().parents[3]
-DEPLOY = ROOT / "contracts" / "deployments" / f"{settings.chain_id}.json"
-
 
 async def index_once() -> None:
-    if not DEPLOY.exists():
+    settings = get_settings()
+    try:
+        addresses = get_contract_addresses()
+    except Exception as e:
+        logger.debug(f"Cannot load contract addresses: {e}")
         return
+    
+    if "MarketFactory" not in addresses:
+        return
+    
     try:
         from web3 import Web3
     except ImportError:
         return
+    
     w3 = Web3(Web3.HTTPProvider(settings.anvil_rpc_url))
     if not w3.is_connected():
         return
-    deploy = json.loads(DEPLOY.read_text())
-    factory_abi = json.loads((ROOT / "backend" / "app" / "abi" / "MarketFactory.json").read_text())
-    factory = w3.eth.contract(address=Web3.to_checksum_address(deploy["MarketFactory"]), abi=factory_abi)
+    
+    try:
+        factory_abi = load_abi("MarketFactory")
+    except Exception as e:
+        logger.error(f"Cannot load MarketFactory ABI: {e}")
+        return
+    
+    factory = w3.eth.contract(address=Web3.to_checksum_address(addresses["MarketFactory"]), abi=factory_abi)
     async with SessionLocal() as db:
         cp = await db.get(Checkpoint, 1)
         if cp is None:
