@@ -45,6 +45,7 @@ export function AmmSwap({ conditionId }: { conditionId: string }) {
   const envConfigured = ammAddress && usdcAddress && ctfAddress;
 
   useEffect(() => {
+    setQuote(null);
     refresh();
   }, [amount, outcome, mode, conditionId]);
 
@@ -60,7 +61,6 @@ export function AmmSwap({ conditionId }: { conditionId: string }) {
     try {
       const amountNum = parseFloat(amount);
       if (isNaN(amountNum) || amountNum <= 0) {
-        setQuote(null);
         setQuoting(false);
         return;
       }
@@ -231,25 +231,31 @@ export function AmmSwap({ conditionId }: { conditionId: string }) {
   function formatPayout() {
     if (!quote) return null;
     
+    const stakeNum = parseFloat(amount);
+    if (isNaN(stakeNum)) return null;
+    
     if (mode === "buy" && quote.tokensOut) {
-      const tokensOut = (quote.tokensOut / 1_000_000).toFixed(2);
-      return `stake $${amount} → to win ~$${tokensOut}`;
+      const tokensOut = quote.tokensOut / 1_000_000;
+      const profit = tokensOut - stakeNum;
+      return `stake $${stakeNum.toFixed(2)} → to win ~$${profit.toFixed(2)}`;
     } else if (mode === "sell" && quote.usdcOut) {
       const usdcOut = (quote.usdcOut / 1_000_000).toFixed(2);
-      return `sell ${amount} ${outcome} → to win ~$${usdcOut}`;
+      return `receive ~$${usdcOut}`;
     }
     
     return null;
   }
 
   const executeLabel = !address 
-    ? "connect wallet" 
+    ? mode === "buy" 
+      ? `connect to buy ${outcome}`
+      : `connect to sell ${outcome}`
     : mode === "buy"
       ? `buy ${outcome}`
       : `sell ${outcome}`;
 
   const amountLabel = mode === "buy" 
-    ? "amount (usdc)" 
+    ? "stake ($)" 
     : `amount (${outcome})`;
 
   return (
@@ -269,15 +275,22 @@ export function AmmSwap({ conditionId }: { conditionId: string }) {
       <label className="muted">{amountLabel}</label>
       <input value={amount} onChange={(e) => setAmount(e.target.value)} />
       
-      {formatPayout() && (
-        <p className="muted" style={{ marginTop: 12 }}>{formatPayout()}</p>
+      {quoting && (
+        <p className="muted" style={{ marginTop: 12 }}>quoting...</p>
+      )}
+      
+      {!quoting && formatPayout() && (
+        <>
+          <p className="muted" style={{ marginTop: 12 }}>{formatPayout()}</p>
+          <p className="muted" style={{ marginTop: 4, fontSize: 12 }}>includes 1% fee</p>
+        </>
       )}
       
       <button 
         className="btn" 
         style={{ marginTop: 12 }} 
         onClick={handleExecute} 
-        disabled={!envConfigured || (address && !quote)}
+        disabled={!envConfigured || (address && (!quote || quoting))}
       >
         {executeLabel}
       </button>
