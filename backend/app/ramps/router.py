@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.router import get_current_user
 from app.config import get_settings
 from app.db import get_db
+from app.kyc.router import enforce_kyc_gate
 from app.models import RampTx
 
 router = APIRouter(prefix="/ramps", tags=["ramps"])
@@ -29,10 +30,27 @@ class MoonPayWebhookPayload(BaseModel):
 
 
 @router.post("/moonpay/session")
-async def moonpay_session(req: MoonPaySessionRequest, user: dict = Depends(get_current_user)):
-    """Sign MoonPay widget URL with secret for the authenticated user's address."""
+async def moonpay_session(
+    req: MoonPaySessionRequest,
+    user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Sign MoonPay widget URL with secret for the authenticated user's address.
+    
+    Enforces KYC gate: returns 403 if notional ≥ threshold or restricted jurisdiction
+    and KYC status not in {pass, not_required}.
+    """
     if not settings.moonpay_api_key or not settings.moonpay_secret:
         raise HTTPException(status_code=503, detail="MoonPay not configured")
+
+    # Parse and validate amount
+    try:
+        notional_usdc = float(req.usdc_amount)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid amount")
+
+    # Enforce KYC gate (raises 403 if fails)
+    await enforce_kyc_gate(notional_usdc, user, db)
 
     address = user["address"]
 

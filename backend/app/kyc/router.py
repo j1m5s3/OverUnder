@@ -14,6 +14,72 @@ router = APIRouter(prefix="/kyc", tags=["kyc"])
 settings = get_settings()
 
 
+async def enforce_kyc_gate(
+    notional_usdc: float,
+    user: dict,
+    db: AsyncSession,
+) -> None:
+    """Enforce KYC gate: raise 403 if KYC required but not passed.
+    
+    Gate logic:
+    - notional ≥ threshold (default $500/day) OR restricted jurisdiction → require KYC
+    - Operator JWT cannot bypass fiat KYC
+    - Raises HTTPException(403) if KYC status not in {pass, not_required}
+    """
+    address = user["address"]
+
+    # Get KYC record
+    result = await db.execute(select(KycRecord).where(KycRecord.address == address))
+    kyc_record = result.scalar_one_or_none()
+
+    # Check if user is in restricted jurisdiction
+    restricted_jurisdictions = settings.kyc_restricted_jurisdictions.split(",")
+    restricted_jurisdictions = [j.strip().upper() for j in restricted_jurisdictions if j.strip()]
+
+    is_restricted = False
+    if kyc_record and kyc_record.jurisdiction:
+        is_restricted = kyc_record.jurisdiction.upper() in restricted_jurisdictions
+
+    # Check daily volume
+    threshold = settings.kyc_threshold_usdc
+    now = datetime.utcnow()
+    day_ago = now - timedelta(days=1)
+
+    # Calculate user's 24h ramp volume
+    result = await db.execute(
+        select(RampTx).where(
+            RampTx.address == address,
+            RampTx.created_at >= day_ago,
+            RampTx.status.in_(["completed", "success"]),
+        )
+    )
+    recent_txs = result.scalars().all()
+    daily_volume = sum(float(tx.amount) for tx in recent_txs if tx.amount)
+
+    # Check if current transaction would exceed threshold
+    total_volume = daily_volume + notional_usdc
+
+    # Determine if KYC is required
+    kyc_required = total_volume >= threshold or is_restricted
+
+    if not kyc_required:
+        # Below threshold and not restricted - allow
+        return
+
+    # KYC is required - check status
+    if not kyc_record:
+        raise HTTPException(
+            status_code=403,
+            detail="KYC required but not started. Complete KYC verification to proceed.",
+        )
+
+    if kyc_record.status not in ("pass", "not_required"):
+        raise HTTPException(
+            status_code=403,
+            detail=f"KYC verification required. Current status: {kyc_record.status}",
+        )
+
+
 class KycSessionRequest(BaseModel):
     jurisdiction: str = ""
 
