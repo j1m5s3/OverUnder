@@ -170,10 +170,17 @@ def _validateCall(to: address, callData: Bytes[8192]) -> bool:
         spender: address = self._extractAddress(callData, 4)
         return spender in [self.ctf, self.amm, self.feeVault]
     
-    # CTF split/setApprovalForAll
-    if to == self.ctf:
-        if selector in [SELECTOR_SPLIT, SELECTOR_SET_APPROVAL]:
-            return True
+    # CTF splitPosition
+    if to == self.ctf and selector == SELECTOR_SPLIT:
+        return True
+    
+    # CTF setApprovalForAll: decode operator, require operator in allowed contracts
+    if to == self.ctf and selector == SELECTOR_SET_APPROVAL:
+        if len(callData) < 68:  # selector + address + bool
+            return False
+        operator: address = self._extractAddress(callData, 4)
+        # operator must be in allowed contracts to prevent arbitrary approval grants
+        return operator in [self.amm, self.exchange, self.feeVault]
     
     # AMM buy/sell/addLiquidity
     if to == self.amm:
@@ -214,28 +221,38 @@ def _validateCallData(callData: Bytes[8192]) -> bool:
     selector: bytes4 = self._extractSelector(callData)
     
     # Simple execute(address,uint256,bytes)
+    # ABI: execute(address target, uint256 value, bytes data)
+    # Encoding: selector(4) + target(32) + value(32) + dataOffset(32) + dataLength(32) + data
     if selector == SELECTOR_EXECUTE:
-        if len(callData) < 100:  # 4 + 32 + 32 + 32 (selector + to + value + data offset)
+        if len(callData) < 100:  # 4 + 32 + 32 + 32 (selector + target + value + dataOffset)
             return False
         
         # Extract target address (offset 4)
         target: address = self._extractAddress(callData, 4)
         
-        # Extract inner calldata offset (offset 68 = 4 + 32 + 32)
-        # Inner data starts at offset 100 (4 + 32 + 32 + 32)
-        # For simplicity, validate the inner selector if present
-        if len(callData) < 104:
+        # CRITICAL: Read the ABI offset dynamically (offset 68 = 4 + 32 + 32)
+        # Do NOT hardcode inner data position - crafted offset can hide malicious calls
+        dataOffsetBytes: bytes32 = convert(slice(callData, 68, 32), bytes32)
+        dataOffset: uint256 = convert(dataOffsetBytes, uint256)
+        
+        # dataOffset is relative to start of parameters (after selector), so add 4
+        absoluteDataOffset: uint256 = 4 + dataOffset
+        
+        # Sanity check: offset must be reasonable (at least 96 for standard encoding)
+        if dataOffset < 96 or absoluteDataOffset + 32 > len(callData):
             return False
         
-        # Extract length of inner calldata (at offset 100)
-        innerLenBytes: bytes32 = convert(slice(callData, 100, 32), bytes32)
-        innerLen: uint256 = convert(innerLenBytes, uint256)
+        # Read length at the dynamic offset
+        dataLenBytes: bytes32 = convert(slice(callData, absoluteDataOffset, 32), bytes32)
+        dataLen: uint256 = convert(dataLenBytes, uint256)
         
-        if innerLen < 4 or len(callData) < 132 + innerLen:
+        # Validate length and bounds
+        if dataLen < 4 or absoluteDataOffset + 32 + dataLen > len(callData):
             return False
         
-        # Inner calldata starts at offset 132
-        innerData: Bytes[8192] = slice(callData, 132, innerLen)
+        # Extract inner calldata starting after the length word
+        innerDataStart: uint256 = absoluteDataOffset + 32
+        innerData: Bytes[8192] = slice(callData, innerDataStart, dataLen)
         return self._validateCall(target, innerData)
     
     # executeBatch: DENIED wholesale for stricter deny-by-default security

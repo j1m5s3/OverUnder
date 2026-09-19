@@ -88,9 +88,16 @@ ERC-4337 v0.7 paymaster for gasless AMM operations. Deny-by-default allowlist pr
 
 - Operator-gated: only operator can deposit ETH, add/remove senders/factories.
 - Sender allowlist: `validatePaymasterUserOp` checks `allowedSenders[userOp.sender]` before sponsoring. MVP: operator pre-registers AA accounts via `addSender()`. Production: parse `initCode` to extract factory, validate against `allowedFactories`.
-- Selector allowlist: unwraps AA `execute(address,uint256,bytes)` and validates inner `(target, callData)` against protocol contract addresses + allowed selectors.
-- Allowed: USDC `approve` (spender ∈ {ctf, amm, vault}), CTF `splitPosition`/`setApprovalForAll`, AMM buy/sell/addLiquidity, Oracle `castVote`, Exchange `cancelOrder`/`incrementNonce`, FeeVault `requestRedeem`/`claim`.
-- Blocked: `matchOrders` (relayer-only), `executeBatch` (too complex, denied wholesale for stricter security), unknown selectors, undecodable calldata.
+- Selector allowlist with argument decoding:
+  - USDC `approve`: decodes spender, requires spender ∈ {ctf, amm, vault}
+  - CTF `splitPosition`: allowed without argument validation
+  - CTF `setApprovalForAll`: **decodes operator argument**, requires operator ∈ {amm, exchange, vault} (prevents arbitrary approval grants)
+  - AMM buy/sell/addLiquidity: allowed
+  - Oracle `castVote`: allowed
+  - Exchange `cancelOrder`/`incrementNonce`: allowed (NOT `matchOrders`)
+  - FeeVault `requestRedeem`/`claim`: allowed
+- **Dynamic ABI offset parsing**: unwraps AA `execute(address,uint256,bytes)` by reading the ABI offset word (not hardcoded). Prevents crafted offsets from hiding malicious calls like `matchOrders`.
+- Blocked: `matchOrders` (relayer-only), `executeBatch` (too complex, denied wholesale for stricter security), unknown selectors, undecodable calldata, invalid ABI offsets.
 - Production path for `executeBatch`: decode dynamic arrays, validate each `(target, value, data)` tuple against allowlist. MVP denies entirely to simplify security surface.
 
 ## MockEntryPoint

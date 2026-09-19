@@ -316,3 +316,119 @@ def test_paymaster_blocks_usdc_approve_to_unknown(proto, zero_eth_user):
     with boa.env.prank(entrypoint.address):
         with boa.reverts("paymaster: operation not allowed"):
             paymaster.validatePaymasterUserOp(user_op, user_op_hash, max_cost)
+
+
+def test_paymaster_blocks_ctf_set_approval_bad_operator(proto, zero_eth_user):
+    """Paymaster blocks CTF setApprovalForAll to operator not in allowlist"""
+    paymaster = proto["paymaster"]
+    entrypoint = proto["entrypoint"]
+    ctf = proto["ctf"]
+    operator = proto["accounts"]["operator"].address
+    
+    # Add zero_eth_user to allowed senders
+    with boa.env.prank(operator):
+        paymaster.addSender(zero_eth_user)
+    
+    random_operator = boa.env.generate_address()
+    
+    # Build setApprovalForAll(address operator, bool approved) calldata
+    set_approval_calldata = (
+        bytes.fromhex("a22cb465")  # setApprovalForAll selector
+        + int(random_operator, 16).to_bytes(32, "big")  # operator (not in allowlist)
+        + (1).to_bytes(32, "big")  # approved = true
+    )
+    
+    execute_calldata = (
+        bytes.fromhex("b61d27f6")  # execute
+        + int(ctf.address, 16).to_bytes(32, "big")
+        + (0).to_bytes(32, "big")
+        + (96).to_bytes(32, "big")
+        + len(set_approval_calldata).to_bytes(32, "big")
+        + set_approval_calldata
+    )
+    
+    user_op = _build_user_op(zero_eth_user, execute_calldata)
+    user_op_hash = b"\x00" * 32
+    max_cost = 10**15
+    
+    with boa.env.prank(entrypoint.address):
+        with boa.reverts("paymaster: operation not allowed"):
+            paymaster.validatePaymasterUserOp(user_op, user_op_hash, max_cost)
+
+
+def test_paymaster_allows_ctf_set_approval_allowed_operator(proto, zero_eth_user):
+    """Paymaster allows CTF setApprovalForAll to AMM (allowed operator)"""
+    paymaster = proto["paymaster"]
+    entrypoint = proto["entrypoint"]
+    ctf = proto["ctf"]
+    amm = proto["amm"]
+    operator = proto["accounts"]["operator"].address
+    
+    # Add zero_eth_user to allowed senders
+    with boa.env.prank(operator):
+        paymaster.addSender(zero_eth_user)
+    
+    # Build setApprovalForAll(address operator, bool approved) calldata
+    set_approval_calldata = (
+        bytes.fromhex("a22cb465")  # setApprovalForAll selector
+        + int(amm.address, 16).to_bytes(32, "big")  # operator = AMM (allowed)
+        + (1).to_bytes(32, "big")  # approved = true
+    )
+    
+    execute_calldata = (
+        bytes.fromhex("b61d27f6")  # execute
+        + int(ctf.address, 16).to_bytes(32, "big")
+        + (0).to_bytes(32, "big")
+        + (96).to_bytes(32, "big")
+        + len(set_approval_calldata).to_bytes(32, "big")
+        + set_approval_calldata
+    )
+    
+    user_op = _build_user_op(zero_eth_user, execute_calldata)
+    user_op_hash = b"\x00" * 32
+    max_cost = 10**15
+    
+    with boa.env.prank(entrypoint.address):
+        context, validation_data = paymaster.validatePaymasterUserOp(
+            user_op, user_op_hash, max_cost
+        )
+    
+    assert validation_data == 0  # valid
+
+
+def test_paymaster_blocks_crafted_execute_offset_hiding_match_orders(proto, zero_eth_user):
+    """Paymaster blocks crafted execute with malicious offset hiding matchOrders"""
+    paymaster = proto["paymaster"]
+    entrypoint = proto["entrypoint"]
+    exchange = proto["exchange"]
+    operator = proto["accounts"]["operator"].address
+    
+    # Add zero_eth_user to allowed senders
+    with boa.env.prank(operator):
+        paymaster.addSender(zero_eth_user)
+    
+    # Craft malicious matchOrders calldata
+    match_orders_calldata = bytes.fromhex("8a920150") + b"\x00" * 200
+    
+    # Build execute with CRAFTED offset that tries to hide matchOrders
+    # Standard encoding uses offset 96, but attacker tries non-standard offset
+    crafted_offset = 200  # Non-standard offset
+    
+    execute_calldata = (
+        bytes.fromhex("b61d27f6")  # execute selector
+        + int(exchange.address, 16).to_bytes(32, "big")  # target
+        + (0).to_bytes(32, "big")  # value
+        + crafted_offset.to_bytes(32, "big")  # CRAFTED data offset
+        + b"\x00" * (crafted_offset - 96)  # padding to reach crafted offset
+        + len(match_orders_calldata).to_bytes(32, "big")  # data length at crafted offset
+        + match_orders_calldata  # matchOrders (should be detected)
+    )
+    
+    user_op = _build_user_op(zero_eth_user, execute_calldata)
+    user_op_hash = b"\x00" * 32
+    max_cost = 10**15
+    
+    # Paymaster should detect matchOrders even with crafted offset
+    with boa.env.prank(entrypoint.address):
+        with boa.reverts("paymaster: operation not allowed"):
+            paymaster.validatePaymasterUserOp(user_op, user_op_hash, max_cost)
