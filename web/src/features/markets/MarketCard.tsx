@@ -21,6 +21,7 @@ function formatCloseTime(unixSeconds: number): string {
 export function MarketCard({ market }: { market: Market }) {
   const yesPct = Math.round((market.suggestedProbability || 0.5) * 100);
   const noPct = 100 - yesPct;
+  const isLeading = (side: "yes" | "no") => side === "yes" ? yesPct > noPct : noPct > yesPct;
   
   return (
     <div className="card">
@@ -30,8 +31,14 @@ export function MarketCard({ market }: { market: Market }) {
       </Link>
       
       <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 12 }}>
-        <div style={{ fontSize: 32, fontWeight: 600 }} className="yes">{yesPct}%</div>
-        <div style={{ fontSize: 32, fontWeight: 600 }} className="no">{noPct}%</div>
+        <div style={{ textAlign: "center" }}>
+          <div style={{ fontSize: 32, fontWeight: 600, opacity: isLeading("yes") ? 1 : 0.7 }} className="yes">{yesPct}%</div>
+          <div className="muted" style={{ fontSize: 11, marginTop: 2 }}>yes</div>
+        </div>
+        <div style={{ textAlign: "center" }}>
+          <div style={{ fontSize: 32, fontWeight: 600, opacity: isLeading("no") ? 1 : 0.7 }} className="no">{noPct}%</div>
+          <div className="muted" style={{ fontSize: 11, marginTop: 2 }}>no</div>
+        </div>
       </div>
       
       <div className="row">
