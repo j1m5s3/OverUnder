@@ -61,6 +61,44 @@ def test_paymaster_deposit_info(proto):
     assert deposit == 10**18  # 1 ETH deposited in fixture
 
 
+def test_paymaster_rejects_non_allowed_sender(proto):
+    """Paymaster rejects UserOp from sender not in allowedSenders"""
+    paymaster = proto["paymaster"]
+    entrypoint = proto["entrypoint"]
+    amm = proto["amm"]
+    
+    # Random address NOT in allowedSenders (not added via addSender)
+    random_sender = boa.env.generate_address()
+    
+    # Build valid AMM buy calldata
+    market = b"\x00" * 32
+    buy_calldata = (
+        bytes.fromhex("8b7a7fb9")  # buyWithUSDC
+        + market
+        + (1).to_bytes(32, "big")  # buyYes
+        + (50 * 10**6).to_bytes(32, "big")  # usdcIn
+        + (0).to_bytes(32, "big")  # minOut
+    )
+    
+    execute_calldata = (
+        bytes.fromhex("b61d27f6")  # execute
+        + int(amm.address, 16).to_bytes(32, "big")
+        + (0).to_bytes(32, "big")
+        + (96).to_bytes(32, "big")
+        + len(buy_calldata).to_bytes(32, "big")
+        + buy_calldata
+    )
+    
+    user_op = _build_user_op(random_sender, execute_calldata)
+    user_op_hash = b"\x00" * 32
+    max_cost = 10**15
+    
+    # Paymaster rejects because sender not in allowedSenders
+    with boa.env.prank(entrypoint.address):
+        with boa.reverts("paymaster: sender not from allowed factory"):
+            paymaster.validatePaymasterUserOp(user_op, user_op_hash, max_cost)
+
+
 def test_paymaster_allows_amm_buy(proto, market, zero_eth_user):
     """
     0-eth account with USDC completes AMM buy via sponsored UserOp.
@@ -77,6 +115,10 @@ def test_paymaster_allows_amm_buy(proto, market, zero_eth_user):
     paymaster = proto["paymaster"]
     entrypoint = proto["entrypoint"]
     operator = proto["accounts"]["operator"].address
+    
+    # Add zero_eth_user to allowed senders (AA account from allowed factory)
+    with boa.env.prank(operator):
+        paymaster.addSender(zero_eth_user)
     
     # User starts with 0 ETH
     assert boa.env.get_balance(zero_eth_user) == 0
@@ -140,6 +182,10 @@ def test_paymaster_blocks_match_orders(proto):
     exchange = proto["exchange"]
     operator = proto["accounts"]["operator"].address
     
+    # Add operator to allowed senders for this test
+    with boa.env.prank(operator):
+        paymaster.addSender(operator)
+    
     # Build calldata for matchOrders
     match_calldata = bytes.fromhex("8a920150") + b"\x00" * 1000  # matchOrders + garbage
     
@@ -169,6 +215,10 @@ def test_paymaster_blocks_unknown_selector(proto):
     amm = proto["amm"]
     operator = proto["accounts"]["operator"].address
     
+    # Add operator to allowed senders for this test
+    with boa.env.prank(operator):
+        paymaster.addSender(operator)
+    
     # Unknown selector
     unknown_calldata = bytes.fromhex("deadbeef") + b"\x00" * 100
     
@@ -196,6 +246,11 @@ def test_paymaster_allows_usdc_approve_to_ctf(proto, zero_eth_user):
     entrypoint = proto["entrypoint"]
     usdc = proto["usdc"]
     ctf = proto["ctf"]
+    operator = proto["accounts"]["operator"].address
+    
+    # Add zero_eth_user to allowed senders
+    with boa.env.prank(operator):
+        paymaster.addSender(zero_eth_user)
     
     # Build approve calldata: approve(address,uint256)
     approve_calldata = (
@@ -230,6 +285,11 @@ def test_paymaster_blocks_usdc_approve_to_unknown(proto, zero_eth_user):
     paymaster = proto["paymaster"]
     entrypoint = proto["entrypoint"]
     usdc = proto["usdc"]
+    operator = proto["accounts"]["operator"].address
+    
+    # Add zero_eth_user to allowed senders
+    with boa.env.prank(operator):
+        paymaster.addSender(zero_eth_user)
     
     random_addr = boa.env.generate_address()
     

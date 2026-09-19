@@ -21,6 +21,7 @@ struct PackedUserOperation:
 entryPoint: public(address)
 operator: public(address)
 allowedFactories: public(HashMap[address, bool])
+allowedSenders: public(HashMap[address, bool])
 
 # Protocol contract addresses for allowlist validation
 usdc: public(address)
@@ -112,6 +113,23 @@ def removeFactory(factory: address):
     """Remove an allowed AA factory"""
     assert msg.sender == self.operator, "operator only"
     self.allowedFactories[factory] = False
+
+@external
+def addSender(sender: address):
+    """
+    Add an allowed AA sender (smart account from allowed factory).
+    
+    MVP: operator pre-registers AA accounts from allowed factories.
+    Production: parse initCode to extract factory, validate against allowedFactories.
+    """
+    assert msg.sender == self.operator, "operator only"
+    self.allowedSenders[sender] = True
+
+@external
+def removeSender(sender: address):
+    """Remove an allowed AA sender"""
+    assert msg.sender == self.operator, "operator only"
+    self.allowedSenders[sender] = False
 
 @internal
 @view
@@ -220,8 +238,21 @@ def _validateCallData(callData: Bytes[8192]) -> bool:
         innerData: Bytes[8192] = slice(callData, 132, innerLen)
         return self._validateCall(target, innerData)
     
-    # executeBatch: too complex for slice 5, deny for safety
-    # In production, would decode array and validate each call
+    # executeBatch: DENIED wholesale for stricter deny-by-default security
+    # 
+    # Reasoning:
+    # - executeBatch allows batching multiple calls in one UserOp
+    # - Validating each call in the batch requires decoding dynamic arrays
+    # - Array decoding in Vyper is complex and gas-expensive
+    # - Risk: batch could mix allowed+disallowed calls, bypassing allowlist
+    # 
+    # Production path (if needed):
+    # - Decode calls[] array (address[], uint256[], bytes[])
+    # - Validate each (target, value, data) tuple against allowlist
+    # - Reject if any call is not allowed
+    # 
+    # MVP decision: deny executeBatch entirely, require single execute() per UserOp
+    # This forces explicit per-operation validation and simplifies security surface.
     if selector == SELECTOR_EXECUTE_BATCH:
         return False
     
@@ -244,13 +275,18 @@ def validatePaymasterUserOp(
     - validationData: 0 = valid, 1 = invalid signature/time
     
     Reverts on deny (gas-efficient rejection).
+    
+    Security: sender must be from allowed factory to prevent arbitrary EOA sponsorship.
     """
     assert msg.sender == self.entryPoint, "entrypoint only"
     
-    # Check sender is from allowed factory
-    # In production, would validate account code or factory via initCode
-    # For MVP, we trust any sender (operator adds factories manually)
-    # TODO: parse initCode and validate factory in userOp.initCode[:20]
+    # REQUIRED: Check sender is from allowed factory
+    # MVP: operator pre-registers AA accounts via addSender()
+    # Production: parse initCode to extract factory, validate against allowedFactories
+    # Without this check, any EOA could get sponsorship
+    if not self.allowedSenders[userOp.sender]:
+        log UserOpRejected(sender=userOp.sender, reason="sender not allowed")
+        raise "paymaster: sender not from allowed factory"
     
     # Validate callData allowlist
     if not self._validateCallData(userOp.callData):

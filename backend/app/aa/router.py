@@ -146,7 +146,15 @@ def _validate_call_data(call_data: bytes, settings) -> bool:
         inner_data = call_data[132:132 + inner_len]
         return _validate_call(target, inner_data, settings)
     
-    # executeBatch: too complex for slice 5, deny for safety
+    # executeBatch: DENIED wholesale for stricter deny-by-default security
+    # 
+    # Reasoning:
+    # - executeBatch allows batching multiple calls in one UserOp
+    # - Validating each call requires parsing dynamic arrays
+    # - Risk: batch could mix allowed+disallowed calls, bypassing allowlist
+    # 
+    # MVP decision: deny executeBatch entirely, require single execute() per UserOp
+    # Mirrors on-chain paymaster policy for consistency
     if selector == SELECTOR_EXECUTE_BATCH:
         return False
     
@@ -165,8 +173,17 @@ async def sponsor_userop(
     
     Requires JWT authentication. Re-checks the same allowlist as the on-chain
     paymaster. Never sponsors auth routes or matchOrders.
+    
+    Security: sender must match authenticated user to prevent sponsoring arbitrary accounts.
     """
     settings = get_settings()
+    
+    # REQUIRED: Check sender matches authenticated user
+    # Without this check, authenticated user could sponsor arbitrary accounts
+    # On-chain paymaster enforces sender allowlist; backend enforces JWT user == sender
+    sender_normalized = body.sender.lower()
+    if sender_normalized != user.address:
+        raise HTTPException(403, f"Sender {body.sender} does not match authenticated user {user.address}")
     
     # Parse callData hex
     call_data_hex = body.callData.removeprefix("0x")

@@ -81,6 +81,10 @@ def deploy_protocol():
         amm.setFactory(factory.address)
         # Fund paymaster with 1 ETH for testing
         entrypoint.depositTo(paymaster.address, value=10**18)
+        # Add test accounts to paymaster's allowed senders
+        # In production, would use factory-deployed AA accounts
+        for acct in [trader_a, trader_b]:
+            paymaster.addSender(acct.address)
     
     return {
         "usdc": usdc,
