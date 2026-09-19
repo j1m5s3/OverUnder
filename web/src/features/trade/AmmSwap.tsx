@@ -43,8 +43,8 @@ export function AmmSwap({ conditionId }: { conditionId: string }) {
       setStatus("Connect wallet first.");
       return;
     }
-    if (!quote) {
-      setStatus("Get a quote first.");
+    if (!quote || !quote.tokensOut || quote.tokensOut <= 0) {
+      setStatus("Get a valid quote first.");
       return;
     }
     
@@ -83,6 +83,11 @@ export function AmmSwap({ conditionId }: { conditionId: string }) {
       setStatus("Swapping...");
       const slippagePercent = parseFloat(slippage);
       const minOut = Math.floor((quote.tokensOut * (100 - slippagePercent)) / 100);
+      
+      if (minOut <= 0) {
+        setStatus("Quote too small or slippage too high. Get a fresh quote.");
+        return;
+      }
       
       const swapTx = await writeContractAsync({
         address: ammAddress,

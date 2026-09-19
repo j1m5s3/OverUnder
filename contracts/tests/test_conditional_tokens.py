@@ -67,3 +67,12 @@ def test_redeem_after_payout(proto):
     with boa.env.prank(user):
         ctf.redeemPositions(cid, 0, 100)
     assert usdc.balanceOf(user) == 100
+
+
+def test_primary_requires_seed(proto):
+    factory = proto["factory"]
+    operator = proto["accounts"]["operator"].address
+    close = boa.env.timestamp + 10
+    with boa.env.prank(operator):
+        with boa.reverts("seed required"):
+            factory.createPrimaryMarket(b"\x33" * 32, close, "No seed market", 0)
