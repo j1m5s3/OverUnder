@@ -16,7 +16,7 @@ export default function PortfolioPage() {
             Connect to see your bets.
           </p>
           <button className="btn" onClick={() => connect({ connector: connectors[0] })}>
-            Connect Wallet
+            connect to see your bets
           </button>
         </div>
       </div>
@@ -28,10 +28,10 @@ export default function PortfolioPage() {
       <h1>Portfolio</h1>
       <div className="card" style={{ textAlign: "center", padding: "48px 24px" }}>
         <p className="muted" style={{ marginBottom: "16px" }}>
-          No open bets.
+          No open bets yet.
         </p>
-        <Link href="/">
-          <button className="btn">Browse Markets</button>
+        <Link className="btn" href="/">
+          Browse markets
         </Link>
       </div>
     </div>
