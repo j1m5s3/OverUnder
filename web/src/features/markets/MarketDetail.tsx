@@ -27,10 +27,18 @@ export function MarketDetail({ conditionId }: { conditionId: string }) {
       );
   }, [conditionId]);
 
-  if (!market) return <p>Loading…</p>;
+  if (!market) {
+    return (
+      <div>
+        <div className="skeleton" style={{ width: 120, height: 16, marginBottom: 8 }}></div>
+        <div className="skeleton" style={{ width: "80%", height: 32, marginBottom: 24 }}></div>
+        <div className="card skeleton" style={{ height: 200 }}></div>
+      </div>
+    );
+  }
   return (
     <div>
-      <div className="muted">{market.marketType === 0 ? "PRIMARY · AMM" : "WILDCARD · AMM"}</div>
+      <div className="muted">{market.marketType === 0 ? "PRIMARY" : "WILDCARD"}</div>
       <h1>{market.question}</h1>
       <AmmSwap conditionId={market.conditionId} />
       <OraclePanel conditionId={market.conditionId} />

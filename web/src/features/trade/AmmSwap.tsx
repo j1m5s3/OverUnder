@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { api } from "@/shared/api/client";
-import { useAccount, useWriteContract, usePublicClient } from "wagmi";
+import { useAccount, useConnect, useWriteContract, usePublicClient } from "wagmi";
 import { parseAbi } from "viem";
 
 const AMM_ABI = parseAbi([
@@ -26,64 +26,94 @@ const CTF_ABI = parseAbi([
 export function AmmSwap({ conditionId }: { conditionId: string }) {
   const [mode, setMode] = useState<"buy" | "sell">("buy");
   const [outcome, setOutcome] = useState<"yes" | "no">("yes");
-  const [amount, setAmount] = useState("1000000");
+  const [amount, setAmount] = useState("1.00");
   const [quote, setQuote] = useState<any>(null);
   const [status, setStatus] = useState("");
   const [slippage, setSlippage] = useState("0.5");
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [quoting, setQuoting] = useState(false);
   
   const { address } = useAccount();
+  const { connect, connectors } = useConnect();
   const { writeContractAsync } = useWriteContract();
   const publicClient = usePublicClient();
 
+  const ammAddress = process.env.NEXT_PUBLIC_AMM_ADDRESS as `0x${string}` | undefined;
+  const usdcAddress = process.env.NEXT_PUBLIC_USDC_ADDRESS as `0x${string}` | undefined;
+  const ctfAddress = process.env.NEXT_PUBLIC_CTF_ADDRESS as `0x${string}` | undefined;
+  
+  const envConfigured = ammAddress && usdcAddress && ctfAddress;
+
   async function refresh() {
+    if (!envConfigured) {
+      setStatus("trading isn't configured on this deploy");
+      return;
+    }
+    
+    setQuoting(true);
+    setStatus("quoting...");
+    
     try {
+      const amountNum = parseFloat(amount);
+      if (isNaN(amountNum) || amountNum <= 0) {
+        setStatus("enter a valid amount");
+        setQuoting(false);
+        return;
+      }
+      
+      const microAmount = Math.round(amountNum * 1_000_000);
+      
       let q;
       if (mode === "buy") {
         q = await api(
-          `/api/v1/amm/${encodeURIComponent(conditionId)}/quote?buy_yes=${outcome === "yes"}&usdc_in=${amount}`,
+          `/api/v1/amm/${encodeURIComponent(conditionId)}/quote?buy_yes=${outcome === "yes"}&usdc_in=${microAmount}`,
         );
       } else {
         q = await api(
-          `/api/v1/amm/${encodeURIComponent(conditionId)}/quote?sell_yes=${outcome === "yes"}&token_amount=${amount}`,
+          `/api/v1/amm/${encodeURIComponent(conditionId)}/quote?sell_yes=${outcome === "yes"}&token_amount=${microAmount}`,
         );
       }
       setQuote(q);
       setStatus("");
     } catch (e: any) {
       setStatus(e.message);
+    } finally {
+      setQuoting(false);
     }
   }
 
-  async function swap() {
+  function handleExecute() {
     if (!address) {
-      setStatus("Connect wallet first.");
+      if (connectors[0]) {
+        connect({ connector: connectors[0] });
+      }
       return;
     }
 
-    const ammAddress = process.env.NEXT_PUBLIC_AMM_ADDRESS as `0x${string}`;
-    const usdcAddress = process.env.NEXT_PUBLIC_USDC_ADDRESS as `0x${string}`;
-    const ctfAddress = process.env.NEXT_PUBLIC_CTF_ADDRESS as `0x${string}`;
-    
-    if (!ammAddress || !usdcAddress || !ctfAddress) {
-      setStatus("Missing contract addresses in env");
+    if (!envConfigured) {
+      setStatus("trading isn't configured on this deploy");
       return;
     }
 
+    swap();
+  }
+
+  async function swap() {
     if (mode === "buy") {
-      await executeBuy(ammAddress, usdcAddress);
+      await executeBuy(ammAddress!, usdcAddress!);
     } else {
-      await executeSell(ammAddress, ctfAddress);
+      await executeSell(ammAddress!, ctfAddress!);
     }
   }
 
   async function executeBuy(ammAddress: `0x${string}`, usdcAddress: `0x${string}`) {
     if (!quote || !quote.tokensOut || quote.tokensOut <= 0) {
-      setStatus("Get a valid quote first.");
+      setStatus("get a valid quote first");
       return;
     }
     
     try {
-      setStatus("Checking USDC approval...");
+      setStatus("checking usdc approval...");
 
       const allowance = await publicClient?.readContract({
         address: usdcAddress,
@@ -92,26 +122,27 @@ export function AmmSwap({ conditionId }: { conditionId: string }) {
         args: [address!, ammAddress],
       });
 
-      const usdcAmount = BigInt(amount);
+      const amountNum = parseFloat(amount);
+      const usdcAmount = BigInt(Math.round(amountNum * 1_000_000));
       
       if (!allowance || allowance < usdcAmount) {
-        setStatus("Approving USDC...");
+        setStatus("approving usdc...");
         const approveTx = await writeContractAsync({
           address: usdcAddress,
           abi: USDC_ABI,
           functionName: "approve",
           args: [ammAddress, usdcAmount],
         });
-        setStatus(`Approval sent: ${approveTx}`);
+        setStatus(`approval submitted`);
         await publicClient?.waitForTransactionReceipt({ hash: approveTx });
       }
 
-      setStatus("Buying...");
+      setStatus("buying...");
       const slippagePercent = parseFloat(slippage);
       const minOut = Math.floor((quote.tokensOut * (100 - slippagePercent)) / 100);
       
       if (minOut <= 0) {
-        setStatus("Quote too small or slippage too high. Get a fresh quote.");
+        setStatus("quote too small or slippage too high");
         return;
       }
       
@@ -122,23 +153,23 @@ export function AmmSwap({ conditionId }: { conditionId: string }) {
         args: [conditionId as `0x${string}`, outcome === "yes", usdcAmount, BigInt(minOut)],
       });
       
-      setStatus(`Buy sent: ${swapTx}`);
+      setStatus(`buy submitted`);
       await publicClient?.waitForTransactionReceipt({ hash: swapTx });
-      setStatus("Success! Tokens received.");
+      setStatus("success! tokens received");
       
     } catch (e: any) {
-      setStatus(e.message || "Transaction failed");
+      setStatus(e.message || "transaction failed");
     }
   }
 
   async function executeSell(ammAddress: `0x${string}`, ctfAddress: `0x${string}`) {
     if (!quote || !quote.usdcOut || quote.usdcOut <= 0) {
-      setStatus("Get a valid quote first.");
+      setStatus("get a valid quote first");
       return;
     }
     
     try {
-      setStatus("Checking token approval...");
+      setStatus("checking token approval...");
 
       const isApproved = await publicClient?.readContract({
         address: ctfAddress,
@@ -148,27 +179,28 @@ export function AmmSwap({ conditionId }: { conditionId: string }) {
       });
 
       if (!isApproved) {
-        setStatus("Approving outcome tokens...");
+        setStatus("approving outcome tokens...");
         const approveTx = await writeContractAsync({
           address: ctfAddress,
           abi: CTF_ABI,
           functionName: "setApprovalForAll",
           args: [ammAddress, true],
         });
-        setStatus(`Approval sent: ${approveTx}`);
+        setStatus(`approval submitted`);
         await publicClient?.waitForTransactionReceipt({ hash: approveTx });
       }
 
-      setStatus("Selling...");
+      setStatus("selling...");
       const slippagePercent = parseFloat(slippage);
       const minUsdc = Math.floor((quote.usdcOut * (100 - slippagePercent)) / 100);
       
       if (minUsdc <= 0) {
-        setStatus("Quote too small or slippage too high. Get a fresh quote.");
+        setStatus("quote too small or slippage too high");
         return;
       }
 
-      const tokenAmount = BigInt(amount);
+      const amountNum = parseFloat(amount);
+      const tokenAmount = BigInt(Math.round(amountNum * 1_000_000));
       
       const swapTx = await writeContractAsync({
         address: ammAddress,
@@ -177,19 +209,47 @@ export function AmmSwap({ conditionId }: { conditionId: string }) {
         args: [conditionId as `0x${string}`, outcome === "yes", tokenAmount, BigInt(minUsdc)],
       });
       
-      setStatus(`Sell sent: ${swapTx}`);
+      setStatus(`sell submitted`);
       await publicClient?.waitForTransactionReceipt({ hash: swapTx });
-      setStatus("Success! USDC received.");
+      setStatus("success! usdc received");
       
     } catch (e: any) {
-      setStatus(e.message || "Transaction failed");
+      setStatus(e.message || "transaction failed");
     }
   }
 
+  function formatQuote() {
+    if (!quote) return null;
+    
+    const action = mode === "buy" ? "buy" : "sell";
+    const outcomeLabel = outcome;
+    const slippagePercent = parseFloat(slippage);
+    
+    if (mode === "buy" && quote.tokensOut) {
+      const tokensOut = (quote.tokensOut / 1_000_000).toFixed(2);
+      const minOut = ((quote.tokensOut * (100 - slippagePercent)) / 100 / 1_000_000).toFixed(2);
+      return `${action} ${outcomeLabel} · you get ~${tokensOut} ${outcomeLabel} / fee 1% / min after slip ~${minOut}`;
+    } else if (mode === "sell" && quote.usdcOut) {
+      const usdcOut = (quote.usdcOut / 1_000_000).toFixed(2);
+      const minUsdc = ((quote.usdcOut * (100 - slippagePercent)) / 100 / 1_000_000).toFixed(2);
+      return `${action} ${outcomeLabel} · you get ~${usdcOut} usdc / fee 1% / min after slip ~${minUsdc}`;
+    }
+    
+    return null;
+  }
+
+  const executeLabel = !address 
+    ? `connect to ${mode}` 
+    : `${mode} ${outcome}`;
+
+  const amountLabel = mode === "buy" 
+    ? "amount (usdc)" 
+    : `amount (${outcome})`;
+
   return (
     <div className="card">
-      <h3>AMM swap</h3>
-      <p className="muted">CPMM on YES/NO. 100 bps fee (50 vault / 50 LPs).</p>
+      <h3>Trade</h3>
+      <p className="muted">1% fee</p>
       
       <div className="row">
         <button className={mode === "buy" ? "btn" : "btn ghost"} onClick={() => { setMode("buy"); setQuote(null); }}>
@@ -209,26 +269,39 @@ export function AmmSwap({ conditionId }: { conditionId: string }) {
         </button>
       </div>
 
-      <label className="muted">{mode === "buy" ? "USDC in (6 decimals)" : "Tokens to sell"}</label>
+      <label className="muted">{amountLabel}</label>
       <input value={amount} onChange={(e) => { setAmount(e.target.value); setQuote(null); }} />
       
-      <label className="muted">Slippage tolerance (%)</label>
-      <input value={slippage} onChange={(e) => setSlippage(e.target.value)} />
-      
-      <button className="btn" style={{ marginTop: 12 }} onClick={refresh}>
-        Get Quote
+      <button className="btn" style={{ marginTop: 12 }} onClick={refresh} disabled={quoting}>
+        get quote
       </button>
       
-      {quote ? (
+      {quote && formatQuote() ? (
         <>
-          <pre className="muted">{JSON.stringify(quote, null, 2)}</pre>
-          <button className="btn" onClick={swap}>
-            Execute {mode === "buy" ? "Buy" : "Sell"}
+          <p className="muted" style={{ marginTop: 12 }}>{formatQuote()}</p>
+          <button className="btn" onClick={handleExecute} disabled={!quote || !envConfigured}>
+            {executeLabel}
           </button>
         </>
       ) : null}
       
-      {status && <p className="muted">{status}</p>}
+      <div style={{ marginTop: 16 }}>
+        <button 
+          className="btn ghost" 
+          onClick={() => setShowAdvanced(!showAdvanced)}
+          style={{ fontSize: 13, padding: "6px 10px" }}
+        >
+          {showAdvanced ? "Hide" : "Show"} Advanced
+        </button>
+        {showAdvanced && (
+          <div style={{ marginTop: 8 }}>
+            <label className="muted">slippage tolerance (%)</label>
+            <input value={slippage} onChange={(e) => setSlippage(e.target.value)} />
+          </div>
+        )}
+      </div>
+      
+      {status && <p className="muted" style={{ marginTop: 12 }}>{status}</p>}
     </div>
   );
 }

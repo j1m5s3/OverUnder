@@ -1,29 +1,34 @@
+"use client";
+
 import type { Metadata } from "next";
 import Link from "next/link";
+import { useState } from "react";
 import "./globals.css";
 import { Providers } from "./providers";
 import { ConnectBar } from "@/features/wallet/ConnectBar";
 
-export const metadata: Metadata = {
-  title: "OverUnder",
-  description: "AI-oracle prediction markets on Base",
-};
-
 export default function RootLayout({ children }: { children: React.ReactNode }) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  
   return (
     <html lang="en">
       <body>
         <Providers>
           <header className="nav">
-            <Link className="brand" href="/">
-              OVERUNDER
-            </Link>
-            <nav className="row">
-              <Link href="/">Markets</Link>
-              <Link href="/portfolio">Portfolio</Link>
-              <Link href="/wallet">Wallet</Link>
-              <ConnectBar />
-            </nav>
+            <div className="nav-row">
+              <Link className="brand" href="/" onClick={() => setMenuOpen(false)}>
+                OVERUNDER
+              </Link>
+              <button className="menu-toggle btn ghost" onClick={() => setMenuOpen(!menuOpen)}>
+                {menuOpen ? "✕" : "☰"}
+              </button>
+              <nav className={`nav-links ${menuOpen ? "open" : ""}`}>
+                <Link href="/" onClick={() => setMenuOpen(false)}>Markets</Link>
+                <Link href="/portfolio" onClick={() => setMenuOpen(false)}>Portfolio</Link>
+                <Link href="/wallet" onClick={() => setMenuOpen(false)}>Wallet</Link>
+                <ConnectBar />
+              </nav>
+            </div>
           </header>
           <main className="wrap">{children}</main>
         </Providers>

@@ -17,14 +17,14 @@ export type Market = {
 };
 
 export function MarketList() {
-  const [markets, setMarkets] = useState<Market[]>([]);
+  const [markets, setMarkets] = useState<Market[] | null>(null);
   const [error, setError] = useState("");
 
   useEffect(() => {
     api("/api/v1/markets")
       .then(setMarkets)
       .catch(() => {
-        setError("API offline — showing demo markets.");
+        setError("couldn't reach the api — showing demo markets.");
         setMarkets([
           {
             conditionId: "0xdemo1",
@@ -49,26 +49,49 @@ export function MarketList() {
       });
   }, []);
 
+  if (markets === null) {
+    return (
+      <div className="grid">
+        <div className="card skeleton" style={{ height: 140 }}></div>
+        <div className="card skeleton" style={{ height: 140 }}></div>
+        <div className="card skeleton" style={{ height: 140 }}></div>
+      </div>
+    );
+  }
+
+  if (markets.length === 0) {
+    return <p className="muted">no markets yet</p>;
+  }
+
   const primaries = markets.filter((m) => m.marketType === 0);
+  const gridStyle = primaries.length === 1 ? { maxWidth: 560 } : {};
+
   return (
     <div>
-      {error ? <p className="muted">{error}</p> : null}
-      <div className="grid">
-        {primaries.map((m) => (
-          <div key={m.conditionId}>
-            <MarketCard market={m} />
-            <div className="muted" style={{ marginTop: 8 }}>
-              Wildcards:{" "}
-              {markets
-                .filter((c) => c.parentConditionId === m.conditionId)
-                .map((c) => (
-                  <Link key={c.conditionId} href={`/markets/${c.conditionId}`}>
-                    {c.question}{" "}
-                  </Link>
-                ))}
+      {error ? (
+        <div className="banner" style={{ marginBottom: 16 }}>
+          {error}
+        </div>
+      ) : null}
+      <div className="grid" style={gridStyle}>
+        {primaries.map((m) => {
+          const wildcards = markets.filter((c) => c.parentConditionId === m.conditionId);
+          return (
+            <div key={m.conditionId}>
+              <MarketCard market={m} />
+              {wildcards.length > 0 && (
+                <div className="muted" style={{ marginTop: 8 }}>
+                  Wildcards:{" "}
+                  {wildcards.map((c) => (
+                    <Link key={c.conditionId} href={`/markets/${c.conditionId}`}>
+                      {c.question}{" "}
+                    </Link>
+                  ))}
+                </div>
+              )}
             </div>
-          </div>
-        ))}
+          );
+        })}
         {primaries.length === 0
           ? markets.map((m) => <MarketCard key={m.conditionId} market={m} />)
           : null}
