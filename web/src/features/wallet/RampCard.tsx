@@ -17,8 +17,6 @@ interface KycCheckResponse {
 }
 
 export function RampCard({ address }: { address: string }) {
-  const [moonpayUrl, setMoonpayUrl] = useState("");
-  const [coinbaseUrl, setCoinbaseUrl] = useState("");
   const [kycStatus, setKycStatus] = useState<KycStatus | null>(null);
   const [kycCheck, setKycCheck] = useState<KycCheckResponse | null>(null);
   const [loading, setLoading] = useState(false);
@@ -36,18 +34,13 @@ export function RampCard({ address }: { address: string }) {
   useEffect(() => {
     if (!address) return;
 
-    // Get Coinbase fallback URL
-    api(`/api/v1/ramps/onramp-url?address=${address}&usdc_amount=${amount}`)
-      .then((r) => setCoinbaseUrl(r.url))
-      .catch(() => setCoinbaseUrl(""));
-
     // Get KYC status
     api(`/api/v1/kyc/status`, {
       headers: { Authorization: `Bearer ${localStorage.getItem("jwt")}` },
     })
       .then((r) => setKycStatus(r))
       .catch(() => setKycStatus(null));
-  }, [address, amount]);
+  }, [address]);
 
   const handleBuyUSDC = async () => {
     setLoading(true);
@@ -95,9 +88,14 @@ export function RampCard({ address }: { address: string }) {
       }
 
       // Fallback to Coinbase
-      if (coinbaseUrl) {
-        window.open(coinbaseUrl, "_blank");
-      } else {
+      try {
+        const coinbaseResponse = await api(`/api/v1/ramps/onramp-url?address=${address}&usdc_amount=${amount}`);
+        if (coinbaseResponse.url) {
+          window.open(coinbaseResponse.url, "_blank");
+        } else {
+          setError("No ramp providers available");
+        }
+      } catch {
         setError("No ramp providers available");
       }
     } catch (err) {
@@ -147,18 +145,6 @@ export function RampCard({ address }: { address: string }) {
           >
             {loading ? "Processing..." : "Add Money"}
           </button>
-
-          {coinbaseUrl && (
-            <a
-              className="btn"
-              href={coinbaseUrl}
-              target="_blank"
-              rel="noreferrer"
-              style={{ opacity: 0.7 }}
-            >
-              Alternative Payment Option
-            </a>
-          )}
         </div>
       ) : (
         <button 
