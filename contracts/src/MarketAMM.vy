@@ -100,6 +100,25 @@ def quoteBuy(conditionId: bytes32, buyYes: bool, usdcIn: uint256) -> uint256:
     return trade + (n - new_n)
 
 @external
+@view
+def quoteSell(conditionId: bytes32, sellYes: bool, tokenAmount: uint256) -> uint256:
+    p: Pool = self.pools[conditionId]
+    y: uint256 = p.yesReserve
+    n: uint256 = p.noReserve
+    s: uint256 = tokenAmount
+    disc: uint256 = 0
+    x: uint256 = 0
+    if sellYes:
+        disc = (y + n + s) * (y + n + s) - 4 * n * s
+        x = (y + n + s - isqrt(disc)) // 2
+    else:
+        disc = (n + y + s) * (n + y + s) - 4 * y * s
+        x = (n + y + s - isqrt(disc)) // 2
+    vault_fee: uint256 = x * 50 // BPS_DENOM
+    lp_keep: uint256 = x * 50 // BPS_DENOM
+    return x - vault_fee - lp_keep
+
+@external
 def buyWithUSDC(conditionId: bytes32, buyYes: bool, usdcIn: uint256, minOut: uint256) -> uint256:
     assert usdcIn > 0
     assert not staticcall ICTF(self.ctf).isResolved(conditionId)

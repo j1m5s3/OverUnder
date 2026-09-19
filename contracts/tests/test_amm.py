@@ -53,6 +53,35 @@ def test_amm_buy_moves_price_and_splits_fee(proto):
     assert pool_after[1] > pool_before[1]
 
 
+def test_amm_sell_moves_price_and_splits_fee(proto):
+    usdc = proto["usdc"]
+    ctf = proto["ctf"]
+    amm = proto["amm"]
+    vault = proto["vault"]
+    user = proto["accounts"]["trader_a"]
+    _parent, child = _seeded_wildcard(proto)
+
+    with boa.env.prank(user.address):
+        usdc.faucet(50_000_000)
+        usdc.approve(ctf.address, 50_000_000)
+        ctf.splitPosition(child, 50_000_000)
+
+    yes_id = ctf.positionId(child, 0)
+    token_amount = 10_000_000
+    pool_before = amm.pools(child)
+    
+    with boa.env.prank(user.address):
+        ctf.setApprovalForAll(amm.address, True)
+        quoted = amm.quoteSell(child, True, token_amount)
+        usdc_out = amm.sellToUSDC(child, True, token_amount, quoted)
+
+    assert usdc_out == quoted
+    assert usdc.balanceOf(user.address) > 0
+    pool_after = amm.pools(child)
+    assert pool_after[0] > pool_before[0]
+    assert pool_after[1] < pool_before[1]
+
+
 def test_add_liquidity(proto):
     usdc = proto["usdc"]
     amm = proto["amm"]

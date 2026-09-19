@@ -23,6 +23,7 @@ KEYS = {
     "OU_TOKEN_ADDRESS": "RevenueToken",
     "NEXT_PUBLIC_AMM_ADDRESS": "MarketAMM",
     "NEXT_PUBLIC_USDC_ADDRESS": "MockUSDC",
+    "NEXT_PUBLIC_CTF_ADDRESS": "ConditionalTokens",
 }
 
 
