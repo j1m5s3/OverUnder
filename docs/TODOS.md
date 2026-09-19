@@ -21,7 +21,7 @@ Machine registry below. Human index:
 - [PHASE2] OU-T004 OU emissions from treasury (no FeeVault mint)
 - [SHIPPED] OU-T005 Live LLM agents; MockSearch tests-only
 - [PHASE2] OU-T006 Flutter from `mobile/README.md`
-- [PHASE2] OU-T007 MoonPay + KYC
+- [SHIPPED] OU-T007 MoonPay + KYC
 
 YAML status values: `open` | `blocked` | `done`.
 
@@ -83,10 +83,12 @@ todos:
       - "[mobile/README.md : L1-25]"
   - id: OU-T007
     title: MoonPay widget plus KYC gating
-    status: open
+    status: done
     area: backend
     phase: 2
     summary: Signed MoonPay sessions, webhook, jurisdiction policy; Coinbase URL stays fallback.
     pointers:
-      - "[backend/app/ramps/router.py : L9-32]"
+      - "[backend/app/ramps/router.py : L28-129]"
+      - "[backend/app/kyc/router.py : L29-168]"
+      - "[backend/app/models.py : L98-115]"
 ```

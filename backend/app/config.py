@@ -16,6 +16,10 @@ class Settings(BaseSettings):
     privy_app_id: str = ""
     privy_app_secret: str = ""
     coinbase_onramp_app_id: str = ""
+    moonpay_api_key: str = ""
+    moonpay_secret: str = ""
+    kyc_threshold_usdc: float = 500.0
+    kyc_restricted_jurisdictions: str = ""
     operator_private_key: str = ""
     relayer_private_key: str = ""
     usdc_address: str = ""

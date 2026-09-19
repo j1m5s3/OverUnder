@@ -91,3 +91,22 @@ class Checkpoint(Base):
     __tablename__ = "checkpoints"
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     last_block: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class RampTx(Base):
+    __tablename__ = "ramp_txs"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    address: Mapped[str] = mapped_column(String(42), index=True)
+    amount: Mapped[str] = mapped_column(String(64))
+    provider_id: Mapped[str] = mapped_column(String(255), unique=True, index=True)
+    status: Mapped[str] = mapped_column(String(32))
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
+
+
+class KycRecord(Base):
+    __tablename__ = "kyc_records"
+    address: Mapped[str] = mapped_column(String(42), primary_key=True, index=True)
+    status: Mapped[str] = mapped_column(String(32))
+    jurisdiction: Mapped[str] = mapped_column(String(2), default="")
+    updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())

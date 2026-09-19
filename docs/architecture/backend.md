@@ -2,8 +2,8 @@
 title: Backend
 status: MIXED
 area: backend
-summary: FastAPI routers for auth, markets, CLOB, AMM quotes, oracle records, ramps, and portfolio.
-last_verified: 2026-09-16
+summary: FastAPI routers for auth, markets, CLOB, AMM quotes, oracle records, ramps, KYC, and portfolio.
+last_verified: 2026-09-19
 pointers:
   - "[backend/app/main.py : L23-48]"
   - "[backend/app/auth/router.py : L61-102]"
@@ -13,9 +13,11 @@ pointers:
   - "[backend/app/markets/router.py : L44-62]"
   - "[backend/app/amm/router.py : L9-32]"
   - "[backend/app/oracle/router.py : L29-66]"
-  - "[backend/app/ramps/router.py : L9-32]"
+  - "[backend/app/ramps/router.py : L28-129]"
+  - "[backend/app/kyc/router.py : L29-168]"
   - "[backend/app/portfolio/router.py : L13-61]"
-  - "[backend/app/config.py : L9-33]"
+  - "[backend/app/config.py : L9-40]"
+  - "[backend/app/models.py : L98-115]"
   - "[backend/app/indexer/listener.py : L20-40]"
 ---
 
@@ -62,8 +64,20 @@ pointers:
 
 ## Ramps
 
-- [STUB] Builds Coinbase Pay URLs from `coinbase_onramp_app_id` or `"demo"`. No session token API. [backend/app/ramps/router.py : L9-32]
-- [PHASE2] Coinbase Onramp session API + MoonPay widget + KYC status for jurisdiction gating.
+- [SHIPPED] Builds Coinbase Pay URLs from `coinbase_onramp_app_id` or `"demo"`. Coinbase stays as fallback. [backend/app/ramps/router.py : L107-129]
+- [SHIPPED] `POST /ramps/moonpay/session` (JWT): Sign widget URL with `MOONPAY_SECRET`; destination = session address, usdc/base. [backend/app/ramps/router.py : L28-56]
+- [SHIPPED] `POST /ramps/moonpay/webhook`: Verify signature on raw body; upsert `RampTx{address, amount, provider_id, status}` only. [backend/app/ramps/router.py : L59-104]
+- [SHIPPED] `RampTx` model stores address, amount, provider_id, status with timestamps. No government IDs. [backend/app/models.py : L98-106]
+- [PHASE2] Additional payment providers and webhook retry logic.
+
+## KYC
+
+- [SHIPPED] `POST /kyc/session` (JWT): Create or update KYC record with status enum and jurisdiction only. [backend/app/kyc/router.py : L29-75]
+- [SHIPPED] `GET /kyc/status` (JWT): Get current KYC status for authenticated user. [backend/app/kyc/router.py : L78-98]
+- [SHIPPED] `POST /kyc/check` (JWT): Gate logic - notional ≥ threshold (default $500/day) or restricted jurisdiction → require KYC. [backend/app/kyc/router.py : L101-168]
+- [SHIPPED] `KycRecord{address, status, jurisdiction, updated_at}` — status enum only, NEVER document images/numbers. [backend/app/models.py : L109-115]
+- [SHIPPED] Gate returns 403 if KYC required but not in {pass, not_required}. Operator JWT cannot bypass fiat KYC.
+- [PHASE2] Third-party KYC provider integration (Persona, Jumio) with webhook callbacks.
 
 ## Portfolio + indexer
 
