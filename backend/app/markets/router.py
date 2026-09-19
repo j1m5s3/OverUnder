@@ -207,42 +207,50 @@ async def pause_market(
         raise HTTPException(404, "market not found")
     
     if not settings.operator_private_key:
-        m.paused = True
-        await db.commit()
-        return _public(m)
+        raise HTTPException(500, "operator_private_key not configured")
     
     root = Path(__file__).resolve().parents[3]
     deploy_path = root / "contracts" / "deployments" / f"{settings.chain_id}.json"
     
-    if deploy_path.exists():
-        try:
-            deploy = json.loads(deploy_path.read_text())
-            factory_abi = json.loads((root / "backend" / "app" / "abi" / "MarketFactory.json").read_text())
-            
-            w3 = Web3(Web3.HTTPProvider(settings.anvil_rpc_url))
-            if w3.is_connected():
-                operator_acct = Account.from_key(settings.operator_private_key)
-                factory = w3.eth.contract(address=Web3.to_checksum_address(deploy["MarketFactory"]), abi=factory_abi)
-                
-                cid_bytes = bytes.fromhex(condition_id[2:] if condition_id.startswith("0x") else condition_id)
-                
-                pause_tx = factory.functions.setPaused(cid_bytes, True).build_transaction({
-                    "from": operator_acct.address,
-                    "nonce": w3.eth.get_transaction_count(operator_acct.address),
-                    "chainId": settings.chain_id,
-                    "gas": 100_000,
-                    "gasPrice": w3.eth.gas_price,
-                })
-                
-                signed = operator_acct.sign_transaction(pause_tx)
-                txh = w3.eth.send_raw_transaction(signed.raw_transaction)
-                w3.eth.wait_for_transaction_receipt(txh)
-        except Exception:
-            pass
+    if not deploy_path.exists():
+        raise HTTPException(500, "deployment file not found")
     
-    m.paused = True
-    await db.commit()
-    return _public(m)
+    deploy = json.loads(deploy_path.read_text())
+    factory_abi = json.loads((root / "backend" / "app" / "abi" / "MarketFactory.json").read_text())
+    
+    w3 = Web3(Web3.HTTPProvider(settings.anvil_rpc_url))
+    if not w3.is_connected():
+        raise HTTPException(500, "RPC not available")
+    
+    operator_acct = Account.from_key(settings.operator_private_key)
+    factory = w3.eth.contract(address=Web3.to_checksum_address(deploy["MarketFactory"]), abi=factory_abi)
+    
+    cid_bytes = bytes.fromhex(condition_id[2:] if condition_id.startswith("0x") else condition_id)
+    
+    try:
+        pause_tx = factory.functions.setPaused(cid_bytes, True).build_transaction({
+            "from": operator_acct.address,
+            "nonce": w3.eth.get_transaction_count(operator_acct.address),
+            "chainId": settings.chain_id,
+            "gas": 100_000,
+            "gasPrice": w3.eth.gas_price,
+        })
+        
+        signed = operator_acct.sign_transaction(pause_tx)
+        txh = w3.eth.send_raw_transaction(signed.raw_transaction)
+        receipt = w3.eth.wait_for_transaction_receipt(txh)
+        
+        if receipt["status"] != 1:
+            raise HTTPException(500, "setPaused transaction failed")
+        
+        m.paused = True
+        await db.commit()
+        return _public(m)
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, f"failed to pause market on chain: {e}")
 
 
 def _public(m: Market) -> dict:
