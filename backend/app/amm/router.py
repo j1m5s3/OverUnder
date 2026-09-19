@@ -9,14 +9,15 @@ settings = get_settings()
 @router.get("/{market_id}/quote")
 async def quote(market_id: str, buy_yes: bool = True, usdc_in: int = 1_000_000, sell_yes: bool | None = None, token_amount: int | None = None):
     from web3 import Web3
-    import json
-    from pathlib import Path
+    from app.contract_addresses import get_contract_addresses, load_abi
 
-    root = Path(__file__).resolve().parents[3]
-    deploy = json.loads((root / "contracts" / "deployments" / f"{settings.chain_id}.json").read_text())
-    abi = json.loads((root / "backend" / "app" / "abi" / "MarketAMM.json").read_text())
+    addresses = get_contract_addresses()
+    if "MarketAMM" not in addresses:
+        return {"error": "MarketAMM address not configured"}, 503
+    
+    abi = load_abi("MarketAMM")
     w3 = Web3(Web3.HTTPProvider(settings.anvil_rpc_url))
-    c = w3.eth.contract(address=Web3.to_checksum_address(deploy["MarketAMM"]), abi=abi)
+    c = w3.eth.contract(address=Web3.to_checksum_address(addresses["MarketAMM"]), abi=abi)
     cid = bytes.fromhex(market_id[2:] if market_id.startswith("0x") else market_id)
     
     if sell_yes is not None and token_amount is not None:

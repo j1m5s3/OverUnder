@@ -47,15 +47,16 @@ async def portfolio(address: str, db: AsyncSession = Depends(get_db)):
 @router.get("/fee-vault/nav")
 async def nav():
     try:
-        from pathlib import Path
-        import json
         from web3 import Web3
+        from app.contract_addresses import get_contract_addresses, load_abi
 
-        root = Path(__file__).resolve().parents[3]
-        deploy = json.loads((root / "contracts" / "deployments" / f"{settings.chain_id}.json").read_text())
-        abi = json.loads((root / "backend" / "app" / "abi" / "FeeVault.json").read_text())
+        addresses = get_contract_addresses()
+        if "FeeVault" not in addresses:
+            return {"nav": 0, "chainId": settings.chain_id, "simulated": True}
+        
+        abi = load_abi("FeeVault")
         w3 = Web3(Web3.HTTPProvider(settings.anvil_rpc_url))
-        c = w3.eth.contract(address=Web3.to_checksum_address(deploy["FeeVault"]), abi=abi)
+        c = w3.eth.contract(address=Web3.to_checksum_address(addresses["FeeVault"]), abi=abi)
         return {"nav": c.functions.nav().call(), "chainId": settings.chain_id}
     except Exception:
         return {"nav": 0, "chainId": settings.chain_id, "simulated": True}
