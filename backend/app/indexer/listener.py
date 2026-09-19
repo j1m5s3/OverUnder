@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from pathlib import Path
 
 from sqlalchemy import select
@@ -11,6 +12,8 @@ from sqlalchemy import select
 from app.config import get_settings
 from app.db import SessionLocal
 from app.models import Checkpoint, Market
+
+logger = logging.getLogger(__name__)
 
 settings = get_settings()
 ROOT = Path(__file__).resolve().parents[3]
@@ -93,6 +96,6 @@ async def run_indexer_loop(interval: float = 5.0) -> None:
     while True:
         try:
             await index_once()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.error(f"Indexer error: {e}", exc_info=True)
         await asyncio.sleep(interval)
