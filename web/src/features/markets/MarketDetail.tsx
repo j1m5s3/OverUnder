@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { api } from "@/shared/api/client";
 import { AmmSwap } from "@/features/trade/AmmSwap";
 import { OraclePanel } from "@/features/oracle/OraclePanel";
@@ -8,6 +9,9 @@ import type { Market } from "./MarketList";
 
 export function MarketDetail({ conditionId }: { conditionId: string }) {
   const [market, setMarket] = useState<Market | null>(null);
+  const searchParams = useSearchParams();
+  const sideParam = searchParams.get("side");
+  const initialSide = (sideParam === "yes" || sideParam === "no") ? sideParam : undefined;
 
   useEffect(() => {
     api(`/api/v1/markets/${encodeURIComponent(conditionId)}`)
@@ -40,7 +44,7 @@ export function MarketDetail({ conditionId }: { conditionId: string }) {
     <div>
       <div className="muted">{market.marketType === 0 ? "PRIMARY" : "WILDCARD"}</div>
       <h1>{market.question}</h1>
-      <AmmSwap conditionId={market.conditionId} />
+      <AmmSwap conditionId={market.conditionId} initialSide={initialSide} />
       <OraclePanel conditionId={market.conditionId} />
     </div>
   );
