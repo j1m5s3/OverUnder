@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { api } from "@/shared/api/client";
 import { useAccount, useConnect, useWriteContract, usePublicClient } from "wagmi";
 import { parseAbi } from "viem";
@@ -43,19 +43,28 @@ export function AmmSwap({ conditionId }: { conditionId: string }) {
   const ctfAddress = process.env.NEXT_PUBLIC_CTF_ADDRESS as `0x${string}` | undefined;
   
   const envConfigured = ammAddress && usdcAddress && ctfAddress;
+  
+  const requestIdRef = useRef(0);
 
   useEffect(() => {
     setQuote(null);
-    refresh();
+    setQuoting(true);
+    
+    const debounceTimer = setTimeout(() => {
+      refresh();
+    }, 300);
+    
+    return () => clearTimeout(debounceTimer);
   }, [amount, outcome, mode, conditionId]);
 
   async function refresh() {
     if (!envConfigured) {
       setStatus("trading isn't configured on this deploy");
+      setQuoting(false);
       return;
     }
     
-    setQuoting(true);
+    const requestId = ++requestIdRef.current;
     setStatus("");
     
     try {
@@ -77,13 +86,20 @@ export function AmmSwap({ conditionId }: { conditionId: string }) {
           `/api/v1/amm/${encodeURIComponent(conditionId)}/quote?sell_yes=${outcome === "yes"}&token_amount=${microAmount}`,
         );
       }
-      setQuote(q);
-      setStatus("");
+      
+      if (requestId === requestIdRef.current) {
+        setQuote(q);
+        setStatus("");
+      }
     } catch (e: any) {
-      setQuote(null);
-      setStatus(e.message);
+      if (requestId === requestIdRef.current) {
+        setQuote(null);
+        setStatus(e.message);
+      }
     } finally {
-      setQuoting(false);
+      if (requestId === requestIdRef.current) {
+        setQuoting(false);
+      }
     }
   }
 
