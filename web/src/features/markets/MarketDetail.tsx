@@ -38,7 +38,7 @@ export function MarketDetail({ conditionId }: { conditionId: string }) {
   }
   return (
     <div>
-      <div className="muted">{market.marketType === 0 ? "PRIMARY · AMM" : "WILDCARD · AMM"}</div>
+      <div className="muted">{market.marketType === 0 ? "PRIMARY" : "WILDCARD"}</div>
       <h1>{market.question}</h1>
       <AmmSwap conditionId={market.conditionId} />
       <OraclePanel conditionId={market.conditionId} />

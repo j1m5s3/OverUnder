@@ -4,7 +4,7 @@ export default function HomePage() {
   return (
     <div>
       <h1>Markets</h1>
-      <p className="muted">Primary CLOB books plus AI-generated wildcard AMM markets.</p>
+      <p className="muted">bet yes or no in usdc.</p>
       <MarketList />
     </div>
   );
