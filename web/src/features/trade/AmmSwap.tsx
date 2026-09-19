@@ -61,16 +61,16 @@ export function AmmSwap({ conditionId }: { conditionId: string }) {
         return;
       }
       
-      const usdcAmount = Math.floor(amountNum * 1_000_000);
+      const microAmount = Math.round(amountNum * 1_000_000);
       
       let q;
       if (mode === "buy") {
         q = await api(
-          `/api/v1/amm/${encodeURIComponent(conditionId)}/quote?buy_yes=${outcome === "yes"}&usdc_in=${usdcAmount}`,
+          `/api/v1/amm/${encodeURIComponent(conditionId)}/quote?buy_yes=${outcome === "yes"}&usdc_in=${microAmount}`,
         );
       } else {
         q = await api(
-          `/api/v1/amm/${encodeURIComponent(conditionId)}/quote?sell_yes=${outcome === "yes"}&token_amount=${usdcAmount}`,
+          `/api/v1/amm/${encodeURIComponent(conditionId)}/quote?sell_yes=${outcome === "yes"}&token_amount=${microAmount}`,
         );
       }
       setQuote(q);
@@ -123,7 +123,7 @@ export function AmmSwap({ conditionId }: { conditionId: string }) {
       });
 
       const amountNum = parseFloat(amount);
-      const usdcAmount = BigInt(Math.floor(amountNum * 1_000_000));
+      const usdcAmount = BigInt(Math.round(amountNum * 1_000_000));
       
       if (!allowance || allowance < usdcAmount) {
         setStatus("approving usdc...");
@@ -200,7 +200,7 @@ export function AmmSwap({ conditionId }: { conditionId: string }) {
       }
 
       const amountNum = parseFloat(amount);
-      const tokenAmount = BigInt(Math.floor(amountNum * 1_000_000));
+      const tokenAmount = BigInt(Math.round(amountNum * 1_000_000));
       
       const swapTx = await writeContractAsync({
         address: ammAddress,
