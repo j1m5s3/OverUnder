@@ -110,6 +110,10 @@ jobs:
         run: |
           docker build \
             --build-arg NEXT_PUBLIC_API_URL=${{ steps.api_url.outputs.url }} \
+            --build-arg NEXT_PUBLIC_AMM_ADDRESS=${{ vars.AMM_ADDRESS }} \
+            --build-arg NEXT_PUBLIC_USDC_ADDRESS=${{ vars.USDC_ADDRESS }} \
+            --build-arg NEXT_PUBLIC_CTF_ADDRESS=${{ vars.CTF_ADDRESS }} \
+            --build-arg NEXT_PUBLIC_RPC_URL=https://sepolia.base.org \
             -t ${{ env.ARTIFACT_REGISTRY }}/web:${{ github.sha }} \
             -t ${{ env.ARTIFACT_REGISTRY }}/web:latest \
             ./web
