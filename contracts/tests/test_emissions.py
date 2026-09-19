@@ -1,61 +1,53 @@
 import boa
 import pytest
 
-
-@pytest.fixture
-def treasury(accounts):
-    return accounts[5]
+from tests.conftest import deploy_protocol
 
 
 @pytest.fixture
-def operator(accounts):
-    return accounts[6]
+def proto():
+    return deploy_protocol()
 
 
 @pytest.fixture
-def recipient_a(accounts):
-    return accounts[7]
+def emissions_distributor(proto):
+    """Deploy EmissionsDistributor using proto accounts."""
+    from pathlib import Path
 
-
-@pytest.fixture
-def recipient_b(accounts):
-    return accounts[8]
-
-
-@pytest.fixture
-def ou_token(treasury):
-    """Deploy OU token with treasury as initial holder."""
-    from tests.conftest import ROOT
-
-    ou = boa.load(ROOT / "src" / "RevenueToken.vy", treasury.address)
-    return ou
-
-
-@pytest.fixture
-def emissions_distributor(ou_token, treasury, operator):
-    """Deploy EmissionsDistributor."""
-    from tests.conftest import ROOT
+    ROOT = Path(__file__).resolve().parent.parent
+    
+    ou_token = proto["ou"]
+    treasury = proto["accounts"]["treasury"].address
+    operator = proto["accounts"]["operator"].address
 
     distributor = boa.load(
         ROOT / "src" / "EmissionsDistributor.vy",
         ou_token.address,
-        treasury.address,
-        operator.address,
+        treasury,
+        operator,
     )
     return distributor
 
 
-def test_emissions_distributor_deploy(emissions_distributor, ou_token, treasury, operator):
+def test_emissions_distributor_deploy(proto, emissions_distributor):
     """Test EmissionsDistributor deployment."""
+    ou_token = proto["ou"]
+    treasury = proto["accounts"]["treasury"].address
+    operator = proto["accounts"]["operator"].address
+    
     assert emissions_distributor.ou() == ou_token.address
-    assert emissions_distributor.treasury() == treasury.address
-    assert emissions_distributor.operator() == operator.address
+    assert emissions_distributor.treasury() == treasury
+    assert emissions_distributor.operator() == operator
 
 
-def test_distribute_transfers_from_treasury(
-    ou_token, emissions_distributor, treasury, operator, recipient_a, recipient_b
-):
+def test_distribute_transfers_from_treasury(proto, emissions_distributor):
     """Test distribute transfers OU from treasury to recipients."""
+    ou_token = proto["ou"]
+    treasury = proto["accounts"]["treasury"]
+    operator = proto["accounts"]["operator"]
+    recipient_a = proto["accounts"]["trader_a"]
+    recipient_b = proto["accounts"]["trader_b"]
+    
     # Treasury approves distributor
     with boa.env.prank(treasury.address):
         ou_token.approve(emissions_distributor.address, 2_000_000 * 10**18)
@@ -81,25 +73,30 @@ def test_distribute_transfers_from_treasury(
     assert ou_token.totalSupply() == total_supply_before
 
 
-def test_distribute_enforces_operator_only(
-    ou_token, emissions_distributor, treasury, recipient_a, accounts
-):
+def test_distribute_enforces_operator_only(proto, emissions_distributor):
     """Test distribute can only be called by operator."""
+    ou_token = proto["ou"]
+    treasury = proto["accounts"]["treasury"]
+    recipient_a = proto["accounts"]["trader_a"]
+    non_operator = proto["accounts"]["generator"]
+    
     # Treasury approves distributor
     with boa.env.prank(treasury.address):
         ou_token.approve(emissions_distributor.address, 1_000_000 * 10**18)
 
     # Non-operator tries to distribute
-    non_operator = accounts[0]
     with boa.env.prank(non_operator.address):
         with boa.reverts("operator only"):
             emissions_distributor.distribute(0, [recipient_a.address], [1_000_000 * 10**18])
 
 
-def test_distribute_all_program_ids(
-    ou_token, emissions_distributor, treasury, operator, recipient_a
-):
+def test_distribute_all_program_ids(proto, emissions_distributor):
     """Test distribute works for all program IDs (0-3)."""
+    ou_token = proto["ou"]
+    treasury = proto["accounts"]["treasury"]
+    operator = proto["accounts"]["operator"]
+    recipient_a = proto["accounts"]["trader_a"]
+    
     # Treasury approves distributor
     with boa.env.prank(treasury.address):
         ou_token.approve(emissions_distributor.address, 4_000_000 * 10**18)
@@ -115,10 +112,14 @@ def test_distribute_all_program_ids(
     assert ou_token.totalSupply() == total_supply_before
 
 
-def test_distribute_reverts_on_length_mismatch(
-    ou_token, emissions_distributor, treasury, operator, recipient_a, recipient_b
-):
+def test_distribute_reverts_on_length_mismatch(proto, emissions_distributor):
     """Test distribute reverts when recipients and amounts length mismatch."""
+    ou_token = proto["ou"]
+    treasury = proto["accounts"]["treasury"]
+    operator = proto["accounts"]["operator"]
+    recipient_a = proto["accounts"]["trader_a"]
+    recipient_b = proto["accounts"]["trader_b"]
+    
     with boa.env.prank(treasury.address):
         ou_token.approve(emissions_distributor.address, 1_000_000 * 10**18)
 
@@ -129,17 +130,22 @@ def test_distribute_reverts_on_length_mismatch(
             )
 
 
-def test_distribute_reverts_on_empty_recipients(ou_token, emissions_distributor, operator):
+def test_distribute_reverts_on_empty_recipients(proto, emissions_distributor):
     """Test distribute reverts when recipients list is empty."""
+    operator = proto["accounts"]["operator"]
+    
     with boa.env.prank(operator.address):
         with boa.reverts("empty"):
             emissions_distributor.distribute(0, [], [])
 
 
-def test_distribute_reverts_on_zero_amount(
-    ou_token, emissions_distributor, treasury, operator, recipient_a
-):
+def test_distribute_reverts_on_zero_amount(proto, emissions_distributor):
     """Test distribute reverts when amount is zero."""
+    ou_token = proto["ou"]
+    treasury = proto["accounts"]["treasury"]
+    operator = proto["accounts"]["operator"]
+    recipient_a = proto["accounts"]["trader_a"]
+    
     with boa.env.prank(treasury.address):
         ou_token.approve(emissions_distributor.address, 1_000_000 * 10**18)
 
@@ -148,10 +154,15 @@ def test_distribute_reverts_on_zero_amount(
             emissions_distributor.distribute(0, [recipient_a.address], [0])
 
 
-def test_distribute_maintains_nav(
-    ou_token, emissions_distributor, treasury, operator, recipient_a, usdc, vault
-):
+def test_distribute_maintains_nav(proto, emissions_distributor):
     """Test that emissions (transfers) don't affect NAV calculation."""
+    ou_token = proto["ou"]
+    treasury = proto["accounts"]["treasury"]
+    operator = proto["accounts"]["operator"]
+    recipient_a = proto["accounts"]["trader_a"]
+    usdc = proto["usdc"]
+    vault = proto["vault"]
+    
     # Setup: Give vault some USDC backing
     with boa.env.prank(treasury.address):
         usdc.faucet(10_000_000)
@@ -171,10 +182,14 @@ def test_distribute_maintains_nav(
     assert nav_after == nav_before
 
 
-def test_feevault_not_increased_by_emissions(
-    ou_token, emissions_distributor, treasury, operator, recipient_a, vault
-):
+def test_feevault_not_increased_by_emissions(proto, emissions_distributor):
     """Test that FeeVault OU balance is not increased by emissions."""
+    ou_token = proto["ou"]
+    treasury = proto["accounts"]["treasury"]
+    operator = proto["accounts"]["operator"]
+    recipient_a = proto["accounts"]["trader_a"]
+    vault = proto["vault"]
+    
     vault_balance_before = ou_token.balanceOf(vault.address)
 
     # Treasury approves and distributes
@@ -189,10 +204,13 @@ def test_feevault_not_increased_by_emissions(
     assert vault_balance_after == vault_balance_before
 
 
-def test_total_supply_flat_after_emissions(
-    ou_token, emissions_distributor, treasury, operator, recipient_a
-):
+def test_total_supply_flat_after_emissions(proto, emissions_distributor):
     """Test totalSupply remains constant after emissions."""
+    ou_token = proto["ou"]
+    treasury = proto["accounts"]["treasury"]
+    operator = proto["accounts"]["operator"]
+    recipient_a = proto["accounts"]["trader_a"]
+    
     total_supply_before = ou_token.totalSupply()
 
     # Treasury approves and distributes
