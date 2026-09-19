@@ -48,8 +48,7 @@ async def create_market(
     _user: User = Depends(require_operator),
 ):
     from app.config import get_settings
-    import json
-    from pathlib import Path
+    from app.contract_addresses import get_contract_addresses, load_abi
     from web3 import Web3
     from eth_account import Account
 
@@ -61,23 +60,23 @@ async def create_market(
     if body.seed_usdc <= 0:
         raise HTTPException(400, "seed_usdc must be > 0")
     
-    root = Path(__file__).resolve().parents[3]
-    deploy_path = root / "contracts" / "deployments" / f"{settings.chain_id}.json"
+    try:
+        addresses = get_contract_addresses()
+        factory_abi = load_abi("MarketFactory")
+        usdc_abi = load_abi("MockUSDC")
+    except Exception as e:
+        raise HTTPException(500, f"failed to load contract config: {e}")
     
-    if not deploy_path.exists():
-        raise HTTPException(500, "deployment file not found")
-    
-    deploy = json.loads(deploy_path.read_text())
-    factory_abi = json.loads((root / "backend" / "app" / "abi" / "MarketFactory.json").read_text())
-    usdc_abi = json.loads((root / "backend" / "app" / "abi" / "MockUSDC.json").read_text())
+    if "MarketFactory" not in addresses or "MockUSDC" not in addresses:
+        raise HTTPException(500, "MarketFactory or MockUSDC address not configured")
     
     w3 = Web3(Web3.HTTPProvider(settings.anvil_rpc_url))
     if not w3.is_connected():
         raise HTTPException(500, "RPC not available")
     
     operator_acct = Account.from_key(settings.operator_private_key)
-    factory = w3.eth.contract(address=Web3.to_checksum_address(deploy["MarketFactory"]), abi=factory_abi)
-    usdc = w3.eth.contract(address=Web3.to_checksum_address(deploy["MockUSDC"]), abi=usdc_abi)
+    factory = w3.eth.contract(address=Web3.to_checksum_address(addresses["MarketFactory"]), abi=factory_abi)
+    usdc = w3.eth.contract(address=Web3.to_checksum_address(addresses["MockUSDC"]), abi=usdc_abi)
     
     balance = usdc.functions.balanceOf(operator_acct.address).call()
     if balance < body.seed_usdc:
@@ -195,8 +194,7 @@ async def pause_market(
     _user: User = Depends(require_operator),
 ):
     from app.config import get_settings
-    import json
-    from pathlib import Path
+    from app.contract_addresses import get_contract_addresses, load_abi
     from web3 import Web3
     from eth_account import Account
 
@@ -209,21 +207,21 @@ async def pause_market(
     if not settings.operator_private_key:
         raise HTTPException(500, "operator_private_key not configured")
     
-    root = Path(__file__).resolve().parents[3]
-    deploy_path = root / "contracts" / "deployments" / f"{settings.chain_id}.json"
+    try:
+        addresses = get_contract_addresses()
+        factory_abi = load_abi("MarketFactory")
+    except Exception as e:
+        raise HTTPException(500, f"failed to load contract config: {e}")
     
-    if not deploy_path.exists():
-        raise HTTPException(500, "deployment file not found")
-    
-    deploy = json.loads(deploy_path.read_text())
-    factory_abi = json.loads((root / "backend" / "app" / "abi" / "MarketFactory.json").read_text())
+    if "MarketFactory" not in addresses:
+        raise HTTPException(500, "MarketFactory address not configured")
     
     w3 = Web3(Web3.HTTPProvider(settings.anvil_rpc_url))
     if not w3.is_connected():
         raise HTTPException(500, "RPC not available")
     
     operator_acct = Account.from_key(settings.operator_private_key)
-    factory = w3.eth.contract(address=Web3.to_checksum_address(deploy["MarketFactory"]), abi=factory_abi)
+    factory = w3.eth.contract(address=Web3.to_checksum_address(addresses["MarketFactory"]), abi=factory_abi)
     
     cid_bytes = bytes.fromhex(condition_id[2:] if condition_id.startswith("0x") else condition_id)
     

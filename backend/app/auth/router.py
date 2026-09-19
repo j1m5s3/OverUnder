@@ -107,12 +107,26 @@ async def siwe(body: SiweVerify, db: AsyncSession = Depends(get_db)):
     if result.rowcount != 1:
         raise HTTPException(401, "nonce already consumed")
     
+    # Determine if this address is the operator
+    is_operator = False
+    if settings.operator_private_key:
+        try:
+            operator_acct = Account.from_key(settings.operator_private_key)
+            is_operator = (addr == operator_acct.address.lower())
+        except Exception:
+            pass
+    
     user = (await db.execute(select(User).where(User.address == addr))).scalar_one_or_none()
     if user is None:
-        user = User(address=addr, is_operator=False)
+        user = User(address=addr, is_operator=is_operator)
         db.add(user)
         await db.commit()
         await db.refresh(user)
+    else:
+        # Update operator flag if it changed
+        if user.is_operator != is_operator:
+            user.is_operator = is_operator
+            await db.commit()
     
     return {"token": _issue(addr, user.is_operator), "address": addr}
 
@@ -126,12 +140,26 @@ async def privy(body: PrivyVerify, db: AsyncSession = Depends(get_db)):
     if anvil_bypass and settings.chain_id == 31337:
         if body.token == "privy-demo-anvil-only":
             addr = "0x" + "de" * 20
+            
+            # Check if this is the operator address
+            is_operator = False
+            if settings.operator_private_key:
+                try:
+                    operator_acct = Account.from_key(settings.operator_private_key)
+                    is_operator = (addr.lower() == operator_acct.address.lower())
+                except Exception:
+                    pass
+            
             user = (await db.execute(select(User).where(User.address == addr))).scalar_one_or_none()
             if user is None:
-                user = User(address=addr, is_operator=False)
+                user = User(address=addr, is_operator=is_operator)
                 db.add(user)
                 await db.commit()
                 await db.refresh(user)
+            else:
+                if user.is_operator != is_operator:
+                    user.is_operator = is_operator
+                    await db.commit()
             return {"token": _issue(addr, user.is_operator), "address": addr}
     
     if not settings.privy_app_id:
@@ -189,11 +217,25 @@ async def privy(body: PrivyVerify, db: AsyncSession = Depends(get_db)):
     
     addr = wallet_address.lower()
     
+    # Check if this is the operator address
+    is_operator = False
+    if settings.operator_private_key:
+        try:
+            operator_acct = Account.from_key(settings.operator_private_key)
+            is_operator = (addr == operator_acct.address.lower())
+        except Exception:
+            pass
+    
     user = (await db.execute(select(User).where(User.address == addr))).scalar_one_or_none()
     if user is None:
-        user = User(address=addr, is_operator=False)
+        user = User(address=addr, is_operator=is_operator)
         db.add(user)
         await db.commit()
         await db.refresh(user)
+    else:
+        # Update operator flag if it changed
+        if user.is_operator != is_operator:
+            user.is_operator = is_operator
+            await db.commit()
     
     return {"token": _issue(addr, user.is_operator), "address": addr}
