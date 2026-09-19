@@ -2,7 +2,7 @@
 title: Backend
 status: MIXED
 area: backend
-summary: FastAPI routers for auth, markets, CLOB, AMM quotes, oracle records, ramps, KYC, and portfolio.
+summary: FastAPI routers for auth, markets, CLOB, AMM quotes, oracle records, ramps, KYC, emissions, and portfolio.
 last_verified: 2026-09-19
 pointers:
   - "[backend/app/main.py : L23-48]"
@@ -15,6 +15,7 @@ pointers:
   - "[backend/app/oracle/router.py : L29-66]"
   - "[backend/app/ramps/router.py : L28-129]"
   - "[backend/app/kyc/router.py : L29-168]"
+  - "[backend/app/emissions/router.py : L16-79]"
   - "[backend/app/portfolio/router.py : L13-61]"
   - "[backend/app/config.py : L9-40]"
   - "[backend/app/models.py : L98-115]"
@@ -85,3 +86,10 @@ pointers:
 - [STUB] `GET /fee-vault/nav` returns `nav: 0, simulated: true` if RPC/deploy missing. [backend/app/portfolio/router.py : L47-61]
 - [STUB] `index_once` polls factory logs when connected; not started as a background task from `main.py`. [backend/app/indexer/listener.py : L20-40]
 - [PHASE2] Always-on indexer, CTF balance snapshots, and OU NAV history.
+
+## Emissions
+
+- [SHIPPED] `POST /emissions/distribute` (operator JWT): Calls EmissionsDistributor.distribute to transfer OU from treasury to recipients. [backend/app/emissions/router.py : L16-79]
+- [SHIPPED] Program IDs: 0=LP, 1=maker, 2=agent, 3=quest. Max 100 recipients per batch.
+- [SHIPPED] Requires treasury approval for EmissionsDistributor; never mints. See [docs/emissions/schedule.yaml] for allocation schedules.
+- [PHASE2] Off-chain accounting service that tracks vested amounts and calls distribute endpoint in batches.

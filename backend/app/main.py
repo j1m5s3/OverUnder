@@ -8,6 +8,7 @@ from app.aa.router import router as aa_router
 from app.amm.router import router as amm_router
 from app.auth.router import router as auth_router
 from app.db import Base, engine
+from app.emissions.router import router as emissions_router
 from app.kyc.router import router as kyc_router
 from app.markets.router import router as markets_router
 from app.oracle.router import router as oracle_router
@@ -52,6 +53,7 @@ def create_app() -> FastAPI:
     app.include_router(amm_router, prefix="/api/v1")
     app.include_router(ramps_router, prefix="/api/v1")
     app.include_router(kyc_router, prefix="/api/v1")
+    app.include_router(emissions_router, prefix="/api/v1")
     app.include_router(oracle_router, prefix="/api/v1")
     app.include_router(portfolio_router, prefix="/api/v1")
     app.include_router(aa_router, prefix="/api/v1")

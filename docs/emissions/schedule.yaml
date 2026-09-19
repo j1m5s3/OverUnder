@@ -1,0 +1,61 @@
+---
+# OverUnder Emissions Schedule
+# All amounts in OU tokens (18 decimals)
+# Treasury transferFrom only - never mint
+
+programs:
+  lp:
+    id: 0
+    name: Liquidity Provider Rewards
+    total_allocation: 25000000  # 25M OU (25% of 100M supply)
+    start_timestamp: 1704067200  # 2024-01-01 00:00:00 UTC
+    cliff_seconds: 2592000       # 30 days
+    duration_seconds: 31536000   # 365 days
+    description: Rewards for AMM liquidity providers based on time-weighted liquidity provision
+    
+  maker:
+    id: 1
+    name: Market Maker Rebates
+    total_allocation: 15000000  # 15M OU (15% of 100M supply)
+    start_timestamp: 1704067200  # 2024-01-01 00:00:00 UTC
+    cliff_seconds: 0             # No cliff
+    duration_seconds: 31536000   # 365 days
+    description: Rebates for passive CLOB order makers based on filled volume
+    
+  agent:
+    id: 2
+    name: Oracle Agent Incentives
+    total_allocation: 10000000  # 10M OU (10% of 100M supply)
+    start_timestamp: 1704067200  # 2024-01-01 00:00:00 UTC
+    cliff_seconds: 0             # No cliff
+    duration_seconds: 63072000   # 730 days (2 years)
+    description: Payments to oracle agents for research and attestation work
+    
+  quest:
+    id: 3
+    name: User Quests & Referrals
+    total_allocation: 5000000   # 5M OU (5% of 100M supply)
+    start_timestamp: 1704067200  # 2024-01-01 00:00:00 UTC
+    cliff_seconds: 0             # No cliff
+    duration_seconds: 15768000   # 182.5 days (~6 months)
+    description: Quest completions, referral bonuses, and user engagement rewards
+
+# Remaining 45M OU stays in treasury for:
+# - Future programs
+# - Ecosystem development
+# - Strategic partnerships
+# - Emergency reserves
+
+distribution_rules:
+  - Treasury must approve EmissionsDistributor for sufficient allowance before each distribute call
+  - Operator calls POST /emissions/distribute with program ID and recipient list
+  - Contract enforces totalSupply unchanged (transfer-only, never mint)
+  - NAV = USDC backing / totalSupply remains accurate since transfers don't affect either
+  - FeeVault never receives minted OU; only fees from AMM/Exchange
+  
+notes:
+  - Total allocation across all programs: 55M OU
+  - Treasury reserve: 45M OU
+  - Each program has independent schedule
+  - Off-chain accounting tracks vested amounts per user
+  - On-chain distribute calls transfer vested amounts in batches

@@ -18,7 +18,7 @@ Machine registry below. Human index:
 - [PHASE2] OU-T001 ERC-4337 paymaster
 - [PHASE2] OU-T002 Privy JWKS + SIWE ecrecover
 - [PHASE2] OU-T003 Centralized production relayer
-- [PHASE2] OU-T004 OU emissions from treasury (no FeeVault mint)
+- [SHIPPED] OU-T004 OU emissions from treasury (no FeeVault mint)
 - [SHIPPED] OU-T005 Live LLM agents; MockSearch tests-only
 - [PHASE2] OU-T006 Flutter from `mobile/README.md`
 - [SHIPPED] OU-T007 MoonPay + KYC
@@ -56,13 +56,16 @@ todos:
       - "[contracts/src/Exchange.vy : L128-159]"
   - id: OU-T004
     title: OU emissions from treasury without minting into FeeVault
-    status: open
+    status: done
     area: contracts
     phase: 2
     summary: LP/maker/agent/quest transfers from treasury; NAV stays USDC backing / supply.
     pointers:
+      - "[contracts/src/EmissionsDistributor.vy : L22-50]"
       - "[contracts/src/RevenueToken.vy : L13-32]"
       - "[contracts/src/FeeVault.vy : L44-50]"
+      - "[docs/emissions/schedule.yaml : L1-59]"
+      - "[backend/app/emissions/router.py : L16-79]"
   - id: OU-T005
     title: Replace heuristic agents and MockSearch as the default path
     status: done

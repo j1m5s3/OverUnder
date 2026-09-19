@@ -2,7 +2,7 @@
 title: Contracts
 status: SHIPPED
 area: contracts
-summary: Vyper contract graph for CTF, CLOB, AMM, oracle, OU NAV, and ERC-4337 paymaster.
+summary: Vyper contract graph for CTF, CLOB, AMM, oracle, OU NAV, emissions, and ERC-4337 paymaster.
 last_verified: 2026-09-19
 pointers:
   - "[contracts/src/ConditionalTokens.vy : L52-60]"
@@ -21,6 +21,7 @@ pointers:
   - "[contracts/src/ConsensusOracle.vy : L197-217]"
   - "[contracts/src/FeeVault.vy : L44-83]"
   - "[contracts/src/RevenueToken.vy : L13-32]"
+  - "[contracts/src/EmissionsDistributor.vy : L22-50]"
   - "[contracts/src/OverUnderPaymaster.vy : L235-268]"
   - "[contracts/src/OverUnderPaymaster.vy : L206-229]"
 ---
@@ -81,6 +82,16 @@ Three agent addresses. `WINDOW = 86400`, `ARBITRATION_GRACE = 172800` (grace sto
 - `burn` is public on the token; FeeVault is the intended burner after a redeem claim. [contracts/src/RevenueToken.vy : L57-61]
 - NAV view: `usdc_balance * 1e18 / totalSupply`. Integer division can be 0 when fees are tiny versus 100M supply. [contracts/src/FeeVault.vy : L44-50]
 - Redeem: `requestRedeem` locks OU for `cooldown` (deploy uses 24h), then `claim` burns OU and pays pro-rata USDC. [contracts/src/FeeVault.vy : L61-83]
+
+## EmissionsDistributor
+
+Treasury-gated OU distribution. Never mints; only `transferFrom` treasury to recipients. Operator-only.
+
+- `distribute(program, recipients[], amounts[])`: pulls OU from treasury (requires treasury approval), transfers to recipients. [contracts/src/EmissionsDistributor.vy : L22-50]
+- Asserts `totalSupply` unchanged before/after batch. [contracts/src/EmissionsDistributor.vy : L47-49]
+- Program IDs: 0=LP, 1=maker, 2=agent, 3=quest. See [docs/emissions/schedule.yaml] for allocation schedules.
+- NAV stays accurate: transfers don't affect USDC backing or totalSupply, so `nav = usdc * 1e18 / supply` unchanged.
+- FeeVault never receives minted OU; only fees from Exchange/AMM.
 
 ## OverUnderPaymaster
 
