@@ -2,8 +2,8 @@
 title: Contracts
 status: SHIPPED
 area: contracts
-summary: Vyper contract graph for CTF, CLOB, AMM, oracle, and OU NAV.
-last_verified: 2026-09-16
+summary: Vyper contract graph for CTF, CLOB, AMM, oracle, OU NAV, emissions, and ERC-4337 paymaster.
+last_verified: 2026-09-19
 pointers:
   - "[contracts/src/ConditionalTokens.vy : L52-60]"
   - "[contracts/src/ConditionalTokens.vy : L63-72]"
@@ -21,6 +21,9 @@ pointers:
   - "[contracts/src/ConsensusOracle.vy : L197-217]"
   - "[contracts/src/FeeVault.vy : L44-83]"
   - "[contracts/src/RevenueToken.vy : L13-32]"
+  - "[contracts/src/EmissionsDistributor.vy : L22-50]"
+  - "[contracts/src/OverUnderPaymaster.vy : L235-268]"
+  - "[contracts/src/OverUnderPaymaster.vy : L206-229]"
 ---
 
 # Contracts
@@ -79,6 +82,38 @@ Three agent addresses. `WINDOW = 86400`, `ARBITRATION_GRACE = 172800` (grace sto
 - `burn` is public on the token; FeeVault is the intended burner after a redeem claim. [contracts/src/RevenueToken.vy : L57-61]
 - NAV view: `usdc_balance * 1e18 / totalSupply`. Integer division can be 0 when fees are tiny versus 100M supply. [contracts/src/FeeVault.vy : L44-50]
 - Redeem: `requestRedeem` locks OU for `cooldown` (deploy uses 24h), then `claim` burns OU and pays pro-rata USDC. [contracts/src/FeeVault.vy : L61-83]
+
+## EmissionsDistributor
+
+Treasury-gated OU distribution. Never mints; only `transferFrom` treasury to recipients. Operator-only.
+
+- `distribute(program, recipients[], amounts[])`: pulls OU from treasury (requires treasury approval), transfers to recipients. [contracts/src/EmissionsDistributor.vy : L22-50]
+- Asserts `totalSupply` unchanged before/after batch. [contracts/src/EmissionsDistributor.vy : L47-49]
+- Program IDs: 0=LP, 1=maker, 2=agent, 3=quest. See [docs/emissions/schedule.yaml] for allocation schedules.
+- NAV stays accurate: transfers don't affect USDC backing or totalSupply, so `nav = usdc * 1e18 / supply` unchanged.
+- FeeVault never receives minted OU; only fees from Exchange/AMM.
+
+## OverUnderPaymaster
+
+ERC-4337 v0.7 paymaster for gasless AMM operations. Deny-by-default allowlist prevents arbitrary sponsorship.
+
+- Operator-gated: only operator can deposit ETH, add/remove senders/factories.
+- Sender allowlist: `validatePaymasterUserOp` checks `allowedSenders[userOp.sender]` before sponsoring. MVP: operator pre-registers AA accounts via `addSender()`. Production: parse `initCode` to extract factory, validate against `allowedFactories`.
+- Selector allowlist with argument decoding:
+  - USDC `approve`: decodes spender, requires spender ∈ {ctf, amm, vault}
+  - CTF `splitPosition`: allowed without argument validation
+  - CTF `setApprovalForAll`: **decodes operator argument**, requires operator ∈ {amm, exchange, vault} (prevents arbitrary approval grants)
+  - AMM buy/sell/addLiquidity: allowed
+  - Oracle `castVote`: allowed
+  - Exchange `cancelOrder`/`incrementNonce`: allowed (NOT `matchOrders`)
+  - FeeVault `requestRedeem`/`claim`: allowed
+- **Dynamic ABI offset parsing**: unwraps AA `execute(address,uint256,bytes)` by reading the ABI offset word (not hardcoded). Prevents crafted offsets from hiding malicious calls like `matchOrders`.
+- Blocked: `matchOrders` (relayer-only), `executeBatch` (too complex, denied wholesale for stricter security), unknown selectors, undecodable calldata, invalid ABI offsets.
+- Production path for `executeBatch`: decode dynamic arrays, validate each `(target, value, data)` tuple against allowlist. MVP denies entirely to simplify security surface.
+
+## MockEntryPoint
+
+Minimal EntryPoint v0.7 for local testing. Tracks paymaster deposits via `depositTo`, returns deposit info for validation. Production uses canonical EntryPoint deployment.
 
 ## MockUSDC
 

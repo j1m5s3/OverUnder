@@ -1,9 +1,122 @@
-from fastapi import APIRouter
+import hashlib
+import hmac
+from urllib.parse import urlencode
 
+from fastapi import APIRouter, Depends, HTTPException, Request
+from pydantic import BaseModel
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.auth.router import get_current_user
 from app.config import get_settings
+from app.db import get_db
+from app.kyc.router import enforce_kyc_gate
+from app.models import RampTx
 
 router = APIRouter(prefix="/ramps", tags=["ramps"])
 settings = get_settings()
+
+
+class MoonPaySessionRequest(BaseModel):
+    usdc_amount: str = "100"
+
+
+class MoonPayWebhookPayload(BaseModel):
+    type: str
+    externalTransactionId: str
+    status: str
+    walletAddress: str
+    cryptoAmount: float
+
+
+@router.post("/moonpay/session")
+async def moonpay_session(
+    req: MoonPaySessionRequest,
+    user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Sign MoonPay widget URL with secret for the authenticated user's address.
+    
+    Enforces KYC gate: returns 403 if notional ≥ threshold or restricted jurisdiction
+    and KYC status not in {pass, not_required}.
+    """
+    if not settings.moonpay_api_key or not settings.moonpay_secret:
+        raise HTTPException(status_code=503, detail="MoonPay not configured")
+
+    # Parse and validate amount
+    try:
+        notional_usdc = float(req.usdc_amount)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid amount")
+
+    # Enforce KYC gate (raises 403 if fails)
+    await enforce_kyc_gate(notional_usdc, user, db)
+
+    address = user["address"]
+
+    # Build MoonPay widget URL
+    params = {
+        "apiKey": settings.moonpay_api_key,
+        "currencyCode": "usdc",
+        "walletAddress": address,
+        "baseCurrencyAmount": req.usdc_amount,
+        "baseCurrencyCode": "usd",
+        "network": "base",
+    }
+
+    query_string = urlencode(params)
+    signature = hmac.new(
+        settings.moonpay_secret.encode(), query_string.encode(), hashlib.sha256
+    ).hexdigest()
+
+    url = f"https://buy.moonpay.com?{query_string}&signature={signature}"
+
+    return {"url": url, "provider": "moonpay", "asset": "USDC", "chain": "base"}
+
+
+@router.post("/moonpay/webhook")
+async def moonpay_webhook(request: Request, db: AsyncSession = Depends(get_db)):
+    """Verify MoonPay webhook signature and upsert RampTx."""
+    if not settings.moonpay_secret:
+        raise HTTPException(status_code=503, detail="MoonPay not configured")
+
+    # Get raw body for signature verification
+    body = await request.body()
+    signature = request.headers.get("moonpay-signature", "")
+
+    # Verify signature
+    expected_signature = hmac.new(
+        settings.moonpay_secret.encode(), body, hashlib.sha256
+    ).hexdigest()
+
+    if not hmac.compare_digest(signature, expected_signature):
+        raise HTTPException(status_code=401, detail="Invalid signature")
+
+    # Parse payload
+    import json
+
+    payload = json.loads(body)
+
+    # Upsert RampTx
+    provider_id = payload.get("externalTransactionId", "")
+    address = payload.get("walletAddress", "")
+    amount = str(payload.get("cryptoAmount", 0))
+    status = payload.get("status", "unknown")
+
+    # Check if exists
+    result = await db.execute(select(RampTx).where(RampTx.provider_id == provider_id))
+    existing = result.scalar_one_or_none()
+
+    if existing:
+        existing.status = status
+        existing.amount = amount
+    else:
+        tx = RampTx(address=address, amount=amount, provider_id=provider_id, status=status)
+        db.add(tx)
+
+    await db.commit()
+
+    return {"ok": True}
 
 
 @router.get("/onramp-url")

@@ -1,0 +1,42 @@
+name: overunder
+description: OverUnder prediction markets on Base
+version: 0.1.0+1
+publish_to: 'none'
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  
+  # HTTP & API
+  http: ^1.1.0
+  dio: ^5.4.0
+  
+  # State management
+  flutter_riverpod: ^2.4.9
+  provider: ^6.1.1
+  
+  # UI
+  flutter_svg: ^2.0.9
+  
+  # Utils
+  intl: ^0.18.1
+  shared_preferences: ^2.2.2
+  url_launcher: ^6.2.2
+  
+  # Web3
+  web3dart: ^2.7.3
+  walletconnect_flutter_v2: ^2.1.12
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.1
+
+flutter:
+  uses-material-design: true
+  
+  assets:
+    - assets/deployments/

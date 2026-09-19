@@ -57,7 +57,9 @@ def happy_path(proto) -> dict:
 
     close = boa.env.timestamp + 60
     with boa.env.prank(operator.address):
-        parent = factory.createPrimaryMarket(b"\xaa" * 32, close, "Chiefs vs Broncos")
+        usdc.faucet(200_000_000)
+        usdc.approve(factory.address, 200_000_000)
+        parent = factory.createPrimaryMarket(b"\xaa" * 32, close, "Chiefs vs Broncos", 200_000_000)
 
     kids = propose("Chiefs vs Broncos", close_time=close)
     seed = 200_000_000
@@ -160,7 +162,9 @@ def fallback_path(proto) -> None:
     user = proto["accounts"]["trader_a"]
     close = boa.env.timestamp + 5
     with boa.env.prank(operator.address):
-        cid = factory.createPrimaryMarket(b"\xcc" * 32, close, "Fallback market")
+        usdc.faucet(10_000_000)
+        usdc.approve(factory.address, 10_000_000)
+        cid = factory.createPrimaryMarket(b"\xcc" * 32, close, "Fallback market", 10_000_000)
     with boa.env.prank(user.address):
         usdc.faucet(50)
         usdc.approve(ctf.address, 50)
@@ -188,6 +192,10 @@ def fallback_path(proto) -> None:
 
 def main() -> None:
     import os
+
+    # Set mock flag for e2e with MockSearch
+    os.environ["OU_ORACLE_MOCK"] = "1"
+    os.environ["CHAIN_ID"] = "31337"
 
     os.chdir(CONTRACTS)
     proto = deploy_protocol()

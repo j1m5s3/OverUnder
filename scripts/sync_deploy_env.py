@@ -21,6 +21,11 @@ KEYS = {
     "ORACLE_ADDRESS": "ConsensusOracle",
     "FEE_VAULT_ADDRESS": "FeeVault",
     "OU_TOKEN_ADDRESS": "RevenueToken",
+    "ENTRYPOINT_ADDRESS": "MockEntryPoint",
+    "PAYMASTER_ADDRESS": "OverUnderPaymaster",
+    "NEXT_PUBLIC_AMM_ADDRESS": "MarketAMM",
+    "NEXT_PUBLIC_USDC_ADDRESS": "MockUSDC",
+    "NEXT_PUBLIC_CTF_ADDRESS": "ConditionalTokens",
 }
 
 

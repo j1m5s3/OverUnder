@@ -11,11 +11,14 @@ def proto():
 
 
 def _primary(proto, close_delta=10):
+    usdc = proto["usdc"]
     factory = proto["factory"]
     operator = proto["accounts"]["operator"].address
     close = boa.env.timestamp + close_delta
     with boa.env.prank(operator):
-        cid = factory.createPrimaryMarket(b"\x51" * 32, close, "Who won")
+        usdc.faucet(10_000_000)
+        usdc.approve(factory.address, 10_000_000)
+        cid = factory.createPrimaryMarket(b"\x51" * 32, close, "Who won", 10_000_000)
     return cid, close
 
 

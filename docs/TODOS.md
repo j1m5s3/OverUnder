@@ -3,11 +3,11 @@ title: TODO registry
 status: PHASE2
 area: cross
 summary: Machine-parseable gaps for paymaster, JWKS, relayer, emissions, oracle mocks, Flutter, and KYC.
-last_verified: 2026-09-16
+last_verified: 2026-09-19
 pointers:
   - "[backend/app/auth/router.py : L90-102]"
   - "[backend/app/orderbook/matcher.py : L88-136]"
-  - "[oracles/agents/base.py : L30-35]"
+  - "[oracles/agents/base.py : L10-63]"
   - "[mobile/README.md : L1-25]"
 ---
 
@@ -18,10 +18,10 @@ Machine registry below. Human index:
 - [PHASE2] OU-T001 ERC-4337 paymaster
 - [PHASE2] OU-T002 Privy JWKS + SIWE ecrecover
 - [PHASE2] OU-T003 Centralized production relayer
-- [PHASE2] OU-T004 OU emissions from treasury (no FeeVault mint)
-- [PHASE2] OU-T005 Live LLM agents; MockSearch tests-only
-- [PHASE2] OU-T006 Flutter from `mobile/README.md`
-- [PHASE2] OU-T007 MoonPay + KYC
+- [SHIPPED] OU-T004 OU emissions from treasury (no FeeVault mint)
+- [SHIPPED] OU-T005 Live LLM agents; MockSearch tests-only
+- [SHIPPED] OU-T006 Flutter from `mobile/README.md`
+- [SHIPPED] OU-T007 MoonPay + KYC
 
 YAML status values: `open` | `blocked` | `done`.
 
@@ -56,37 +56,47 @@ todos:
       - "[contracts/src/Exchange.vy : L128-159]"
   - id: OU-T004
     title: OU emissions from treasury without minting into FeeVault
-    status: open
+    status: done
     area: contracts
     phase: 2
     summary: LP/maker/agent/quest transfers from treasury; NAV stays USDC backing / supply.
     pointers:
+      - "[contracts/src/EmissionsDistributor.vy : L22-50]"
       - "[contracts/src/RevenueToken.vy : L13-32]"
       - "[contracts/src/FeeVault.vy : L44-50]"
+      - "[docs/emissions/schedule.yaml : L1-59]"
+      - "[backend/app/emissions/router.py : L16-79]"
   - id: OU-T005
     title: Replace heuristic agents and MockSearch as the default path
-    status: open
+    status: done
     area: oracles
     phase: 2
     summary: Bind Claude/GPT/Gemini with tool-use; keep MockSearch only for unit tests and keyless CI.
     pointers:
-      - "[oracles/agents/base.py : L30-35]"
-      - "[oracles/agents/alpha.py : L10-47]"
+      - "[oracles/agents/base.py : L10-63]"
+      - "[oracles/agents/alpha.py : L10-110]"
       - "[oracles/consensus/coordinator.py : L36-52]"
   - id: OU-T006
     title: Flutter app from mobile carryover contract
-    status: open
+    status: done
     area: web
     phase: 2
     summary: Implement lib/features/* mirroring web; consume tokens.json and openapi.json.
     pointers:
-      - "[mobile/README.md : L1-25]"
+      - "[mobile/README.md : L1-70]"
+      - "[mobile/lib/main.dart : L1-72]"
+      - "[mobile/lib/theme/app_theme.dart : L1-92]"
+      - "[mobile/lib/services/api_client.dart : L1-137]"
+      - "[mobile/lib/features/markets/market_list_screen.dart : L1-154]"
+      - "[mobile/lib/features/trade/amm_swap_widget.dart : L1-186]"
   - id: OU-T007
     title: MoonPay widget plus KYC gating
-    status: open
+    status: done
     area: backend
     phase: 2
     summary: Signed MoonPay sessions, webhook, jurisdiction policy; Coinbase URL stays fallback.
     pointers:
-      - "[backend/app/ramps/router.py : L9-32]"
+      - "[backend/app/ramps/router.py : L28-129]"
+      - "[backend/app/kyc/router.py : L29-168]"
+      - "[backend/app/models.py : L98-115]"
 ```
