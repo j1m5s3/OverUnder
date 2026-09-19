@@ -10,18 +10,32 @@ export function OraclePanel({ conditionId }: { conditionId: string }) {
       .then(setStatus)
       .catch(() => setStatus({ unanimous: false, attestations: [] }));
   }, [conditionId]);
+  
+  const attestations = status?.attestations || [];
+  const emptySlots = attestations.length === 0 ? 3 : 0;
+  
   return (
     <div className="card" style={{ marginTop: 16 }}>
       <h3>Oracle</h3>
-      <p className="muted">Three AI agents. Unanimous settlement, else 24h majority + votes.</p>
-      <div className="muted">{status?.unanimous ? "Unanimous — settling" : "Awaiting consensus"}</div>
-      <ul>
-        {(status?.attestations || []).map((a: any) => (
-          <li key={a.agent}>
-            {a.agent}: {a.outcome === 0 ? "YES" : "NO"} — {a.summary}
-          </li>
-        ))}
-      </ul>
+      <p className="muted">three ai agents. settles when they agree, or after a 24h vote.</p>
+      <div className="muted">{status?.unanimous ? "unanimous — settling" : "awaiting consensus"}</div>
+      {attestations.length > 0 ? (
+        <ul>
+          {attestations.map((a: any) => (
+            <li key={a.agent}>
+              {a.agent}: {a.outcome === 0 ? "YES" : "NO"} — {a.summary}
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <div style={{ marginTop: 12 }}>
+          {Array.from({ length: emptySlots }).map((_, i) => (
+            <div key={i} className="muted" style={{ marginBottom: 4 }}>
+              agent {i + 1}: waiting...
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
