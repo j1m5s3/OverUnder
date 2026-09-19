@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useConnect } from "wagmi";
 import { api } from "@/shared/api/client";
 
 interface KycStatus {
@@ -23,6 +24,14 @@ export function RampCard({ address }: { address: string }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [amount, setAmount] = useState("100");
+  const { connect, connectors } = useConnect();
+
+  const humanizeStatus = (status: string) => {
+    return status
+      .split("_")
+      .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+      .join(" ");
+  };
 
   useEffect(() => {
     if (!address) return;
@@ -109,7 +118,7 @@ export function RampCard({ address }: { address: string }) {
         <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
           <div>
             <label htmlFor="amount" style={{ display: "block", marginBottom: "0.5rem" }}>
-              Amount (USD):
+              Amount ($):
             </label>
             <input
               id="amount"
@@ -124,7 +133,7 @@ export function RampCard({ address }: { address: string }) {
 
           {kycStatus && kycStatus.status !== "not_started" && (
             <p className="muted">
-              Verification Status: {kycStatus.status}
+              Verification Status: {humanizeStatus(kycStatus.status)}
               {kycStatus.jurisdiction && ` (${kycStatus.jurisdiction})`}
             </p>
           )}
@@ -152,7 +161,12 @@ export function RampCard({ address }: { address: string }) {
           )}
         </div>
       ) : (
-        <p className="muted">Connect your wallet to add money.</p>
+        <button 
+          className="btn"
+          onClick={() => connect({ connector: connectors[0] })}
+        >
+          Connect to Add Money
+        </button>
       )}
     </div>
   );
