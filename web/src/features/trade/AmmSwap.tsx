@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { api } from "@/shared/api/client";
-import { useAccount, useWriteContract, usePublicClient } from "wagmi";
+import { useAccount, useConnect, useWriteContract, usePublicClient } from "wagmi";
 import { parseAbi } from "viem";
 
 const AMM_ABI = parseAbi([
@@ -31,8 +31,10 @@ export function AmmSwap({ conditionId }: { conditionId: string }) {
   const [status, setStatus] = useState("");
   const [slippage, setSlippage] = useState("0.5");
   const [showAdvanced, setShowAdvanced] = useState(false);
+  const [quoting, setQuoting] = useState(false);
   
   const { address } = useAccount();
+  const { connect, connectors } = useConnect();
   const { writeContractAsync } = useWriteContract();
   const publicClient = usePublicClient();
 
@@ -48,10 +50,14 @@ export function AmmSwap({ conditionId }: { conditionId: string }) {
       return;
     }
     
+    setQuoting(true);
+    setStatus("quoting...");
+    
     try {
       const amountNum = parseFloat(amount);
       if (isNaN(amountNum) || amountNum <= 0) {
         setStatus("enter a valid amount");
+        setQuoting(false);
         return;
       }
       
@@ -71,12 +77,16 @@ export function AmmSwap({ conditionId }: { conditionId: string }) {
       setStatus("");
     } catch (e: any) {
       setStatus(e.message);
+    } finally {
+      setQuoting(false);
     }
   }
 
-  async function swap() {
+  function handleExecute() {
     if (!address) {
-      setStatus("connect wallet first");
+      if (connectors[0]) {
+        connect({ connector: connectors[0] });
+      }
       return;
     }
 
@@ -85,6 +95,10 @@ export function AmmSwap({ conditionId }: { conditionId: string }) {
       return;
     }
 
+    swap();
+  }
+
+  async function swap() {
     if (mode === "buy") {
       await executeBuy(ammAddress!, usdcAddress!);
     } else {
@@ -224,10 +238,13 @@ export function AmmSwap({ conditionId }: { conditionId: string }) {
     return null;
   }
 
-  const canExecute = address && quote && envConfigured;
   const executeLabel = !address 
     ? `connect to ${mode}` 
     : `${mode} ${outcome}`;
+
+  const amountLabel = mode === "buy" 
+    ? "amount (usdc)" 
+    : `amount (${outcome})`;
 
   return (
     <div className="card">
@@ -252,17 +269,17 @@ export function AmmSwap({ conditionId }: { conditionId: string }) {
         </button>
       </div>
 
-      <label className="muted">amount (usdc)</label>
+      <label className="muted">{amountLabel}</label>
       <input value={amount} onChange={(e) => { setAmount(e.target.value); setQuote(null); }} />
       
-      <button className="btn" style={{ marginTop: 12 }} onClick={refresh}>
-        Get Quote
+      <button className="btn" style={{ marginTop: 12 }} onClick={refresh} disabled={quoting}>
+        get quote
       </button>
       
       {quote && formatQuote() ? (
         <>
           <p className="muted" style={{ marginTop: 12 }}>{formatQuote()}</p>
-          <button className="btn" onClick={swap} disabled={!canExecute}>
+          <button className="btn" onClick={handleExecute} disabled={!quote || !envConfigured}>
             {executeLabel}
           </button>
         </>
