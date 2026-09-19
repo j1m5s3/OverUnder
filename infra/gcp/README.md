@@ -331,10 +331,7 @@ The workflow maps `OU_DATABASE_URL` from Secret Manager. For MVP:
   postgresql+asyncpg://postgres:PASSWORD@/overunder?host=/cloudsql/overunder-509107:us-central1:overunder-db
   ```
 
-  And add Cloud SQL connection to Cloud Run deploy step:
-  ```bash
-  --add-cloudsql-instances=overunder-509107:us-central1:overunder-db
-  ```
+  **Note**: When using Cloud SQL unix socket URLs (`host=/cloudsql/...`), you must add `--add-cloudsql-instances=overunder-509107:us-central1:overunder-db` to the Cloud Run deploy command. The current workflow does not include this flag — add it to the "Deploy API to Cloud Run" step if using unix sockets. TCP connections (e.g. `postgresql://postgres:PASSWORD@IP:5432/overunder`) do not require this flag.
 
 ## Project Number vs Project ID
 

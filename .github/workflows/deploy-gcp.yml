@@ -60,23 +60,22 @@ jobs:
           fi
           
           # Check OU_DATABASE_URL is NOT sqlite/aiosqlite (Cloud Run needs persistent DB)
+          # Never echo secret contents to avoid leaking credentials into logs
           DB_URL=$(gcloud secrets versions access latest --secret=OU_DATABASE_URL --project=${{ env.GCP_PROJECT_ID }} 2>/dev/null || echo "")
           if [ -z "$DB_URL" ]; then
-            echo "ERROR: Secret OU_DATABASE_URL is empty. Cloud Run requires Cloud SQL or external PostgreSQL."
-            echo "SQLite is ephemeral on Cloud Run (data lost on redeploy)."
+            echo "ERROR: Secret OU_DATABASE_URL rejected: empty."
+            echo "Cloud Run requires Cloud SQL or external PostgreSQL."
+            echo "Expected format: postgresql://user:pass@host/dbname"
             exit 1
           fi
           if echo "$DB_URL" | grep -qiE "sqlite|aiosqlite"; then
-            echo "ERROR: Secret OU_DATABASE_URL contains 'sqlite' or 'aiosqlite'."
+            echo "ERROR: Secret OU_DATABASE_URL rejected: contains sqlite/aiosqlite."
             echo "Cloud Run requires persistent database (Cloud SQL or external PostgreSQL)."
-            echo "Current value starts with: $(echo "$DB_URL" | head -c 30)..."
-            echo ""
-            echo "Expected format: postgresql://user:pass@host/dbname or postgresql+asyncpg://..."
+            echo "Expected format: postgresql://user:pass@host/dbname"
             exit 1
           fi
           if ! echo "$DB_URL" | grep -qiE "^postgres"; then
             echo "WARNING: Secret OU_DATABASE_URL does not start with 'postgresql://' or 'postgres://'."
-            echo "Current value starts with: $(echo "$DB_URL" | head -c 30)..."
             echo "Proceeding anyway, but verify this is a valid database URL."
           fi
           
