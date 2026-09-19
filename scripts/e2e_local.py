@@ -193,6 +193,10 @@ def fallback_path(proto) -> None:
 def main() -> None:
     import os
 
+    # Set mock flag for e2e with MockSearch
+    os.environ["OU_ORACLE_MOCK"] = "1"
+    os.environ["CHAIN_ID"] = "31337"
+
     os.chdir(CONTRACTS)
     proto = deploy_protocol()
     summary = happy_path(proto)

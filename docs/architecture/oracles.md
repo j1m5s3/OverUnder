@@ -3,12 +3,12 @@ title: Oracles
 status: MIXED
 area: oracles
 summary: Three research agents, coordinator unanimity, 24h fallback, and wildcard proposal gates.
-last_verified: 2026-09-16
+last_verified: 2026-09-19
 pointers:
-  - "[oracles/agents/base.py : L10-41]"
-  - "[oracles/agents/alpha.py : L10-47]"
-  - "[oracles/agents/beta.py : L1-14]"
-  - "[oracles/agents/gamma.py : L1-14]"
+  - "[oracles/agents/base.py : L10-63]"
+  - "[oracles/agents/alpha.py : L10-110]"
+  - "[oracles/agents/beta.py : L1-115]"
+  - "[oracles/agents/gamma.py : L1-115]"
   - "[oracles/consensus/coordinator.py : L36-62]"
   - "[oracles/consensus/fallback.py : L6-28]"
   - "[oracles/wildcard/gates.py : L19-58]"
@@ -23,12 +23,13 @@ Resolution is off-chain research plus on-chain ConsensusOracle. Agents never hol
 
 ## Agents
 
-- [SHIPPED] Shared `Attestation` hashes `{outcome, urls, summary}` with SHA-256. [oracles/agents/base.py : L10-23]
-- [SHIPPED] `MockSearch` returns a canned Chiefs/Broncos/Kelce recap when live keys are absent. [oracles/agents/base.py : L30-35]
-- [STUB] Alpha is documented as Claude+Tavily but `_infer_outcome` is a keyword heuristic; Tavily is optional HTTP. [oracles/agents/alpha.py : L10-47]
-- [STUB] Beta is labeled GPT+Brave; search falls back to MockSearch without `BRAVE_API_KEY`. [oracles/agents/beta.py : L1-14]
-- [STUB] Gamma is labeled Gemini+Exa; same mock fallback without `EXA_API_KEY`. [oracles/agents/gamma.py : L1-14]
-- [PHASE2] Bind Alpha→Claude, Beta→GPT, Gamma→Gemini with tool-use, citation URLs, structured JSON schema, and disagreement critique rounds. Keep search vendors swappable.
+- [SHIPPED] Shared `Attestation` hashes `{outcome, urls, summary}` with SHA-256. [oracles/agents/base.py : L10-33]
+- [SHIPPED] `MockSearch` returns canned results with mock.local URLs; enabled via `OU_ORACLE_MOCK=1` in pytest/CI/anvil only. [oracles/agents/base.py : L36-63]
+- [SHIPPED] Alpha uses Claude+Tavily; hard-fails if keys missing without mock flag. Evidence URLs filtered from search hits only. [oracles/agents/alpha.py : L10-110]
+- [SHIPPED] Beta uses GPT+Brave; hard-fails if keys missing without mock flag. Evidence URLs filtered from search hits only. [oracles/agents/beta.py : L1-115]
+- [SHIPPED] Gamma uses Gemini+Exa; hard-fails if keys missing without mock flag. Evidence URLs filtered from search hits only. [oracles/agents/gamma.py : L1-115]
+- [SHIPPED] `evidence_urls` are validated to be a subset of search hit URLs; no invented URLs accepted. [oracles/agents/alpha.py : L105-108]
+- [PHASE2] Disagreement critique rounds. Keep search vendors swappable.
 
 ## Coordinator
 
