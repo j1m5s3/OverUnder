@@ -1,0 +1,82 @@
+name: Deploy to GCP Cloud Run
+
+on:
+  push:
+    branches:
+      - feat/mvp-docs
+  workflow_dispatch:
+
+env:
+  GCP_PROJECT_ID: overunder-509107
+  GCP_REGION: us-central1
+  ARTIFACT_REGISTRY: us-central1-docker.pkg.dev/overunder-509107/overunder
+  API_SERVICE_NAME: overunder-api
+  WEB_SERVICE_NAME: overunder-web
+
+jobs:
+  deploy:
+    name: Build and Deploy to Cloud Run
+    runs-on: ubuntu-latest
+    
+    permissions:
+      contents: read
+      id-token: write
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: projects/${{ secrets.GCP_PROJECT_NUMBER }}/locations/global/workloadIdentityPools/github-pool/providers/github
+          service_account: github-deploy@overunder-509107.iam.gserviceaccount.com
+      
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+      
+      - name: Configure Docker for Artifact Registry
+        run: gcloud auth configure-docker us-central1-docker.pkg.dev --quiet
+      
+      - name: Build and push API image
+        run: |
+          docker build -t ${{ env.ARTIFACT_REGISTRY }}/api:${{ github.sha }} -t ${{ env.ARTIFACT_REGISTRY }}/api:latest ./backend
+          docker push ${{ env.ARTIFACT_REGISTRY }}/api:${{ github.sha }}
+          docker push ${{ env.ARTIFACT_REGISTRY }}/api:latest
+      
+      - name: Build and push Web image
+        run: |
+          docker build \
+            --build-arg NEXT_PUBLIC_API_URL=${{ vars.NEXT_PUBLIC_API_URL || 'https://overunder-api-REPLACE.run.app' }} \
+            -t ${{ env.ARTIFACT_REGISTRY }}/web:${{ github.sha }} \
+            -t ${{ env.ARTIFACT_REGISTRY }}/web:latest \
+            ./web
+          docker push ${{ env.ARTIFACT_REGISTRY }}/web:${{ github.sha }}
+          docker push ${{ env.ARTIFACT_REGISTRY }}/web:latest
+      
+      - name: Deploy API to Cloud Run
+        run: |
+          gcloud run deploy ${{ env.API_SERVICE_NAME }} \
+            --image=${{ env.ARTIFACT_REGISTRY }}/api:${{ github.sha }} \
+            --platform=managed \
+            --region=${{ env.GCP_REGION }} \
+            --allow-unauthenticated \
+            --set-secrets=JWT_SECRET=OU_JWT_SECRET:latest,DATABASE_URL=OU_DATABASE_URL:latest,ANVIL_RPC_URL=OU_ANVIL_RPC_URL:latest,PRIVY_APP_SECRET=OU_PRIVY_APP_SECRET:latest,OPERATOR_PRIVATE_KEY=OU_OPERATOR_PRIVATE_KEY:latest,RELAYER_PRIVATE_KEY=OU_RELAYER_PRIVATE_KEY:latest \
+            --set-env-vars="CHAIN_ID=84532,PRIVY_APP_ID=${{ vars.PRIVY_APP_ID || '' }},USDC_ADDRESS=${{ vars.USDC_ADDRESS || '' }},CTF_ADDRESS=${{ vars.CTF_ADDRESS || '' }},FACTORY_ADDRESS=${{ vars.FACTORY_ADDRESS || '' }},EXCHANGE_ADDRESS=${{ vars.EXCHANGE_ADDRESS || '' }},AMM_ADDRESS=${{ vars.AMM_ADDRESS || '' }},ORACLE_ADDRESS=${{ vars.ORACLE_ADDRESS || '' }},FEE_VAULT_ADDRESS=${{ vars.FEE_VAULT_ADDRESS || '' }},OU_TOKEN_ADDRESS=${{ vars.OU_TOKEN_ADDRESS || '' }},COINBASE_ONRAMP_APP_ID=${{ vars.COINBASE_ONRAMP_APP_ID || '' }}" \
+            --project=${{ env.GCP_PROJECT_ID }}
+      
+      - name: Deploy Web to Cloud Run
+        run: |
+          gcloud run deploy ${{ env.WEB_SERVICE_NAME }} \
+            --image=${{ env.ARTIFACT_REGISTRY }}/web:${{ github.sha }} \
+            --platform=managed \
+            --region=${{ env.GCP_REGION }} \
+            --allow-unauthenticated \
+            --project=${{ env.GCP_PROJECT_ID }}
+      
+      - name: Output Service URLs
+        run: |
+          API_URL=$(gcloud run services describe ${{ env.API_SERVICE_NAME }} --platform=managed --region=${{ env.GCP_REGION }} --format='value(status.url)' --project=${{ env.GCP_PROJECT_ID }})
+          WEB_URL=$(gcloud run services describe ${{ env.WEB_SERVICE_NAME }} --platform=managed --region=${{ env.GCP_REGION }} --format='value(status.url)' --project=${{ env.GCP_PROJECT_ID }})
+          echo "API Service: $API_URL"
+          echo "Web Service: $WEB_URL"
