@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import '../../services/api_client.dart';
+import '../../providers/wallet_provider.dart';
 import '../../theme/app_theme.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -13,14 +15,23 @@ class WalletScreen extends StatefulWidget {
 }
 
 class _WalletScreenState extends State<WalletScreen> {
-  String? _address;
+  final _privateKeyController = TextEditingController();
+  final _rpcController = TextEditingController(text: 'http://127.0.0.1:8545');
   double _nav = 0.0;
   bool _loading = false;
+  String? _error;
 
   @override
   void initState() {
     super.initState();
     _loadNav();
+  }
+
+  @override
+  void dispose() {
+    _privateKeyController.dispose();
+    _rpcController.dispose();
+    super.dispose();
   }
 
   Future<void> _loadNav() async {
@@ -34,18 +45,67 @@ class _WalletScreenState extends State<WalletScreen> {
     }
   }
 
-  Future<void> _openRamp() async {
-    if (_address == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Connect wallet first')),
-      );
+  Future<void> _connect() async {
+    final privateKey = _privateKeyController.text.trim();
+    final rpcUrl = _rpcController.text.trim();
+
+    if (privateKey.isEmpty || rpcUrl.isEmpty) {
+      setState(() {
+        _error = 'Private key and RPC URL are required';
+      });
       return;
     }
 
-    setState(() => _loading = true);
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
 
     try {
-      final result = await widget.apiClient.getRampUrl(_address!);
+      final walletProvider = context.read<WalletProvider>();
+      await walletProvider.connect(privateKey, rpcUrl);
+      
+      setState(() {
+        _loading = false;
+      });
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Wallet connected successfully')),
+        );
+      }
+    } catch (e) {
+      setState(() {
+        _loading = false;
+        _error = 'Failed to connect: $e';
+      });
+    }
+  }
+
+  void _disconnect() {
+    context.read<WalletProvider>().disconnect();
+    setState(() {
+      _error = null;
+    });
+  }
+
+  Future<void> _openRamp() async {
+    final walletProvider = context.read<WalletProvider>();
+    
+    if (!walletProvider.isConnected) {
+      setState(() {
+        _error = 'Connect wallet first';
+      });
+      return;
+    }
+
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+
+    try {
+      final result = await widget.apiClient.getRampUrl(walletProvider.address!);
       final urlString = result['url'];
 
       if (urlString != null) {
@@ -55,9 +115,9 @@ class _WalletScreenState extends State<WalletScreen> {
         }
       }
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to get ramp URL: $e')),
-      );
+      setState(() {
+        _error = 'Failed to get ramp URL: $e';
+      });
     } finally {
       setState(() => _loading = false);
     }
@@ -65,6 +125,8 @@ class _WalletScreenState extends State<WalletScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final walletProvider = context.watch<WalletProvider>();
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('Wallet'),
@@ -89,7 +151,7 @@ class _WalletScreenState extends State<WalletScreen> {
                           ),
                     ),
                     const SizedBox(height: AppTheme.spacingMd),
-                    if (_address != null)
+                    if (walletProvider.isConnected)
                       Container(
                         padding: const EdgeInsets.all(AppTheme.spacingMd),
                         decoration: BoxDecoration(
@@ -102,30 +164,67 @@ class _WalletScreenState extends State<WalletScreen> {
                             const SizedBox(width: AppTheme.spacingSm),
                             Expanded(
                               child: Text(
-                                '${_address!.substring(0, 6)}...${_address!.substring(_address!.length - 4)}',
+                                '${walletProvider.address!.substring(0, 6)}...${walletProvider.address!.substring(walletProvider.address!.length - 4)}',
                                 style: const TextStyle(fontFamily: 'monospace'),
                               ),
                             ),
                             IconButton(
                               icon: const Icon(Icons.close),
-                              onPressed: () {
-                                setState(() => _address = null);
-                              },
+                              onPressed: _disconnect,
                             ),
                           ],
                         ),
                       )
                     else
-                      ElevatedButton(
-                        onPressed: () {
-                          // TODO: Privy/wallet integration
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              content: Text('Wallet connection requires Privy integration'),
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          TextField(
+                            controller: _privateKeyController,
+                            decoration: const InputDecoration(
+                              labelText: 'Private Key',
+                              border: OutlineInputBorder(),
+                              hintText: '0x...',
                             ),
-                          );
-                        },
-                        child: const Text('Connect Wallet'),
+                            obscureText: true,
+                          ),
+                          const SizedBox(height: AppTheme.spacingMd),
+                          TextField(
+                            controller: _rpcController,
+                            decoration: const InputDecoration(
+                              labelText: 'RPC URL',
+                              border: OutlineInputBorder(),
+                            ),
+                          ),
+                          const SizedBox(height: AppTheme.spacingMd),
+                          if (_error != null)
+                            Padding(
+                              padding: const EdgeInsets.only(bottom: AppTheme.spacingMd),
+                              child: Text(
+                                _error!,
+                                style: TextStyle(color: AppTheme.no),
+                              ),
+                            ),
+                          ElevatedButton(
+                            onPressed: _loading ? null : _connect,
+                            child: _loading
+                                ? const SizedBox(
+                                    height: 20,
+                                    width: 20,
+                                    child: CircularProgressIndicator(strokeWidth: 2),
+                                  )
+                                : const Text('Connect Wallet'),
+                          ),
+                          const SizedBox(height: AppTheme.spacingSm),
+                          Text(
+                            'Development only: Use Anvil test account private keys',
+                            style: TextStyle(
+                              color: AppTheme.warning,
+                              fontSize: AppTheme.sizeSm,
+                            ),
+                            textAlign: TextAlign.center,
+                          ),
+                        ],
                       ),
                   ],
                 ),
@@ -182,7 +281,7 @@ class _WalletScreenState extends State<WalletScreen> {
                     SizedBox(
                       width: double.infinity,
                       child: ElevatedButton(
-                        onPressed: _loading ? null : _openRamp,
+                        onPressed: walletProvider.isConnected && !_loading ? _openRamp : null,
                         child: _loading
                             ? const SizedBox(
                                 height: 20,

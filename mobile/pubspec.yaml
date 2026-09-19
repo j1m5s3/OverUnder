@@ -16,6 +16,7 @@ dependencies:
   
   # State management
   flutter_riverpod: ^2.4.9
+  provider: ^6.1.1
   
   # UI
   flutter_svg: ^2.0.9

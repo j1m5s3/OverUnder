@@ -42,13 +42,10 @@ class Deployments {
   }
 
   static Future<Deployments> load(int chainId) async {
-    try {
-      final jsonString = await rootBundle.loadString('assets/deployments/$chainId.json');
-      final Map<String, dynamic> data = json.decode(jsonString);
-      return Deployments.fromJson(data);
-    } catch (e) {
-      // Return empty deployments if file not found
-      return Deployments(chainId: chainId);
-    }
+    // Fail-closed: throw if deployment file not found or invalid
+    final jsonString = await rootBundle.loadString('assets/deployments/$chainId.json');
+    final Map<String, dynamic> data = json.decode(jsonString);
+    return Deployments.fromJson(data);
   }
 }
+

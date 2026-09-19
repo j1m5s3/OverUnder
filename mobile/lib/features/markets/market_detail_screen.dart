@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
-import '../models/models.dart';
-import '../services/api_client.dart';
-import '../theme/app_theme.dart';
-import '../features/trade/amm_swap_widget.dart';
-import '../features/oracle/oracle_status_widget.dart';
+import 'package:provider/provider.dart';
+import '../../models/models.dart';
+import '../../services/api_client.dart';
+import '../../providers/wallet_provider.dart';
+import '../../theme/app_theme.dart';
+import '../trade/amm_swap_widget.dart';
+import '../oracle/oracle_status_widget.dart';
 
 class MarketDetailScreen extends StatefulWidget {
   final ApiClient apiClient;
@@ -52,6 +54,8 @@ class _MarketDetailScreenState extends State<MarketDetailScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final walletProvider = context.watch<WalletProvider>();
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('Market Details'),
@@ -124,11 +128,43 @@ class _MarketDetailScreenState extends State<MarketDetailScreen> {
                         ),
                       ),
                       const SizedBox(height: AppTheme.spacingLg),
-                      // AMM Swap (AMM-first: no OrderTicket)
-                      AmmSwapWidget(
-                        apiClient: widget.apiClient,
-                        marketId: widget.marketId,
-                      ),
+                      // AMM Swap - only mount when wallet connected
+                      if (walletProvider.isConnected)
+                        AmmSwapWidget(
+                          apiClient: widget.apiClient,
+                          marketId: widget.marketId,
+                          web3Client: walletProvider.web3Client,
+                          credentials: walletProvider.credentials,
+                        )
+                      else
+                        Card(
+                          child: Padding(
+                            padding: const EdgeInsets.all(AppTheme.spacingMd),
+                            child: Column(
+                              children: [
+                                Text(
+                                  'AMM Swap',
+                                  style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                                        fontWeight: AppTheme.weightBold,
+                                      ),
+                                ),
+                                const SizedBox(height: AppTheme.spacingMd),
+                                Text(
+                                  'Connect wallet to trade',
+                                  style: TextStyle(color: AppTheme.textMuted),
+                                ),
+                                const SizedBox(height: AppTheme.spacingMd),
+                                ElevatedButton(
+                                  onPressed: () {
+                                    // Navigate to wallet screen
+                                    DefaultTabController.of(context).animateTo(1);
+                                  },
+                                  child: const Text('Go to Wallet'),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
                       const SizedBox(height: AppTheme.spacingLg),
                       // Oracle Status
                       OracleStatusWidget(
