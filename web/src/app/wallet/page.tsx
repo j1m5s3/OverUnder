@@ -11,7 +11,7 @@ export default function WalletPage() {
   return (
     <div>
       <h1>Wallet</h1>
-      <p className="muted">USDC on Base. Email AA (Privy) or EOA. Ramps via Coinbase.</p>
+      <p className="muted">Add money to place bets on prediction markets.</p>
       <RampCard address={address} />
     </div>
   );

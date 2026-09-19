@@ -59,7 +59,7 @@ export function RampCard({ address }: { address: string }) {
 
       if (!checkResponse.allowed) {
         setError(
-          `KYC required: ${checkResponse.reason}. Please complete KYC verification.`
+          `Verification required: ${checkResponse.reason}. Please complete identity verification.`
         );
         setLoading(false);
         return;
@@ -82,7 +82,7 @@ export function RampCard({ address }: { address: string }) {
           return;
         }
       } catch (moonpayError) {
-        console.warn("MoonPay not available, falling back to Coinbase");
+        console.warn("Primary payment provider not available, trying alternative");
       }
 
       // Fallback to Coinbase
@@ -100,9 +100,9 @@ export function RampCard({ address }: { address: string }) {
 
   return (
     <div className="card">
-      <h3>Buy USDC</h3>
+      <h3>Add Money</h3>
       <p className="muted">
-        Purchase USDC on Base with MoonPay or Coinbase Onramp.
+        Add funds to your wallet to place bets.
       </p>
 
       {address ? (
@@ -124,7 +124,7 @@ export function RampCard({ address }: { address: string }) {
 
           {kycStatus && kycStatus.status !== "not_started" && (
             <p className="muted">
-              KYC Status: {kycStatus.status}
+              Verification Status: {kycStatus.status}
               {kycStatus.jurisdiction && ` (${kycStatus.jurisdiction})`}
             </p>
           )}
@@ -136,7 +136,7 @@ export function RampCard({ address }: { address: string }) {
             onClick={handleBuyUSDC}
             disabled={loading || !address}
           >
-            {loading ? "Processing..." : "Buy USDC"}
+            {loading ? "Processing..." : "Add Money"}
           </button>
 
           {coinbaseUrl && (
@@ -147,12 +147,12 @@ export function RampCard({ address }: { address: string }) {
               rel="noreferrer"
               style={{ opacity: 0.7 }}
             >
-              Coinbase Onramp (Fallback)
+              Alternative Payment Option
             </a>
           )}
         </div>
       ) : (
-        <p className="muted">Connect wallet to buy USDC.</p>
+        <p className="muted">Connect your wallet to add money.</p>
       )}
     </div>
   );
