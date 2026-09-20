@@ -4,55 +4,51 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { api } from "@/shared/api/client";
 import { MarketCard } from "./MarketCard";
-import { categorizeMarket, type Category } from "@/shared/utils/categorize";
+import { selectHubs, type EventCard } from "./eventHub";
+import type { Category } from "@/shared/utils/categorize";
 
-export type Market = {
-  conditionId: string;
-  parentConditionId?: string | null;
-  question: string;
-  marketType: number;
-  closeTime: number;
-  paused: boolean;
-  resolved: boolean;
-  suggestedProbability: number;
-};
+const DEMO_CARDS: EventCard[] = [
+  {
+    primary: {
+      conditionId: "0xdemo1",
+      question: "Chiefs vs Broncos: Chiefs win?",
+      marketType: 0,
+      closeTime: Math.floor(Date.now() / 1000) + 86400,
+      paused: false,
+      resolved: false,
+      suggestedProbability: 0.58,
+    },
+    children: [
+      {
+        conditionId: "0xdemo2",
+        parentConditionId: "0xdemo1",
+        question: "Travis Kelce to fumble at least once?",
+        marketType: 1,
+        closeTime: Math.floor(Date.now() / 1000) + 86400,
+        paused: false,
+        resolved: false,
+        suggestedProbability: 0.22,
+      },
+    ],
+  },
+];
 
 export function MarketList() {
-  const [markets, setMarkets] = useState<Market[] | null>(null);
+  const [cards, setCards] = useState<EventCard[] | null>(null);
   const [error, setError] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [activeCategory, setActiveCategory] = useState<Category>("all");
 
   useEffect(() => {
     api("/api/v1/markets")
-      .then(setMarkets)
+      .then(setCards)
       .catch(() => {
         setError("couldn't reach the api — showing demo markets.");
-        setMarkets([
-          {
-            conditionId: "0xdemo1",
-            question: "Chiefs vs Broncos: Chiefs win?",
-            marketType: 0,
-            closeTime: Math.floor(Date.now() / 1000) + 86400,
-            paused: false,
-            resolved: false,
-            suggestedProbability: 0.58,
-          },
-          {
-            conditionId: "0xdemo2",
-            parentConditionId: "0xdemo1",
-            question: "Travis Kelce to fumble at least once?",
-            marketType: 1,
-            closeTime: Math.floor(Date.now() / 1000) + 86400,
-            paused: false,
-            resolved: false,
-            suggestedProbability: 0.22,
-          },
-        ]);
+        setCards(DEMO_CARDS);
       });
   }, []);
 
-  if (markets === null) {
+  if (cards === null) {
     return (
       <div className="grid">
         <div className="card skeleton" style={{ height: 140 }}></div>
@@ -62,47 +58,28 @@ export function MarketList() {
     );
   }
 
-  if (markets.length === 0) {
+  if (cards.length === 0) {
     return <p className="muted">no markets yet</p>;
   }
 
-  const matchesFilter = (m: Market) => {
-    const matchesSearch = m.question.toLowerCase().includes(searchQuery.toLowerCase());
-    if (!matchesSearch) return false;
-    
-    if (activeCategory === "all") return true;
-    return categorizeMarket(m) === activeCategory;
-  };
-
-  const allPrimaries = markets.filter((m) => m.marketType === 0);
-  const allWildcards = markets.filter((m) => m.marketType === 1);
-
-  const visiblePrimaries = allPrimaries.filter((primary) => {
-    if (matchesFilter(primary)) return true;
-    const childWildcards = allWildcards.filter((w) => w.parentConditionId === primary.conditionId);
-    return childWildcards.some(matchesFilter);
-  });
-
-  const searchFilteredMarkets = markets.filter((m) =>
-    m.question.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const hubs = selectHubs(cards, { searchQuery, category: activeCategory });
+  const allView = selectHubs(cards, { searchQuery, category: "all" });
+  const sportsView = selectHubs(cards, { searchQuery, category: "sports" });
+  const otherView = selectHubs(cards, { searchQuery, category: "other" });
 
   const categoryCounts = {
-    all: searchFilteredMarkets.length,
-    sports: searchFilteredMarkets.filter((m) => categorizeMarket(m) === "sports").length,
-    other: searchFilteredMarkets.filter((m) => categorizeMarket(m) === "other").length,
+    all: allView.length,
+    sports: sportsView.length,
+    other: otherView.length,
   };
 
   const availableCategories: Category[] = ["all"];
   if (categoryCounts.sports > 0) availableCategories.push("sports");
   if (categoryCounts.other > 0) availableCategories.push("other");
 
-  const orphanWildcards = allWildcards.filter(
-    (w) => matchesFilter(w) && !visiblePrimaries.some((p) => p.conditionId === w.parentConditionId)
-  );
-
-  const hasResults = visiblePrimaries.length > 0 || orphanWildcards.length > 0;
-  const gridStyle = visiblePrimaries.length === 1 ? { maxWidth: 560 } : {};
+  const hasResults = hubs.length > 0;
+  const gridStyle = hubs.length === 1 ? { maxWidth: 560 } : {};
+  const q = searchQuery.toLowerCase();
 
   return (
     <div>
@@ -138,7 +115,9 @@ export function MarketList() {
 
         {searchQuery && (
           <div className="muted" style={{ marginTop: 12, fontSize: 12 }}>
-            {hasResults ? `${visiblePrimaries.length + orphanWildcards.length} result${visiblePrimaries.length + orphanWildcards.length === 1 ? "" : "s"}` : "0 results"}
+            {hasResults
+              ? `${hubs.length} result${hubs.length === 1 ? "" : "s"}`
+              : "0 results"}
           </div>
         )}
       </div>
@@ -151,20 +130,19 @@ export function MarketList() {
         </p>
       ) : (
         <div className="grid" style={gridStyle}>
-          {visiblePrimaries.map((primary) => {
-            const wildcards = allWildcards.filter(
-              (w) => w.parentConditionId === primary.conditionId
-            );
-            const visibleWildcards = wildcards.filter(matchesFilter);
+          {hubs.map((card) => {
+            const chipChildren = q
+              ? card.children.filter((child) => child.question.toLowerCase().includes(q))
+              : card.children;
             return (
-              <div key={primary.conditionId}>
-                <MarketCard market={primary} childCount={wildcards.length} />
-                {visibleWildcards.length > 0 && (
+              <div key={card.primary.conditionId}>
+                <MarketCard market={card.primary} childCount={card.children.length} />
+                {chipChildren.length > 0 && (
                   <div className="muted" style={{ marginTop: 8 }}>
                     Wildcards:{" "}
-                    {visibleWildcards.map((c) => (
-                      <Link key={c.conditionId} href={`/markets/${c.conditionId}`}>
-                        {c.question}{" "}
+                    {chipChildren.map((child) => (
+                      <Link key={child.conditionId} href={`/markets/${child.conditionId}`}>
+                        {child.question}{" "}
                       </Link>
                     ))}
                   </div>
@@ -172,9 +150,6 @@ export function MarketList() {
               </div>
             );
           })}
-          {orphanWildcards.map((m) => (
-            <MarketCard key={m.conditionId} market={m} />
-          ))}
         </div>
       )}
     </div>

@@ -7,10 +7,13 @@
     "/api/v1/auth/siwe": { "post": { "responses": { "200": { "description": "jwt" } } } },
     "/api/v1/auth/privy": { "post": { "responses": { "200": { "description": "jwt" } } } },
     "/api/v1/markets": {
-      "get": { "parameters": [{ "name": "parentId", "in": "query", "schema": { "type": "string" } }], "responses": { "200": { "description": "list" } } },
+      "get": {
+        "parameters": [{ "name": "parentId", "in": "query", "schema": { "type": "string" } }],
+        "responses": { "200": { "description": "EventCard[] of primaries with nested children; orphan wildcards listed alone; parentId returns flat MarketPublic[]" } }
+      },
       "post": { "responses": { "200": { "description": "created" } } }
     },
-    "/api/v1/markets/{condition_id}": { "get": { "responses": { "200": { "description": "market" } } } },
+    "/api/v1/markets/{condition_id}": { "get": { "responses": { "200": { "description": "MarketDetail with children[]" } } } },
     "/api/v1/markets/{condition_id}/pause": { "post": { "responses": { "200": { "description": "paused" } } } },
     "/api/v1/orders": { "post": { "responses": { "200": { "description": "posted" } } } },
     "/api/v1/orders/{order_hash}": { "delete": { "responses": { "200": { "description": "cancelled" } } } },

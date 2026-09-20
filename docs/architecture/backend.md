@@ -10,7 +10,8 @@ pointers:
   - "[backend/app/orderbook/matcher.py : L37-86]"
   - "[backend/app/orderbook/matcher.py : L88-136]"
   - "[backend/app/orderbook/router.py : L28-58]"
-  - "[backend/app/markets/router.py : L44-62]"
+  - "[backend/app/markets/router.py : L59-90]"
+  - "[backend/app/markets/router.py : L93-100]"
   - "[backend/app/amm/router.py : L9-32]"
   - "[backend/app/oracle/router.py : L29-66]"
   - "[backend/app/ramps/router.py : L28-129]"
@@ -38,7 +39,9 @@ pointers:
 
 ## Markets
 
-- [SHIPPED] List/get unpaused markets; operator `POST /markets` and pause. [backend/app/markets/router.py : L24-76]
+- [SHIPPED] `GET /markets` returns EventCard[] of unpaused primaries with nested unpaused wildcard children. Wildcards whose parent is missing or paused list alone. `?parentId=` stays a flat MarketPublic[] filter. [backend/app/markets/router.py : L59-90]
+- [SHIPPED] `GET /markets/{id}` returns MarketDetail with the same child filter; `children` is always present and may be `[]`. [backend/app/markets/router.py : L93-100]
+- [SHIPPED] Operator `POST /markets` and pause. [backend/app/markets/router.py : L104-310]
 - [STUB] Create writes SQLite only. It does not call `MarketFactory.createPrimaryMarket` / `createWildcardMarket`.
 - [PHASE2] Atomic create: operator/relayer submits the factory tx, indexer confirms `MarketCreated`, API returns the on-chain `conditionId`.
 

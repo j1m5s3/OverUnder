@@ -38,7 +38,7 @@ Shared inputs (already in repo, do not fork):
 
 ### Screens (required v1 mobile)
 
-1. **Market list** — primaries as full-width cards; wildcard children as chips under the parent. Pull `GET /api/v1/markets` and `?parentId=`.
+1. **Market list** — primaries as full-width cards; wildcard children as chips under the parent. Pull `GET /api/v1/markets` (EventCard[] of primaries with nested children; orphan wildcards listed alone) and `?parentId=` for a flat child filter.
 2. **Market detail** — type 0 renders a CLOB ticket (bids/asks, limit price 1e6 scale, 75 bps copy). Type 1 renders AMM buy/sell with `quoteBuy` then a wallet `buyWithUSDC` / `sellToUSDC`.
 3. **Wallet** — Privy email OTP + injected EOA. Show USDC, YES/NO balances for open markets, OU + NAV. Coinbase Onramp URL from `GET /api/v1/ramps/onramp-url` until MoonPay ships (section 5).
 4. **Oracle** — attestations, unanimity flag, countdown to `closeTime + 86400`, vote CTA calling `castVote` through the AA wallet.

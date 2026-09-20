@@ -1,6 +1,6 @@
 "use client";
 
-import type { Market } from "./MarketList";
+import type { Market } from "./eventHub";
 
 function formatTimestamp(unixSeconds: number): string {
   return new Date(unixSeconds * 1000).toLocaleString(undefined, {
