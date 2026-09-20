@@ -40,7 +40,15 @@ function calculateImpliedProbability(quote: any, mode: "buy" | "sell", outcome: 
   return null;
 }
 
-export function AmmSwap({ conditionId, initialSide }: { conditionId: string; initialSide?: "yes" | "no" }) {
+export function AmmSwap({
+  conditionId,
+  initialSide,
+  question,
+}: {
+  conditionId: string;
+  initialSide?: "yes" | "no";
+  question?: string;
+}) {
   const [mode, setMode] = useState<"buy" | "sell">("buy");
   const [outcome, setOutcome] = useState<"yes" | "no">(initialSide || "yes");
   const [amount, setAmount] = useState("1.00");
@@ -306,6 +314,7 @@ export function AmmSwap({ conditionId, initialSide }: { conditionId: string; ini
   return (
     <div className="card">
       <h3>Trade</h3>
+      {question ? <p className="muted" style={{ marginTop: 0 }}>{question}</p> : null}
       <p className="muted">1% fee</p>
 
       <div className="row">

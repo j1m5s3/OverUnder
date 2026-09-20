@@ -1,6 +1,14 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { selectHubs, type EventCard, type Market } from "../src/features/markets/eventHub.ts";
+import {
+  applyActiveMarketQuery,
+  hubRoster,
+  resolveActiveConditionId,
+  selectHubs,
+  type EventCard,
+  type Market,
+  type MarketDetailData,
+} from "../src/features/markets/eventHub.ts";
 
 function market(partial: Partial<Market> & Pick<Market, "conditionId" | "question" | "marketType">): Market {
   return {
@@ -88,5 +96,59 @@ describe("selectHubs", () => {
     const orphan = hubs.find((card) => card.primary.conditionId === "0xorphan");
     assert.equal(orphan?.primary.conditionId, "0xorphan");
     assert.deepEqual(orphan?.children, []);
+  });
+});
+
+const electionDetail: MarketDetailData = { ...electionPrimary, children: [chiefsChild] };
+const emptyDetail: MarketDetailData = { ...sportsPrimary, children: [] };
+
+describe("resolveActiveConditionId", () => {
+  it("defaults to the primary when no id is requested", () => {
+    assert.equal(resolveActiveConditionId(electionDetail, null), "0xprimary");
+    assert.equal(resolveActiveConditionId(electionDetail, undefined), "0xprimary");
+  });
+
+  it("returns the primary when the requested id is the primary", () => {
+    assert.equal(resolveActiveConditionId(electionDetail, "0xprimary"), "0xprimary");
+  });
+
+  it("returns a nested child id when the requested id is a child", () => {
+    assert.equal(resolveActiveConditionId(electionDetail, "0xchild"), "0xchild");
+  });
+
+  it("falls back to the primary when the requested id is unknown", () => {
+    assert.equal(resolveActiveConditionId(electionDetail, "0xmissing"), "0xprimary");
+  });
+
+  it("stays on the page market when children are empty", () => {
+    assert.equal(resolveActiveConditionId(emptyDetail, null), "0xsports");
+    assert.equal(resolveActiveConditionId(emptyDetail, "0xotherchild"), "0xsports");
+  });
+});
+
+describe("hubRoster", () => {
+  it("counts the primary plus each nested child", () => {
+    assert.deepEqual(
+      hubRoster(electionDetail).map((row) => row.conditionId),
+      ["0xprimary", "0xchild"],
+    );
+    assert.deepEqual(
+      hubRoster(emptyDetail).map((row) => row.conditionId),
+      ["0xsports"],
+    );
+  });
+});
+
+describe("applyActiveMarketQuery", () => {
+  it("sets m to the child and keeps side", () => {
+    const next = applyActiveMarketQuery(new URLSearchParams("side=no"), "0xprimary", "0xchild");
+    assert.equal(next.get("m"), "0xchild");
+    assert.equal(next.get("side"), "no");
+  });
+
+  it("clears m when the primary is active", () => {
+    const next = applyActiveMarketQuery(new URLSearchParams("m=0xchild&side=yes"), "0xprimary", "0xprimary");
+    assert.equal(next.get("m"), null);
+    assert.equal(next.get("side"), "yes");
   });
 });

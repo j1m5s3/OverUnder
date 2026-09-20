@@ -12,8 +12,10 @@ pointers:
   - "[web/src/features/oracle/OraclePanel.tsx : L6-17]"
   - "[web/src/features/wallet/RampCard.tsx : L8-13]"
   - "[web/src/shared/api/client.ts : L1-11]"
-  - "[web/src/features/markets/MarketList.tsx : L36-157]"
-  - "[web/src/features/markets/eventHub.ts : L26-45]"
+  - "[web/src/features/markets/MarketList.tsx : L36-160]"
+  - "[web/src/features/markets/eventHub.ts : L26-69]"
+  - "[web/src/features/markets/MarketDetail.tsx : L48-139]"
+  - "[web/src/features/trade/AmmSwap.tsx : L43-52]"
   - "[mobile/README.md : L1-25]"
 ---
 
@@ -24,7 +26,8 @@ Next.js App Router under `web/`. Feature folders are the Flutter carryover map.
 ## Shell
 
 - [SHIPPED] Markets home, market detail, portfolio, wallet routes.
-- [SHIPPED] Market list consumes EventCard[]; `childCount` is `children.length`. Tabs categorize the primary only. Missing or paused parents stay as standalone EventCards from the API. [web/src/features/markets/eventHub.ts : L26-45]
+- [SHIPPED] Market list consumes EventCard[]; `childCount` is `children.length`. Tabs categorize the primary only. Missing or paused parents stay as standalone EventCards from the API. List child links stay on the primary route with `?m=`. [web/src/features/markets/eventHub.ts : L26-45]
+- [SHIPPED] Primary detail is the event hub. When `children.length > 0`, a board lists `hubRoster` (primary then children) and the label uses that count. Row click sets `activeConditionId` and writes or clears `?m=` on the primary path. AmmSwap remounts on `activeConditionId` plus `initialSide` and shows the active question. MatchupHero, MarketInfo, and OraclePanel stay on the primary. [web/src/features/markets/MarketDetail.tsx : L83-139]
 - [SHIPPED] `api()` prefixes `NEXT_PUBLIC_API_URL` and attaches `ou_token` bearer. [web/src/shared/api/client.ts : L1-11]
 - [SHIPPED] wagmi config: Anvil/Base Sepolia/Base, **injected connector only** (Coinbase/x402 barrel omitted to keep `next build` green). [web/src/app/providers.tsx : L10-17]
 
@@ -38,7 +41,7 @@ Next.js App Router under `web/`. Feature folders are the Flutter carryover map.
 ## Trade
 
 - [SHIPPED] AmmSwap executes wallet swaps: approve USDC, `buyWithUSDC` with slippage protection. [web/src/features/trade/AmmSwap.tsx : L81-102]
-- [SHIPPED] AmmSwap is the only ticket; used for all markets (primaries and wildcards).
+- [SHIPPED] AmmSwap is the only ticket; used for all markets (primaries and wildcards). The hub passes the active question into the ticket.
 - [PHASE2] OrderTicket posts unsigned orders (`signature: "0x"`, synthetic `orderHash`). [web/src/features/trade/OrderTicket.tsx : L18-39]
 - [PHASE2] EIP-712 typed-data sign for Exchange orders, allowance UX (USDC + setApprovalForAll), and smart-wallet batching (approve+swap).
 
