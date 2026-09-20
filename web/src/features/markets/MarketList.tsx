@@ -16,9 +16,39 @@ export type Market = {
   suggestedProbability: number;
 };
 
+type Category = "all" | "sports" | "other";
+
+function categorizeMarket(market: Market): Category {
+  const q = market.question.toLowerCase();
+  
+  const sportsTokens = [
+    "nfl", "nba", "mlb", "nhl", "mls", "ncaa", "epl", "uefa",
+    "soccer", "football", "basketball", "baseball", "hockey", "tennis",
+    "golf", "boxing", "ufc", "mma", "nascar", "f1", "formula 1",
+    "chiefs", "broncos", "yankees", "red sox", "dodgers", "mets",
+    "lakers", "celtics", "warriors", "knicks",
+    "cowboys", "patriots", "packers", "ravens",
+    "steelers", "seahawks", "chargers",
+    "touchdown", "fumble", "home run", "strikeout", "grand slam",
+    "three-pointer", "slam dunk", "hat trick"
+  ];
+  
+  for (const token of sportsTokens) {
+    const escaped = token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const pattern = new RegExp(`\\b${escaped}\\b`, "i");
+    if (pattern.test(q)) {
+      return "sports";
+    }
+  }
+  
+  return "other";
+}
+
 export function MarketList() {
   const [markets, setMarkets] = useState<Market[] | null>(null);
   const [error, setError] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [activeCategory, setActiveCategory] = useState<Category>("all");
 
   useEffect(() => {
     api("/api/v1/markets")
@@ -63,8 +93,43 @@ export function MarketList() {
     return <p className="muted">no markets yet</p>;
   }
 
-  const primaries = markets.filter((m) => m.marketType === 0);
-  const gridStyle = primaries.length === 1 ? { maxWidth: 560 } : {};
+  const matchesFilter = (m: Market) => {
+    const matchesSearch = m.question.toLowerCase().includes(searchQuery.toLowerCase());
+    if (!matchesSearch) return false;
+    
+    if (activeCategory === "all") return true;
+    return categorizeMarket(m) === activeCategory;
+  };
+
+  const allPrimaries = markets.filter((m) => m.marketType === 0);
+  const allWildcards = markets.filter((m) => m.marketType === 1);
+
+  const visiblePrimaries = allPrimaries.filter((primary) => {
+    if (matchesFilter(primary)) return true;
+    const childWildcards = allWildcards.filter((w) => w.parentConditionId === primary.conditionId);
+    return childWildcards.some(matchesFilter);
+  });
+
+  const searchFilteredMarkets = markets.filter((m) =>
+    m.question.toLowerCase().includes(searchQuery.toLowerCase())
+  );
+
+  const categoryCounts = {
+    all: searchFilteredMarkets.length,
+    sports: searchFilteredMarkets.filter((m) => categorizeMarket(m) === "sports").length,
+    other: searchFilteredMarkets.filter((m) => categorizeMarket(m) === "other").length,
+  };
+
+  const availableCategories: Category[] = ["all"];
+  if (categoryCounts.sports > 0) availableCategories.push("sports");
+  if (categoryCounts.other > 0) availableCategories.push("other");
+
+  const orphanWildcards = allWildcards.filter(
+    (w) => matchesFilter(w) && !visiblePrimaries.some((p) => p.conditionId === w.parentConditionId)
+  );
+
+  const hasResults = visiblePrimaries.length > 0 || orphanWildcards.length > 0;
+  const gridStyle = visiblePrimaries.length === 1 ? { maxWidth: 560 } : {};
 
   return (
     <div>
@@ -73,29 +138,71 @@ export function MarketList() {
           {error}
         </div>
       ) : null}
-      <div className="grid" style={gridStyle}>
-        {primaries.map((m) => {
-          const wildcards = markets.filter((c) => c.parentConditionId === m.conditionId);
-          return (
-            <div key={m.conditionId}>
-              <MarketCard market={m} />
-              {wildcards.length > 0 && (
-                <div className="muted" style={{ marginTop: 8 }}>
-                  Wildcards:{" "}
-                  {wildcards.map((c) => (
-                    <Link key={c.conditionId} href={`/markets/${c.conditionId}`}>
-                      {c.question}{" "}
-                    </Link>
-                  ))}
-                </div>
-              )}
-            </div>
-          );
-        })}
-        {primaries.length === 0
-          ? markets.map((m) => <MarketCard key={m.conditionId} market={m} />)
-          : null}
+
+      <div style={{ marginBottom: 20 }}>
+        <input
+          type="search"
+          placeholder="Search markets..."
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          style={{ marginBottom: 16 }}
+        />
+
+        {availableCategories.length > 1 && (
+          <div className="category-tabs">
+            {availableCategories.map((cat) => (
+              <button
+                key={cat}
+                className={`category-tab ${activeCategory === cat ? "active" : ""}`}
+                onClick={() => setActiveCategory(cat)}
+              >
+                {cat.charAt(0).toUpperCase() + cat.slice(1)}
+                <span className="category-count">{categoryCounts[cat]}</span>
+              </button>
+            ))}
+          </div>
+        )}
+
+        {searchQuery && (
+          <div className="muted" style={{ marginTop: 12, fontSize: 12 }}>
+            {hasResults ? `${visiblePrimaries.length + orphanWildcards.length} result${visiblePrimaries.length + orphanWildcards.length === 1 ? "" : "s"}` : "0 results"}
+          </div>
+        )}
       </div>
+
+      {!hasResults ? (
+        <p className="muted">
+          {searchQuery
+            ? "no markets match your search"
+            : "no markets in this category"}
+        </p>
+      ) : (
+        <div className="grid" style={gridStyle}>
+          {visiblePrimaries.map((primary) => {
+            const wildcards = allWildcards.filter(
+              (w) => w.parentConditionId === primary.conditionId && matchesFilter(w)
+            );
+            return (
+              <div key={primary.conditionId}>
+                <MarketCard market={primary} />
+                {wildcards.length > 0 && (
+                  <div className="muted" style={{ marginTop: 8 }}>
+                    Wildcards:{" "}
+                    {wildcards.map((c) => (
+                      <Link key={c.conditionId} href={`/markets/${c.conditionId}`}>
+                        {c.question}{" "}
+                      </Link>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+          {orphanWildcards.map((m) => (
+            <MarketCard key={m.conditionId} market={m} />
+          ))}
+        </div>
+      )}
     </div>
   );
 }
