@@ -63,7 +63,7 @@ export default function PortfolioPage() {
     return (
       <div>
         <h1>My Bets</h1>
-        <p className="muted">Loading positions...</p>
+        <p className="muted">Loading your bets...</p>
       </div>
     );
   }
@@ -105,7 +105,7 @@ export default function PortfolioPage() {
         <ul>
           {activePositions.map((position, idx) => (
             <li key={`${position.conditionId}-${position.outcome}-${idx}`}>
-              <strong>{position.question}</strong> — {position.side} — {(position.sizeMicros / 1_000_000).toFixed(2)} tokens
+              <strong>{position.question}</strong> — {position.side} — {(position.sizeMicros / 1_000_000).toFixed(2)} shares
             </li>
           ))}
         </ul>
