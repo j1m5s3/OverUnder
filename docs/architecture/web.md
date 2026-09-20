@@ -12,8 +12,8 @@ pointers:
   - "[web/src/features/oracle/OraclePanel.tsx : L6-17]"
   - "[web/src/features/wallet/RampCard.tsx : L8-13]"
   - "[web/src/shared/api/client.ts : L1-11]"
-  - "[web/src/features/markets/MarketList.tsx : L36-160]"
-  - "[web/src/features/markets/eventHub.ts : L26-56]"
+  - "[web/src/features/markets/MarketList.tsx : L36-157]"
+  - "[web/src/features/markets/eventHub.ts : L26-45]"
   - "[mobile/README.md : L1-25]"
 ---
 
@@ -24,7 +24,7 @@ Next.js App Router under `web/`. Feature folders are the Flutter carryover map.
 ## Shell
 
 - [SHIPPED] Markets home, market detail, portfolio, wallet routes.
-- [SHIPPED] Market list consumes EventCard[]; `childCount` is `children.length`. Tabs categorize the primary only. Orphans whose parent is missing, paused, or filtered out stay as standalone cards. [web/src/features/markets/eventHub.ts : L26-56]
+- [SHIPPED] Market list consumes EventCard[]; `childCount` is `children.length`. Tabs categorize the primary only. Missing or paused parents stay as standalone EventCards from the API. [web/src/features/markets/eventHub.ts : L26-45]
 - [SHIPPED] `api()` prefixes `NEXT_PUBLIC_API_URL` and attaches `ou_token` bearer. [web/src/shared/api/client.ts : L1-11]
 - [SHIPPED] wagmi config: Anvil/Base Sepolia/Base, **injected connector only** (Coinbase/x402 barrel omitted to keep `next build` green). [web/src/app/providers.tsx : L10-17]
 

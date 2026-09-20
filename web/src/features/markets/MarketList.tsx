@@ -62,23 +62,23 @@ export function MarketList() {
     return <p className="muted">no markets yet</p>;
   }
 
-  const { hubs, orphans } = selectHubs(cards, { searchQuery, category: activeCategory });
+  const hubs = selectHubs(cards, { searchQuery, category: activeCategory });
   const allView = selectHubs(cards, { searchQuery, category: "all" });
   const sportsView = selectHubs(cards, { searchQuery, category: "sports" });
   const otherView = selectHubs(cards, { searchQuery, category: "other" });
 
   const categoryCounts = {
-    all: allView.hubs.length + allView.orphans.length,
-    sports: sportsView.hubs.length + sportsView.orphans.length,
-    other: otherView.hubs.length + otherView.orphans.length,
+    all: allView.length,
+    sports: sportsView.length,
+    other: otherView.length,
   };
 
   const availableCategories: Category[] = ["all"];
   if (categoryCounts.sports > 0) availableCategories.push("sports");
   if (categoryCounts.other > 0) availableCategories.push("other");
 
-  const hasResults = hubs.length > 0 || orphans.length > 0;
-  const gridStyle = hubs.length === 1 && orphans.length === 0 ? { maxWidth: 560 } : {};
+  const hasResults = hubs.length > 0;
+  const gridStyle = hubs.length === 1 ? { maxWidth: 560 } : {};
   const q = searchQuery.toLowerCase();
 
   return (
@@ -116,7 +116,7 @@ export function MarketList() {
         {searchQuery && (
           <div className="muted" style={{ marginTop: 12, fontSize: 12 }}>
             {hasResults
-              ? `${hubs.length + orphans.length} result${hubs.length + orphans.length === 1 ? "" : "s"}`
+              ? `${hubs.length} result${hubs.length === 1 ? "" : "s"}`
               : "0 results"}
           </div>
         )}
@@ -150,9 +150,6 @@ export function MarketList() {
               </div>
             );
           })}
-          {orphans.map((row) => (
-            <MarketCard key={row.conditionId} market={row} />
-          ))}
         </div>
       )}
     </div>
