@@ -10,16 +10,17 @@ from app.models import LiveScore, Market, User
 
 PRIMARY = "0x" + "b0" * 32
 WILDCARD = "0x" + "b1" * 32
+NONSPORTS = "0x" + "b2" * 32
 OP = "0x" + "0e" * 20
 NONOP = "0x" + "1e" * 20
-SEED_IDS = (PRIMARY, WILDCARD)
+SEED_IDS = (PRIMARY, WILDCARD, NONSPORTS)
 
 
-def _market(condition_id: str, market_type: int, parent: str = "") -> Market:
+def _market(condition_id: str, market_type: int, parent: str = "", question: str = "Chiefs vs Broncos: Chiefs win?") -> Market:
     return Market(
         condition_id=condition_id,
         parent_condition_id=parent,
-        question="Chiefs vs Broncos: Chiefs win?",
+        question=question,
         resolution_criteria="",
         market_type=market_type,
         close_time=2_000_000_000,
@@ -49,6 +50,7 @@ async def client():
             [
                 _market(PRIMARY, 0),
                 _market(WILDCARD, 1, parent=PRIMARY),
+                _market(NONSPORTS, 0, question="Will the bill pass the Senate?"),
                 User(address=OP, is_operator=True),
                 User(address=NONOP, is_operator=False),
             ]
@@ -116,7 +118,9 @@ async def test_upsert_updates_existing_row(client):
 async def test_detail_null_when_absent(client):
     detail = await client.get(f"/api/v1/markets/{PRIMARY}")
     assert detail.status_code == 200
-    assert detail.json()["score"] is None
+    body = detail.json()
+    assert "score" in body
+    assert body["score"] is None
 
 
 @pytest.mark.asyncio
@@ -129,6 +133,51 @@ async def test_scheduled_null_scores_allowed(client):
     assert r.status_code == 200
     assert r.json()["homeScore"] is None
     assert r.json()["awayScore"] is None
+    detail = await client.get(f"/api/v1/markets/{PRIMARY}")
+    assert detail.status_code == 200
+    assert detail.json()["score"]["homeScore"] is None
+    assert detail.json()["score"]["awayScore"] is None
+
+
+@pytest.mark.asyncio
+async def test_scheduled_zero_zero_rejected_but_live_zero_zero_allowed(client):
+    invented = {
+        "homeLabel": "Chiefs",
+        "awayLabel": "Broncos",
+        "homeScore": 0,
+        "awayScore": 0,
+        "status": "scheduled",
+    }
+    r = await client.post(f"/api/v1/markets/{PRIMARY}/score", headers=_op_headers(), json=invented)
+    assert r.status_code == 400
+    live = {**invented, "status": "in_progress", "periodLabel": "Q1"}
+    ok = await client.post(f"/api/v1/markets/{PRIMARY}/score", headers=_op_headers(), json=live)
+    assert ok.status_code == 200
+    assert ok.json()["homeScore"] == 0
+    assert ok.json()["awayScore"] == 0
+
+
+@pytest.mark.asyncio
+async def test_non_sports_primary_write_rejected_and_detail_null(client):
+    r = await client.post(
+        f"/api/v1/markets/{NONSPORTS}/score",
+        headers=_op_headers(),
+        json={"homeLabel": "Yes", "awayLabel": "No", "status": "scheduled"},
+    )
+    assert r.status_code == 400
+    detail = await client.get(f"/api/v1/markets/{NONSPORTS}")
+    assert detail.status_code == 200
+    assert detail.json()["score"] is None
+
+
+def test_sports_gate_mirrors_web_heuristic():
+    from app.markets.sports import is_sports_market
+
+    assert is_sports_market("Chiefs vs Broncos: Chiefs win?")
+    assert is_sports_market("Lakers vs Celtics: over 220 points?")
+    assert not is_sports_market("Will the bill pass the Senate?")
+    assert not is_sports_market("")
+    assert not is_sports_market(None)
 
 
 @pytest.mark.asyncio

@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.router import require_operator
 from app.db import get_db
+from app.markets.sports import is_sports_market
 from app.models import LiveScore, Market, User
 
 router = APIRouter(prefix="/markets", tags=["markets"])
@@ -157,6 +158,10 @@ async def upsert_score(
         raise HTTPException(404, "market not found")
     if m.market_type != 0:
         raise HTTPException(400, "scores only on primaries")
+    if not is_sports_market(m.question):
+        raise HTTPException(400, "scores only on sports primaries")
+    if body.status == "scheduled" and body.homeScore == 0 and body.awayScore == 0:
+        raise HTTPException(400, "scheduled games have no score yet")
     now = datetime.now(timezone.utc)
     row = await db.get(LiveScore, condition_id)
     if row is None:
