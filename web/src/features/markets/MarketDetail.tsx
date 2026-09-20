@@ -81,6 +81,7 @@ export function MarketDetail({ conditionId }: { conditionId: string }) {
   const activeMarket = hubRows.find((row) => row.conditionId === activeConditionId) ?? market;
 
   function selectRow(id: string) {
+    if (!market) return;
     setActiveConditionId(id);
     const next = applyActiveMarketQuery(searchParams, market.conditionId, id);
     const query = next.toString();
