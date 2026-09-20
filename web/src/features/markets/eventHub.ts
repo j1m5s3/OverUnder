@@ -16,7 +16,20 @@ export type EventCard = {
   children: Market[];
 };
 
-export type MarketDetailData = Market & { children: Market[] };
+export type ScoreStatus = "scheduled" | "in_progress" | "final" | "postponed" | "cancelled";
+
+export type LiveScore = {
+  conditionId: string;
+  homeLabel: string;
+  awayLabel: string;
+  homeScore: number | null;
+  awayScore: number | null;
+  status: ScoreStatus;
+  periodLabel: string | null;
+  updatedAt: string;
+};
+
+export type MarketDetailData = Market & { children: Market[]; score?: LiveScore | null };
 
 export function matchesSearch(market: Market, searchQuery: string): boolean {
   if (!searchQuery) return true;

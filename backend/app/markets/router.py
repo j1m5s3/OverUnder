@@ -1,3 +1,6 @@
+from datetime import datetime, timezone
+from typing import Literal
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import and_, select
@@ -5,7 +8,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.router import require_operator
 from app.db import get_db
-from app.models import Market, User
+from app.markets.sports import is_sports_market
+from app.models import LiveScore, Market, User
 
 router = APIRouter(prefix="/markets", tags=["markets"])
 
@@ -35,8 +39,23 @@ class MarketPublic(BaseModel):
     suggestedProbability: float = 0.5
 
 
+class LiveScoreIn(BaseModel):
+    homeLabel: str = Field(min_length=1, max_length=128)
+    awayLabel: str = Field(min_length=1, max_length=128)
+    homeScore: int | None = Field(default=None, ge=0)
+    awayScore: int | None = Field(default=None, ge=0)
+    status: Literal["scheduled", "in_progress", "final", "postponed", "cancelled"] = "scheduled"
+    periodLabel: str | None = Field(default=None, max_length=16)
+
+
+class LiveScorePublic(LiveScoreIn):
+    conditionId: str
+    updatedAt: datetime
+
+
 class MarketDetail(MarketPublic):
     children: list[MarketPublic]
+    score: LiveScorePublic | None = None
 
 
 class EventCard(BaseModel):
@@ -123,7 +142,50 @@ async def get_market(condition_id: str, db: AsyncSession = Depends(get_db)) -> M
         raise HTTPException(404, "market not found")
     kids = (await db.execute(select(Market).where(_child_of(m.condition_id)).order_by(Market.condition_id))).scalars().all()
     public = _to_public(m)
-    return MarketDetail(**public.model_dump(), children=[_to_public(c) for c in kids])
+    score = await _get_score(db, m)
+    return MarketDetail(**public.model_dump(), children=[_to_public(c) for c in kids], score=score)
+
+
+@router.post("/{condition_id}/score")
+async def upsert_score(
+    condition_id: str,
+    body: LiveScoreIn,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(require_operator),
+) -> LiveScorePublic:
+    m = await db.get(Market, condition_id)
+    if m is None:
+        raise HTTPException(404, "market not found")
+    if m.market_type != 0:
+        raise HTTPException(400, "scores only on primaries")
+    if not is_sports_market(m.question):
+        raise HTTPException(400, "scores only on sports primaries")
+    if body.status == "scheduled" and body.homeScore == 0 and body.awayScore == 0:
+        raise HTTPException(400, "scheduled games have no score yet")
+    now = datetime.now(timezone.utc)
+    row = await db.get(LiveScore, condition_id)
+    if row is None:
+        row = LiveScore(
+            condition_id=condition_id,
+            home_label=body.homeLabel,
+            away_label=body.awayLabel,
+            home_score=body.homeScore,
+            away_score=body.awayScore,
+            status=body.status,
+            period_label=body.periodLabel,
+            updated_at=now,
+        )
+        db.add(row)
+    else:
+        row.home_label = body.homeLabel
+        row.away_label = body.awayLabel
+        row.home_score = body.homeScore
+        row.away_score = body.awayScore
+        row.status = body.status
+        row.period_label = body.periodLabel
+        row.updated_at = now
+    await db.commit()
+    return _to_score(row)
 
 
 @router.post("")
@@ -338,6 +400,28 @@ async def pause_market(
 
 def _to_public(m: Market) -> MarketPublic:
     return MarketPublic.model_validate(_public(m))
+
+
+async def _get_score(db: AsyncSession, m: Market) -> LiveScorePublic | None:
+    if m.market_type != 0:
+        return None
+    row = await db.get(LiveScore, m.condition_id)
+    if row is None:
+        return None
+    return _to_score(row)
+
+
+def _to_score(row: LiveScore) -> LiveScorePublic:
+    return LiveScorePublic(
+        conditionId=row.condition_id,
+        homeLabel=row.home_label,
+        awayLabel=row.away_label,
+        homeScore=row.home_score,
+        awayScore=row.away_score,
+        status=row.status,  # type: ignore[arg-type]
+        periodLabel=row.period_label,
+        updatedAt=row.updated_at,
+    )
 
 
 def _public(m: Market) -> dict:

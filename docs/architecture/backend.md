@@ -11,7 +11,9 @@ pointers:
   - "[backend/app/orderbook/matcher.py : L88-136]"
   - "[backend/app/orderbook/router.py : L28-58]"
   - "[backend/app/markets/router.py : L59-90]"
-  - "[backend/app/markets/router.py : L93-100]"
+  - "[backend/app/markets/router.py : L137-145]"
+  - "[backend/app/markets/router.py : L149-188]"
+  - "[backend/app/markets/sports.py : L58-65]"
   - "[backend/app/amm/router.py : L9-32]"
   - "[backend/app/oracle/router.py : L29-66]"
   - "[backend/app/ramps/router.py : L28-129]"
@@ -20,7 +22,8 @@ pointers:
   - "[backend/app/portfolio/router.py : L13-61]"
   - "[backend/app/config.py : L9-40]"
   - "[backend/app/models.py : L96-103]"
-  - "[backend/app/markets/router.py : L99-116]"
+  - "[backend/app/models.py : L106-115]"
+  - "[backend/app/markets/router.py : L117-135]"
   - "[backend/app/indexer/listener.py : L20-49]"
   - "[backend/app/indexer/listener.py : L175-237]"
 ---
@@ -42,8 +45,9 @@ pointers:
 ## Markets
 
 - [SHIPPED] `GET /markets` returns EventCard[] of unpaused primaries with nested unpaused wildcard children. Wildcards whose parent is missing or paused list alone. `?parentId=` stays a flat MarketPublic[] filter. [backend/app/markets/router.py : L59-90]
-- [SHIPPED] `GET /markets/{id}` returns MarketDetail with the same child filter; `children` is always present and may be `[]`. [backend/app/markets/router.py : L93-100]
-- [SHIPPED] Operator `POST /markets` and pause. [backend/app/markets/router.py : L104-310]
+- [SHIPPED] `GET /markets/{id}` returns MarketDetail with the same child filter; `children` is always present and may be `[]`. [backend/app/markets/router.py : L137-145]
+- [SHIPPED] Operator-fed LiveScore on sports primaries only: `POST /markets/{id}/score` (`require_operator`) rejects wildcards and non-sports questions server-side via the sports allowlist, rejects invented `scheduled` 0–0, and upserts labels, nullable scores, status, and display-only period; `MarketDetail.score` embeds it, `null` when absent, always `null` on wildcards — nulls are never coerced to 0. [backend/app/markets/router.py : L149-188]
+- [SHIPPED] Operator `POST /markets` and pause. [backend/app/markets/router.py : L191-398]
 - [STUB] Create writes SQLite only. It does not call `MarketFactory.createPrimaryMarket` / `createWildcardMarket`.
 - [PHASE2] Atomic create: operator/relayer submits the factory tx, indexer confirms `MarketCreated`, API returns the on-chain `conditionId`.
 
