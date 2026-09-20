@@ -46,7 +46,7 @@ export default function PortfolioPage() {
   if (!isConnected) {
     return (
       <div>
-        <h1>Portfolio</h1>
+        <h1>My Bets</h1>
         <div className="card" style={{ textAlign: "center", padding: "48px 24px" }}>
           <p className="muted" style={{ marginBottom: "16px" }}>
             Connect to see your bets.
@@ -62,7 +62,7 @@ export default function PortfolioPage() {
   if (loading || (!data && !error)) {
     return (
       <div>
-        <h1>Portfolio</h1>
+        <h1>My Bets</h1>
         <p className="muted">Loading positions...</p>
       </div>
     );
@@ -71,8 +71,8 @@ export default function PortfolioPage() {
   if (error) {
     return (
       <div>
-        <h1>Portfolio</h1>
-        <p className="muted">Failed to load portfolio. Please try again.</p>
+        <h1>My Bets</h1>
+        <p className="muted">Failed to load your bets. Please try again.</p>
       </div>
     );
   }
@@ -83,7 +83,7 @@ export default function PortfolioPage() {
   if (activePositions.length === 0) {
     return (
       <div>
-        <h1>Portfolio</h1>
+        <h1>My Bets</h1>
         <div className="card" style={{ textAlign: "center", padding: "48px 24px" }}>
           <p className="muted" style={{ marginBottom: "16px" }}>
             No open bets yet.
@@ -98,7 +98,7 @@ export default function PortfolioPage() {
 
   return (
     <div>
-      <h1>Portfolio</h1>
+      <h1>My Bets</h1>
       <p className="muted">{address}</p>
       <div>
         <h2>Open Bets</h2>
