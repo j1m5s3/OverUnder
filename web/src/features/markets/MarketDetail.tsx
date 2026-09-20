@@ -5,6 +5,9 @@ import { useSearchParams } from "next/navigation";
 import { api } from "@/shared/api/client";
 import { AmmSwap } from "@/features/trade/AmmSwap";
 import { OraclePanel } from "@/features/oracle/OraclePanel";
+import { MatchupHero } from "./MatchupHero";
+import { MarketInfo } from "./MarketInfo";
+import { isSportsMarket } from "@/shared/utils/categorize";
 import type { Market } from "./MarketList";
 
 export function MarketDetail({ conditionId }: { conditionId: string }) {
@@ -40,11 +43,30 @@ export function MarketDetail({ conditionId }: { conditionId: string }) {
       </div>
     );
   }
+  
+  const showMatchup = isSportsMarket(market.question);
+  
   return (
-    <div>
-      <h1>{market.question}</h1>
-      <AmmSwap key={initialSide ?? "yes"} conditionId={market.conditionId} initialSide={initialSide} />
-      <OraclePanel conditionId={market.conditionId} />
+    <div className="market-detail-layout">
+      <div className="market-header">
+        {showMatchup ? (
+          <>
+            <MatchupHero question={market.question} />
+            <h2 style={{ fontSize: "20px", fontWeight: 600, marginBottom: "16px" }}>{market.question}</h2>
+          </>
+        ) : (
+          <h1>{market.question}</h1>
+        )}
+      </div>
+      <div className="market-sidebar">
+        <div className="sticky-ticket">
+          <AmmSwap key={initialSide ?? "yes"} conditionId={market.conditionId} initialSide={initialSide} />
+        </div>
+      </div>
+      <div className="market-content">
+        <MarketInfo market={market} />
+        <OraclePanel conditionId={market.conditionId} />
+      </div>
     </div>
   );
 }

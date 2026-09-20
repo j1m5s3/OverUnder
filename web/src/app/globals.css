@@ -44,9 +44,34 @@ details[open] summary::before { transform: rotate(90deg); }
 .category-tab.active { background: var(--accent); border-color: var(--accent); color: white; }
 .category-count { margin-left: 6px; opacity: 0.7; font-size: 12px; }
 
+.market-detail-layout { 
+  display: grid; 
+  grid-template-columns: 1fr; 
+  gap: 16px; 
+}
+
 @keyframes skeleton-loading {
   0% { background-position: 200% 0; }
   100% { background-position: -200% 0; }
+}
+
+@media (min-width: 768px) {
+  .market-detail-layout {
+    grid-template-columns: 1fr 400px;
+    grid-template-areas:
+      "header header"
+      "content sidebar";
+    gap: 24px;
+  }
+  
+  .market-header { grid-area: header; }
+  .market-content { grid-area: content; }
+  .market-sidebar { grid-area: sidebar; }
+  
+  .sticky-ticket {
+    position: sticky;
+    top: 24px;
+  }
 }
 
 @media (max-width: 640px) {

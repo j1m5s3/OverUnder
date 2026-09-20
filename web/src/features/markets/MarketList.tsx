@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { api } from "@/shared/api/client";
 import { MarketCard } from "./MarketCard";
+import { categorizeMarket, type Category } from "@/shared/utils/categorize";
 
 export type Market = {
   conditionId: string;
@@ -15,34 +16,6 @@ export type Market = {
   resolved: boolean;
   suggestedProbability: number;
 };
-
-type Category = "all" | "sports" | "other";
-
-function categorizeMarket(market: Market): Category {
-  const q = market.question.toLowerCase();
-  
-  const sportsTokens = [
-    "nfl", "nba", "mlb", "nhl", "mls", "ncaa", "epl", "uefa",
-    "soccer", "football", "basketball", "baseball", "hockey", "tennis",
-    "golf", "boxing", "ufc", "mma", "nascar", "f1", "formula 1",
-    "chiefs", "broncos", "yankees", "red sox", "dodgers", "mets",
-    "lakers", "celtics", "warriors", "knicks",
-    "cowboys", "patriots", "packers", "ravens",
-    "steelers", "seahawks", "chargers",
-    "touchdown", "fumble", "home run", "strikeout", "grand slam",
-    "three-pointer", "slam dunk", "hat trick"
-  ];
-  
-  for (const token of sportsTokens) {
-    const escaped = token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    const pattern = new RegExp(`\\b${escaped}\\b`, "i");
-    if (pattern.test(q)) {
-      return "sports";
-    }
-  }
-  
-  return "other";
-}
 
 export function MarketList() {
   const [markets, setMarkets] = useState<Market[] | null>(null);

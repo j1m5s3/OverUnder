@@ -23,6 +23,23 @@ const CTF_ABI = parseAbi([
   "function positionId(bytes32 conditionId, uint8 outcome) external view returns (uint256)",
 ]);
 
+function formatMultiplier(probability: number): string {
+  if (!Number.isFinite(probability) || probability <= 0 || probability >= 1) return "—";
+  const multiplier = 1 / probability;
+  return multiplier < 10 ? multiplier.toFixed(2) : multiplier.toFixed(1);
+}
+
+function calculateImpliedProbability(quote: any, mode: "buy" | "sell", outcome: "yes" | "no", amountNum: number): number | null {
+  if (!quote || amountNum <= 0) return null;
+  
+  if (mode === "buy" && quote.tokensOut) {
+    const tokensOut = quote.tokensOut / 1_000_000;
+    return tokensOut > 0 ? amountNum / tokensOut : null;
+  }
+  
+  return null;
+}
+
 export function AmmSwap({ conditionId, initialSide }: { conditionId: string; initialSide?: "yes" | "no" }) {
   const [mode, setMode] = useState<"buy" | "sell">("buy");
   const [outcome, setOutcome] = useState<"yes" | "no">(initialSide || "yes");
@@ -277,22 +294,63 @@ export function AmmSwap({ conditionId, initialSide }: { conditionId: string; ini
     ? "stake ($)" 
     : `amount (${outcome})`;
 
+  const amountNum = parseFloat(amount);
+  const impliedProb = calculateImpliedProbability(quote, mode, outcome, amountNum);
+  const multiplier = impliedProb ? formatMultiplier(impliedProb) : null;
+
+  function addStake(chipAmount: number) {
+    const current = parseFloat(amount) || 0;
+    setAmount((current + chipAmount).toFixed(2));
+  }
+
   return (
     <div className="card">
       <h3>Trade</h3>
       <p className="muted">1% fee</p>
 
       <div className="row">
-        <button className={outcome === "yes" ? "btn yes" : "btn ghost"} onClick={() => setOutcome("yes")}>
-          Yes
+        <button 
+          className={outcome === "yes" ? "btn yes" : "btn ghost"} 
+          onClick={() => setOutcome("yes")}
+          style={{ flex: 1, position: "relative" }}
+        >
+          <div>Yes</div>
+          {mode === "buy" && multiplier && outcome === "yes" && (
+            <div style={{ fontSize: "11px", marginTop: "2px", opacity: 0.8 }}>
+              {multiplier}×
+            </div>
+          )}
         </button>
-        <button className={outcome === "no" ? "btn no" : "btn ghost"} onClick={() => setOutcome("no")}>
-          No
+        <button 
+          className={outcome === "no" ? "btn no" : "btn ghost"} 
+          onClick={() => setOutcome("no")}
+          style={{ flex: 1, position: "relative" }}
+        >
+          <div>No</div>
+          {mode === "buy" && multiplier && outcome === "no" && (
+            <div style={{ fontSize: "11px", marginTop: "2px", opacity: 0.8 }}>
+              {multiplier}×
+            </div>
+          )}
         </button>
       </div>
 
       <label className="muted">{amountLabel}</label>
       <input value={amount} onChange={(e) => setAmount(e.target.value)} />
+      
+      {mode === "buy" && (
+        <div className="row" style={{ marginTop: 8 }}>
+          <button className="btn ghost" style={{ fontSize: 12, padding: "6px 10px" }} onClick={() => addStake(5)}>
+            +$5
+          </button>
+          <button className="btn ghost" style={{ fontSize: 12, padding: "6px 10px" }} onClick={() => addStake(10)}>
+            +$10
+          </button>
+          <button className="btn ghost" style={{ fontSize: 12, padding: "6px 10px" }} onClick={() => addStake(25)}>
+            +$25
+          </button>
+        </div>
+      )}
       
       {quoting && (
         <p className="muted" style={{ marginTop: 12 }}>quoting...</p>
