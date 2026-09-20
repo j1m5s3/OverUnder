@@ -68,3 +68,16 @@ async def test_siwe_and_create_market(client):
     book = await client.get(f"/api/v1/orderbook/0x{'ab' * 32}")
     assert book.status_code == 200
     assert len(book.json()["bids"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_portfolio_structure(client):
+    addr = "0x" + "22" * 20
+    r = await client.get(f"/api/v1/portfolio/{addr}")
+    assert r.status_code == 200
+    data = r.json()
+    assert "address" in data
+    assert "positions" in data
+    assert "openOrders" in data
+    assert "trades" in data
+    assert isinstance(data["positions"], list)
