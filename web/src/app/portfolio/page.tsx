@@ -5,19 +5,41 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { api } from "@/shared/api/client";
 
+interface Position {
+  question: string;
+  side: "YES" | "NO";
+  sizeMicros: number;
+  conditionId: string;
+  outcome: number;
+}
+
+interface PortfolioData {
+  address: string;
+  positions: Position[];
+  openOrders: any[];
+  trades: any[];
+}
+
 export default function PortfolioPage() {
   const { address, isConnected } = useAccount();
   const { connect, connectors } = useConnect();
-  const [data, setData] = useState<any>(null);
+  const [data, setData] = useState<PortfolioData | null>(null);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(false);
 
   useEffect(() => {
     if (address) {
       setLoading(true);
+      setError(false);
       api(`/api/v1/portfolio/${address.toLowerCase()}`)
-        .then(setData)
-        .catch(() => setData(null))
-        .finally(() => setLoading(false));
+        .then((response: PortfolioData) => {
+          setData(response);
+          setLoading(false);
+        })
+        .catch(() => {
+          setError(true);
+          setLoading(false);
+        });
     }
   }, [address]);
 
@@ -37,7 +59,7 @@ export default function PortfolioPage() {
     );
   }
 
-  if (loading) {
+  if (loading || (!data && !error)) {
     return (
       <div>
         <h1>Portfolio</h1>
@@ -46,9 +68,19 @@ export default function PortfolioPage() {
     );
   }
 
-  const positions = data?.positions || [];
+  if (error) {
+    return (
+      <div>
+        <h1>Portfolio</h1>
+        <p className="muted">Failed to load portfolio. Please try again.</p>
+      </div>
+    );
+  }
 
-  if (positions.length === 0) {
+  // Filter out zero/dust positions - only after successful data fetch
+  const activePositions = (data?.positions || []).filter((p) => p.sizeMicros > 0);
+
+  if (activePositions.length === 0) {
     return (
       <div>
         <h1>Portfolio</h1>
@@ -68,7 +100,16 @@ export default function PortfolioPage() {
     <div>
       <h1>Portfolio</h1>
       <p className="muted">{address}</p>
-      <pre className="card">{JSON.stringify(data, null, 2)}</pre>
+      <div>
+        <h2>Open Bets</h2>
+        <ul>
+          {activePositions.map((position, idx) => (
+            <li key={`${position.conditionId}-${position.outcome}-${idx}`}>
+              <strong>{position.question}</strong> — {position.side} — {(position.sizeMicros / 1_000_000).toFixed(2)} tokens
+            </li>
+          ))}
+        </ul>
+      </div>
     </div>
   );
 }
