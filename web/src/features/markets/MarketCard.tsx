@@ -36,14 +36,16 @@ export function MarketCard({ market, childCount }: { market: Market; childCount?
   const noMultiplier = formatMultiplier(noProb);
   
   const matchup = parseMatchup(market.question);
-  const displayTitle = matchup 
-    ? `${matchup.teamA} vs ${matchup.teamB}` 
-    : market.question;
   
   return (
     <div className="card">
       <Link href={`/markets/${encodeURIComponent(market.conditionId)}`} style={{ display: "block", marginBottom: 8 }}>
-        <h3 style={{ marginBottom: 4, fontSize: 16, lineHeight: 1.3 }}>{displayTitle}</h3>
+        {matchup && (
+          <div className="muted" style={{ fontSize: 10, marginBottom: 3, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+            {matchup.teamA} vs {matchup.teamB}
+          </div>
+        )}
+        <h3 style={{ marginBottom: 4, fontSize: 16, lineHeight: 1.3 }}>{market.question}</h3>
         <div className="muted" style={{ fontSize: 11 }}>{formatCloseTime(market.closeTime)}</div>
       </Link>
       
