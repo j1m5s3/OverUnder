@@ -34,6 +34,10 @@ input { background: var(--bg-elevated); color: var(--text); border: 1px solid va
 .muted { color: var(--muted); font-size: 13px; }
 .skeleton { background: linear-gradient(90deg, var(--bg-card) 25%, var(--bg-elevated) 50%, var(--bg-card) 75%); background-size: 200% 100%; animation: skeleton-loading 1.5s infinite; border-radius: 8px; }
 .banner { background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 8px; padding: 12px; color: var(--muted); font-size: 14px; }
+details summary { list-style: none; position: relative; padding-left: 20px; }
+details summary::-webkit-details-marker { display: none; }
+details summary::before { content: '›'; position: absolute; left: 0; font-weight: bold; transition: transform 0.15s; }
+details[open] summary::before { transform: rotate(90deg); }
 
 @keyframes skeleton-loading {
   0% { background-position: 200% 0; }
