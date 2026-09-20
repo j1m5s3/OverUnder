@@ -52,3 +52,18 @@ export function resolveActiveConditionId(
   const nested = detail.children.some((row) => row.conditionId === requestedId);
   return nested ? requestedId : detail.conditionId;
 }
+
+export function hubRoster(detail: MarketDetailData): Market[] {
+  return [detail, ...detail.children];
+}
+
+export function applyActiveMarketQuery(
+  params: { toString(): string },
+  primaryId: string,
+  activeId: string,
+): URLSearchParams {
+  const next = new URLSearchParams(params.toString());
+  if (activeId === primaryId) next.delete("m");
+  else next.set("m", activeId);
+  return next;
+}

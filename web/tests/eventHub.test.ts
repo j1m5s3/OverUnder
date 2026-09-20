@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  applyActiveMarketQuery,
+  hubRoster,
   resolveActiveConditionId,
   selectHubs,
   type EventCard,
@@ -121,5 +123,32 @@ describe("resolveActiveConditionId", () => {
   it("stays on the page market when children are empty", () => {
     assert.equal(resolveActiveConditionId(emptyDetail, null), "0xsports");
     assert.equal(resolveActiveConditionId(emptyDetail, "0xotherchild"), "0xsports");
+  });
+});
+
+describe("hubRoster", () => {
+  it("counts the primary plus each nested child", () => {
+    assert.deepEqual(
+      hubRoster(electionDetail).map((row) => row.conditionId),
+      ["0xprimary", "0xchild"],
+    );
+    assert.deepEqual(
+      hubRoster(emptyDetail).map((row) => row.conditionId),
+      ["0xsports"],
+    );
+  });
+});
+
+describe("applyActiveMarketQuery", () => {
+  it("sets m to the child and keeps side", () => {
+    const next = applyActiveMarketQuery(new URLSearchParams("side=no"), "0xprimary", "0xchild");
+    assert.equal(next.get("m"), "0xchild");
+    assert.equal(next.get("side"), "no");
+  });
+
+  it("clears m when the primary is active", () => {
+    const next = applyActiveMarketQuery(new URLSearchParams("m=0xchild&side=yes"), "0xprimary", "0xprimary");
+    assert.equal(next.get("m"), null);
+    assert.equal(next.get("side"), "yes");
   });
 });

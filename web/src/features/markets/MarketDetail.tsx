@@ -1,14 +1,20 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { api } from "@/shared/api/client";
 import { AmmSwap } from "@/features/trade/AmmSwap";
 import { OraclePanel } from "@/features/oracle/OraclePanel";
 import { MatchupHero } from "./MatchupHero";
 import { MarketInfo } from "./MarketInfo";
 import { isSportsMarket } from "@/shared/utils/categorize";
-import { resolveActiveConditionId, type Market, type MarketDetailData } from "./eventHub";
+import {
+  applyActiveMarketQuery,
+  hubRoster,
+  resolveActiveConditionId,
+  type Market,
+  type MarketDetailData,
+} from "./eventHub";
 
 const DEMO_KELCE: Market = {
   conditionId: "0xdemo2",
@@ -43,6 +49,8 @@ export function MarketDetail({ conditionId }: { conditionId: string }) {
   const [market, setMarket] = useState<MarketDetailData | null>(null);
   const [activeConditionId, setActiveConditionId] = useState(conditionId);
   const searchParams = useSearchParams();
+  const router = useRouter();
+  const pathname = usePathname();
   const sideParam = searchParams.get("side");
   const mParam = searchParams.get("m");
   const initialSide = (sideParam === "yes" || sideParam === "no") ? sideParam : undefined;
@@ -69,7 +77,15 @@ export function MarketDetail({ conditionId }: { conditionId: string }) {
   }
 
   const showMatchup = isSportsMarket(market.question);
-  const hubRows: Market[] = [market, ...market.children];
+  const hubRows = hubRoster(market);
+  const activeMarket = hubRows.find((row) => row.conditionId === activeConditionId) ?? market;
+
+  function selectRow(id: string) {
+    setActiveConditionId(id);
+    const next = applyActiveMarketQuery(searchParams, market.conditionId, id);
+    const query = next.toString();
+    router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false });
+  }
 
   return (
     <div className="market-detail-layout">
@@ -85,14 +101,19 @@ export function MarketDetail({ conditionId }: { conditionId: string }) {
       </div>
       <div className="market-sidebar">
         <div className="sticky-ticket">
-          <AmmSwap key={activeConditionId} conditionId={activeConditionId} initialSide={initialSide} />
+          <AmmSwap
+            key={`${activeConditionId}-${initialSide ?? "yes"}`}
+            conditionId={activeConditionId}
+            initialSide={initialSide}
+            question={activeMarket.question}
+          />
         </div>
       </div>
       <div className="market-content">
         {market.children.length > 0 && (
           <div className="hub-board">
             <div className="muted">
-              {market.children.length} market{market.children.length === 1 ? "" : "s"}
+              {hubRows.length} market{hubRows.length === 1 ? "" : "s"}
             </div>
             {hubRows.map((row) => {
               const selected = row.conditionId === activeConditionId;
@@ -101,7 +122,7 @@ export function MarketDetail({ conditionId }: { conditionId: string }) {
                   key={row.conditionId}
                   type="button"
                   className={selected ? "hub-row selected" : "hub-row"}
-                  onClick={() => setActiveConditionId(row.conditionId)}
+                  onClick={() => selectRow(row.conditionId)}
                 >
                   <span>{row.question}</span>
                   <span className="yes">{yesPct(row.suggestedProbability)}</span>
