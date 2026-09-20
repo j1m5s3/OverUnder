@@ -19,8 +19,10 @@ pointers:
   - "[backend/app/emissions/router.py : L16-79]"
   - "[backend/app/portfolio/router.py : L13-61]"
   - "[backend/app/config.py : L9-40]"
-  - "[backend/app/models.py : L98-115]"
-  - "[backend/app/indexer/listener.py : L20-40]"
+  - "[backend/app/models.py : L96-103]"
+  - "[backend/app/markets/router.py : L99-116]"
+  - "[backend/app/indexer/listener.py : L20-49]"
+  - "[backend/app/indexer/listener.py : L175-237]"
 ---
 
 # Backend
@@ -88,7 +90,11 @@ pointers:
 - [SHIPPED] `GET /portfolio/{address}` returns positions (CTF balances), open orders, and trades. [backend/app/portfolio/router.py : L13-101]
 - [SHIPPED] Positions are AMM outcome holdings queried from ConditionalTokens.balanceOf for all markets. Returns 503 if CTF query fails. [backend/app/portfolio/router.py : L22-74]
 - [STUB] `GET /fee-vault/nav` returns `nav: 0, simulated: true` if RPC/deploy missing. [backend/app/portfolio/router.py : L104-119]
-- [STUB] `index_once` polls factory logs when connected; not started as a background task from `main.py`. [backend/app/indexer/listener.py : L20-40]
+- [STUB] `index_once` polls factory logs when connected; `run_indexer_loop` is started from `main.py` lifespan. [backend/app/indexer/listener.py : L64-172]
+- [SHIPPED] AMM history: `PoolSeeded` stores the first `PricePoint` at 0.5; each `Swap` stores pool-mid `noReserve / (yes+no)` via `pools(conditionId)` at that block — the YES price is the NO reserve share, never trade-implied amounts. [backend/app/indexer/listener.py : L20-49]
+- [SHIPPED] Failed AMM ranges never advance the checkpoint: `get_logs`/`pools().call` failures return False so `last_block` holds and the range retries instead of committing a gap. [backend/app/indexer/listener.py : L175-237]
+- [SHIPPED] `PricePoint{condition_id, ts, block_number, log_index, yes_price_micros}` deduped per block+logIndex. [backend/app/models.py : L96-103]
+- [SHIPPED] `GET /markets/{id}/history` returns ordered `PricePoint[]`, `[]` when empty, 404 for unknown markets. [backend/app/markets/router.py : L99-116]
 - [PHASE2] Always-on indexer, CTF balance snapshots, and OU NAV history.
 
 ## Emissions

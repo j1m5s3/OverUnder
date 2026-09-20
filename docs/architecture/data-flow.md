@@ -3,7 +3,7 @@ title: Data flow
 status: MIXED
 area: cross
 summary: End-to-end traces for primary CLOB fills, wildcard AMM swaps, and oracle resolution.
-last_verified: 2026-09-16
+last_verified: 2026-09-20
 pointers:
   - "[contracts/src/MarketFactory.vy : L81-84]"
   - "[backend/app/orderbook/router.py : L28-58]"
@@ -17,6 +17,9 @@ pointers:
   - "[contracts/src/ConsensusOracle.vy : L197-226]"
   - "[contracts/src/ConditionalTokens.vy : L86-105]"
   - "[web/src/features/trade/OrderTicket.tsx : L18-39]"
+  - "[backend/app/indexer/listener.py : L161-210]"
+  - "[backend/app/markets/router.py : L99-116]"
+  - "[web/src/features/markets/PriceChart.tsx : L16-90]"
   - "[contracts/src/FeeVault.vy : L61-83]"
 ---
 
@@ -29,7 +32,8 @@ pointers:
 3. [SHIPPED] Trader calls `GET /amm/{id}/quote` → `quoteBuy`.
 4. [SHIPPED] Web AmmSwap: approve USDC, then `buyWithUSDC` with `minOut` from quote*(1-slippage). [web/src/features/trade/AmmSwap.tsx : L81-102]
 5. [SHIPPED] On-chain `buyWithUSDC`: pull USDC, 50 bps vault, 50 bps LP, split remainder+LP into tokens, swap k, send bought outcome. [contracts/src/MarketAMM.vy : L103-140]
-6. [PHASE2] Paymaster-sponsored UserOp for gasless swaps.
+6. [SHIPPED] Indexer stores pool-mid `PricePoint`s (`PoolSeeded` → 0.5, each `Swap` → `pools(conditionId)` mid); failed ranges hold the checkpoint and retry. `GET /markets/{id}/history` feeds the hub chart, empty until the pool is seeded. [backend/app/indexer/listener.py : L175-237]
+7. [PHASE2] Paymaster-sponsored UserOp for gasless swaps.
 
 ## Wildcard AMM swap
 
