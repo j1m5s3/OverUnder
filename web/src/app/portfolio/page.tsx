@@ -59,7 +59,7 @@ export default function PortfolioPage() {
     );
   }
 
-  if (loading) {
+  if (loading || (!data && !error)) {
     return (
       <div>
         <h1>Portfolio</h1>
@@ -77,7 +77,7 @@ export default function PortfolioPage() {
     );
   }
 
-  // Filter out zero/dust positions
+  // Filter out zero/dust positions - only after successful data fetch
   const activePositions = (data?.positions || []).filter((p) => p.sizeMicros > 0);
 
   if (activePositions.length === 0) {
