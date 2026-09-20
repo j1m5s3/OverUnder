@@ -103,6 +103,18 @@ class PricePoint(Base):
     yes_price_micros: Mapped[int] = mapped_column(Integer, default=500_000)
 
 
+class LiveScore(Base):
+    __tablename__ = "live_scores"
+    condition_id: Mapped[str] = mapped_column(String(66), primary_key=True)
+    home_label: Mapped[str] = mapped_column(String(128))
+    away_label: Mapped[str] = mapped_column(String(128))
+    home_score: Mapped[int | None] = mapped_column(Integer, nullable=True, default=None)
+    away_score: Mapped[int | None] = mapped_column(Integer, nullable=True, default=None)
+    status: Mapped[str] = mapped_column(String(16), default="scheduled")
+    period_label: Mapped[str | None] = mapped_column(String(16), nullable=True, default=None)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
+
+
 class RampTx(Base):
     __tablename__ = "ramp_txs"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
