@@ -19,7 +19,7 @@ function formatCloseTime(unixSeconds: number): string {
 }
 
 function formatMultiplier(probability: number): string {
-  if (probability <= 0 || probability >= 1) return "—";
+  if (!Number.isFinite(probability) || probability <= 0 || probability >= 1) return "—";
   const multiplier = 1 / probability;
   return multiplier < 10 ? multiplier.toFixed(2) : multiplier.toFixed(1);
 }

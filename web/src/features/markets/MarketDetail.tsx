@@ -48,53 +48,25 @@ export function MarketDetail({ conditionId }: { conditionId: string }) {
   
   return (
     <div className="market-detail-layout">
-      <div className="market-main">
+      <div className="market-header">
         {showMatchup ? (
           <>
             <MatchupHero question={market.question} />
-            <h1 style={{ fontSize: "24px", marginBottom: "16px" }}>{market.question}</h1>
+            <h2 style={{ fontSize: "20px", fontWeight: 600, marginBottom: "16px" }}>{market.question}</h2>
           </>
         ) : (
           <h1>{market.question}</h1>
         )}
-        <MarketInfo market={market} />
-        <OraclePanel conditionId={market.conditionId} />
       </div>
       <div className="market-sidebar">
         <div className="sticky-ticket">
           <AmmSwap key={initialSide ?? "yes"} conditionId={market.conditionId} initialSide={initialSide} />
         </div>
       </div>
-      <style jsx>{`
-        .market-detail-layout {
-          display: grid;
-          grid-template-columns: 1fr;
-          gap: 16px;
-        }
-        
-        @media (min-width: 768px) {
-          .market-detail-layout {
-            grid-template-columns: 1fr 400px;
-            gap: 24px;
-          }
-          
-          .sticky-ticket {
-            position: sticky;
-            top: 24px;
-          }
-        }
-        
-        @media (max-width: 767px) {
-          .market-detail-layout {
-            display: flex;
-            flex-direction: column;
-          }
-          
-          .market-sidebar {
-            order: -1;
-          }
-        }
-      `}</style>
+      <div className="market-content">
+        <MarketInfo market={market} />
+        <OraclePanel conditionId={market.conditionId} />
+      </div>
     </div>
   );
 }

@@ -24,7 +24,7 @@ const CTF_ABI = parseAbi([
 ]);
 
 function formatMultiplier(probability: number): string {
-  if (probability <= 0 || probability >= 1) return "—";
+  if (!Number.isFinite(probability) || probability <= 0 || probability >= 1) return "—";
   const multiplier = 1 / probability;
   return multiplier < 10 ? multiplier.toFixed(2) : multiplier.toFixed(1);
 }
@@ -315,7 +315,7 @@ export function AmmSwap({ conditionId, initialSide }: { conditionId: string; ini
           style={{ flex: 1, position: "relative" }}
         >
           <div>Yes</div>
-          {mode === "buy" && impliedProb && outcome === "yes" && (
+          {mode === "buy" && multiplier && outcome === "yes" && (
             <div style={{ fontSize: "11px", marginTop: "2px", opacity: 0.8 }}>
               {multiplier}×
             </div>
@@ -327,7 +327,7 @@ export function AmmSwap({ conditionId, initialSide }: { conditionId: string; ini
           style={{ flex: 1, position: "relative" }}
         >
           <div>No</div>
-          {mode === "buy" && impliedProb && outcome === "no" && (
+          {mode === "buy" && multiplier && outcome === "no" && (
             <div style={{ fontSize: "11px", marginTop: "2px", opacity: 0.8 }}>
               {multiplier}×
             </div>
