@@ -20,21 +20,30 @@ type Category = "all" | "sports" | "other";
 
 function categorizeMarket(market: Market): Category {
   const q = market.question.toLowerCase();
-  const sportsKeywords = [
+  
+  const sportsTokens = [
     "nfl", "nba", "mlb", "nhl", "mls", "ncaa", "epl", "uefa",
     "soccer", "football", "basketball", "baseball", "hockey", "tennis",
     "golf", "boxing", "ufc", "mma", "nascar", "f1", "formula 1",
     "chiefs", "broncos", "yankees", "red sox", "dodgers", "mets",
-    "lakers", "celtics", "warriors", "heat", "knicks",
-    "cowboys", "patriots", "packers", "49ers", "eagles", "rams",
-    "steelers", "giants", "jets", "bears", "saints", "raiders",
+    "lakers", "celtics", "warriors", "knicks", "bucks",
+    "cowboys", "patriots", "packers", "eagles", "rams", "ravens",
+    "steelers", "raiders", "seahawks", "chargers",
     "touchdown", "fumble", "home run", "strikeout", "grand slam",
     "three-pointer", "dunk", "slam dunk", "hat trick"
   ];
   
-  if (sportsKeywords.some((kw) => q.includes(kw))) {
-    return "sports";
+  const shortTokens = ["f1", "ufc", "mma", "nfl", "nba", "mlb", "nhl", "mls", "epl"];
+  
+  for (const token of sportsTokens) {
+    const pattern = shortTokens.includes(token)
+      ? new RegExp(`\\b${token}\\b`, "i")
+      : new RegExp(`\\b${token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`, "i");
+    if (pattern.test(q)) {
+      return "sports";
+    }
   }
+  
   return "other";
 }
 
