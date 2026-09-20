@@ -21,12 +21,15 @@ type Category = "all" | "sports" | "other";
 function categorizeMarket(market: Market): Category {
   const q = market.question.toLowerCase();
   const sportsKeywords = [
-    "win", "lose", "score", "game", "match", "championship", "playoff",
-    "bowl", "series", "league", "nfl", "nba", "mlb", "nhl", "mls", "ncaa",
+    "nfl", "nba", "mlb", "nhl", "mls", "ncaa", "epl", "uefa",
     "soccer", "football", "basketball", "baseball", "hockey", "tennis",
-    "golf", "boxing", "ufc", "mma", "racing", "nascar", "f1",
-    "chiefs", "broncos", "yankees", "lakers", "celtics", "cowboys",
-    "point", "touchdown", "goal", "home run", "overtime", "fumble"
+    "golf", "boxing", "ufc", "mma", "nascar", "f1", "formula 1",
+    "chiefs", "broncos", "yankees", "red sox", "dodgers", "mets",
+    "lakers", "celtics", "warriors", "heat", "knicks",
+    "cowboys", "patriots", "packers", "49ers", "eagles", "rams",
+    "steelers", "giants", "jets", "bears", "saints", "raiders",
+    "touchdown", "fumble", "home run", "strikeout", "grand slam",
+    "three-pointer", "dunk", "slam dunk", "hat trick"
   ];
   
   if (sportsKeywords.some((kw) => q.includes(kw))) {
@@ -84,26 +87,43 @@ export function MarketList() {
     return <p className="muted">no markets yet</p>;
   }
 
-  const filtered = markets.filter((m) => {
+  const matchesFilter = (m: Market) => {
     const matchesSearch = m.question.toLowerCase().includes(searchQuery.toLowerCase());
     if (!matchesSearch) return false;
     
     if (activeCategory === "all") return true;
     return categorizeMarket(m) === activeCategory;
+  };
+
+  const allPrimaries = markets.filter((m) => m.marketType === 0);
+  const allWildcards = markets.filter((m) => m.marketType === 1);
+
+  const visiblePrimaries = allPrimaries.filter((primary) => {
+    if (matchesFilter(primary)) return true;
+    const childWildcards = allWildcards.filter((w) => w.parentConditionId === primary.conditionId);
+    return childWildcards.some(matchesFilter);
   });
 
+  const searchFilteredMarkets = markets.filter((m) =>
+    m.question.toLowerCase().includes(searchQuery.toLowerCase())
+  );
+
   const categoryCounts = {
-    all: markets.length,
-    sports: markets.filter((m) => categorizeMarket(m) === "sports").length,
-    other: markets.filter((m) => categorizeMarket(m) === "other").length,
+    all: searchFilteredMarkets.length,
+    sports: searchFilteredMarkets.filter((m) => categorizeMarket(m) === "sports").length,
+    other: searchFilteredMarkets.filter((m) => categorizeMarket(m) === "other").length,
   };
 
   const availableCategories: Category[] = ["all"];
   if (categoryCounts.sports > 0) availableCategories.push("sports");
   if (categoryCounts.other > 0) availableCategories.push("other");
 
-  const primaries = filtered.filter((m) => m.marketType === 0);
-  const gridStyle = primaries.length === 1 ? { maxWidth: 560 } : {};
+  const orphanWildcards = allWildcards.filter(
+    (w) => matchesFilter(w) && !visiblePrimaries.some((p) => p.conditionId === w.parentConditionId)
+  );
+
+  const hasResults = visiblePrimaries.length > 0 || orphanWildcards.length > 0;
+  const gridStyle = visiblePrimaries.length === 1 ? { maxWidth: 560 } : {};
 
   return (
     <div>
@@ -136,17 +156,29 @@ export function MarketList() {
             ))}
           </div>
         )}
+
+        {searchQuery && (
+          <div className="muted" style={{ marginTop: 12, fontSize: 12 }}>
+            {hasResults ? `${visiblePrimaries.length + orphanWildcards.length} result${visiblePrimaries.length + orphanWildcards.length === 1 ? "" : "s"}` : "0 results"}
+          </div>
+        )}
       </div>
 
-      {filtered.length === 0 ? (
-        <p className="muted">no markets match your search</p>
+      {!hasResults ? (
+        <p className="muted">
+          {searchQuery
+            ? "no markets match your search"
+            : "no markets in this category"}
+        </p>
       ) : (
         <div className="grid" style={gridStyle}>
-          {primaries.map((m) => {
-            const wildcards = filtered.filter((c) => c.parentConditionId === m.conditionId);
+          {visiblePrimaries.map((primary) => {
+            const wildcards = allWildcards.filter(
+              (w) => w.parentConditionId === primary.conditionId && matchesFilter(w)
+            );
             return (
-              <div key={m.conditionId}>
-                <MarketCard market={m} />
+              <div key={primary.conditionId}>
+                <MarketCard market={primary} />
                 {wildcards.length > 0 && (
                   <div className="muted" style={{ marginTop: 8 }}>
                     Wildcards:{" "}
@@ -160,9 +192,9 @@ export function MarketList() {
               </div>
             );
           })}
-          {primaries.length === 0
-            ? filtered.map((m) => <MarketCard key={m.conditionId} market={m} />)
-            : null}
+          {orphanWildcards.map((m) => (
+            <MarketCard key={m.conditionId} market={m} />
+          ))}
         </div>
       )}
     </div>
