@@ -1,9 +1,9 @@
 ---
-title: Phase 2 full vision
-status: PHASE2
+title: Phase 2 remaining vision
+status: MIXED
 area: roadmap
-summary: Flutter, Polymarket-parity UX, ERC-4337 paymaster, Privy JWKS, MoonPay/KYC, and OU emissions — specified at MVP depth.
-last_verified: 2026-09-16
+summary: MIXED spec — Flutter/emissions/KYC/live agents shipped; remaining paymaster, JWKS, leftover CLOB relayer, uniform-LVR, permissionless listing.
+last_verified: 2026-09-20
 pointers:
   - "[mobile/README.md : L1-25]"
   - "[web/src/app/providers.tsx : L10-17]"
@@ -11,11 +11,13 @@ pointers:
   - "[backend/app/ramps/router.py : L9-32]"
   - "[contracts/src/RevenueToken.vy : L13-32]"
   - "[contracts/src/FeeVault.vy : L44-50]"
+  - "[docs/adr/0007-amm-first-uniform-lvr.md : L29-36]"
+  - "[contracts/src/MarketAMM.vy : L40]"
 ---
 
 # Phase 2
 
-Nothing in this file is implemented. Each section is a build spec so agents do not invent a thinner version at implementation time.
+This file is MIXED. [SHIPPED] Flutter (OU-T006), emissions (OU-T004), live LLM agents (OU-T005), MoonPay/KYC (OU-T007). Remaining open: paymaster (OU-T001), Privy JWKS (OU-T002), leftover CLOB production relayer (OU-T003), uniform-LVR (OU-T008/T009), permissionless listing (OU-T010). CLOB UX is an optional overlay, not a required depth-chart milestone. Do not invent ERC-4337, JWKS, or uniform-LVR as shipped.
 
 ## 1. Flutter
 
@@ -39,7 +41,7 @@ Shared inputs (already in repo, do not fork):
 ### Screens (required v1 mobile)
 
 1. **Market list** — primaries as full-width cards; wildcard children as chips under the parent. Pull `GET /api/v1/markets` (EventCard[] of primaries with nested children; orphan wildcards listed alone) and `?parentId=` for a flat child filter.
-2. **Market detail** — type 0 renders a CLOB ticket (bids/asks, limit price 1e6 scale, 75 bps copy). Type 1 renders AMM buy/sell with `quoteBuy` then a wallet `buyWithUSDC` / `sellToUSDC`.
+2. **Market detail** — type 0 and type 1 render AMM buy/sell with `quoteBuy`/`quoteSell` then a wallet `buyWithUSDC` / `sellToUSDC`. CLOB ticket is leftover overlay, not required.
 3. **Wallet** — Privy email OTP + injected EOA. Show USDC, YES/NO balances for open markets, OU + NAV. Coinbase Onramp URL from `GET /api/v1/ramps/onramp-url` until MoonPay ships (section 5).
 4. **Oracle** — attestations, unanimity flag, countdown to `closeTime + 86400`, vote CTA calling `castVote` through the AA wallet.
 
@@ -50,9 +52,9 @@ Shared inputs (already in repo, do not fork):
 - Offline: cache last market list; never cache signed orders as submitted until the API 200.
 - QA: golden screenshots against tokens.json; run the same e2e economic scenario as `scripts/e2e_local.py` against a shared Anvil.
 
-## 2. Polymarket parity
+## 2. Optional CLOB overlay (not required)
 
-The MVP proves settlement. Phase 2 must feel like a production book.
+The MVP proves AMM settlement. A CLOB overlay may be scheduled later; it is **not** a required Phase 2 destination and there is **no** required depth-chart milestone.
 
 ### Discovery
 
@@ -60,9 +62,9 @@ The MVP proves settlement. Phase 2 must feel like a production book.
 - Search by question substring.
 - “Related wildcards” rail on primary detail (already filterable via `parentId`).
 
-### CLOB UX
+### CLOB UX (optional leftover overlay)
 
-- Depth chart and last-trade tape from `GET /orderbook/{id}` + `Trade` rows.
+- Depth chart and last-trade tape from `GET /orderbook/{id}` + `Trade` rows — only if an overlay is scheduled.
 - Price displayed as cents (divide 1e6, show ¢) with a toggle to implied %.
 - Size in shares (CTF units, 6 decimals matching USDC).
 - Click-to-join best bid/ask into the ticket.
@@ -87,7 +89,20 @@ The MVP proves settlement. Phase 2 must feel like a production book.
 - Operator console: create primary (factory tx), pause, seed wildcard inventory.
 - Status page: matcher lag, relayer nonce, last indexed block.
 
-## 3. Paymaster (ERC-4337)
+## 3. Uniform-LVR AMM (OU-T008 / OU-T009)
+
+[PHASE2] Book of record for every market type becomes a uniform-LVR AMM (pm-AMM / Moallemi–Robinson–Zhu 2026). Default pool: static uniform invariant. Time-based liquidity and dynamic spreads are LP/fee policy, not a second venue. [docs/adr/0007-amm-first-uniform-lvr.md : L29-36]
+
+- [SHIPPED] `MarketAMM` stays CPMM (`AMM_FEE_BPS = 100`) until these TODOs land. [contracts/src/MarketAMM.vy : L40]
+- OU-T008: Vyper formula spike, gas, Gaussian vs jump-event fit.
+- OU-T009: migrate `buyWithUSDC` / `sellToUSDC` to the uniform-LVR default pool.
+- Do not mark uniform-LVR as shipped in this cycle.
+
+## 4. Permissionless listing (OU-T010)
+
+[PHASE2] Listing becomes permissionless or loosely gated so AMM seed—not operator-recruited makers—bootstraps a market. Factory stays operator/generator gated until this lands. [contracts/src/MarketFactory.vy : L82-98]
+
+## 5. Paymaster (ERC-4337)
 
 Gasless flow is required for email AA users who have USDC but no ETH.
 
@@ -112,7 +127,7 @@ Gasless flow is required for email AA users who have USDC but no ETH.
 
 ### Relayer vs paymaster
 
-- CLOB **fills** stay relayer-submitted `matchOrders` (two signatures already exist).
+- Leftover CLOB **fills** stay relayer-submitted `matchOrders` (two signatures already exist) if an overlay is used.
 - Paymaster covers the **user** half: approvals, splits, AMM, votes, cancels.
 - Document gas tank refill runbook (operator EOA tops the paymaster deposit on EntryPoint).
 
@@ -121,7 +136,7 @@ Gasless flow is required for email AA users who have USDC but no ETH.
 - boa/fork test: smart account with 0 ETH, USDC > 0, buy AMM YES, assert paymaster deposit decreases and trader receives tokens.
 - Negative: random `to` / selector rejected.
 
-## 4. Privy JWKS
+## 6. Privy JWKS
 
 Replace [backend/app/auth/router.py : L90-102].
 
@@ -146,7 +161,7 @@ Replace [backend/app/auth/router.py : L90-102].
 
 - `PRIVY_APP_ID` / `PRIVY_APP_SECRET` already exist on Settings. Fail closed if unset outside `chain_id==31337`.
 
-## 5. MoonPay / KYC
+## 7. MoonPay / KYC
 
 Coinbase URL builder remains as a fallback ([backend/app/ramps/router.py : L9-32]). Phase 2 adds a second provider and identity.
 
@@ -168,7 +183,7 @@ Coinbase URL builder remains as a fallback ([backend/app/ramps/router.py : L9-32
 - Keep Coinbase offramp URL; add MoonPay sell URL with the same KYC gate.
 - Never send users to a dApp that asks for the Privy recovery key.
 
-## 6. OU emissions
+## 8. OU emissions
 
 FeeVault must stay a **fee sink**, not a minter ([ADR-0003](../adr/0003-ou-nav-token-not-savings-vault.md)).
 

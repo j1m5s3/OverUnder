@@ -1,9 +1,9 @@
 ---
 title: Hybrid CLOB and AMM
-status: SHIPPED
+status: MIXED
 area: contracts
-summary: AMM-first MVP with CPMM on all markets; CLOB deferred to Phase 2.
-last_verified: 2026-09-19
+summary: Historical hybrid CLOB-primary / AMM-wildcard decision. Superseded by ADR-0007.
+last_verified: 2026-09-20
 pointers:
   - "[contracts/src/MarketFactory.vy : L82-90]"
   - "[contracts/src/MarketAMM.vy : L40]"
@@ -14,7 +14,7 @@ pointers:
 
 ## Status
 
-Revised 2026-09-19. Original CLOB-primary path deferred to Phase 2.
+Superseded 2026-09-20 by [ADR-0007](0007-amm-first-uniform-lvr.md). CLOB is leftover overlay, not a required Phase 2 destination. Decision body below is historical.
 
 ## Context
 

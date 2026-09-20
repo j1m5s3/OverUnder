@@ -5,7 +5,7 @@ area: backend
 summary: FastAPI routers for auth, markets, CLOB, AMM quotes, oracle records, ramps, KYC, emissions, and portfolio.
 last_verified: 2026-09-20
 pointers:
-  - "[backend/app/main.py : L23-48]"
+  - "[backend/app/main.py : L22-38]"
   - "[backend/app/auth/router.py : L61-102]"
   - "[backend/app/orderbook/matcher.py : L37-86]"
   - "[backend/app/orderbook/matcher.py : L88-136]"
@@ -14,7 +14,8 @@ pointers:
   - "[backend/app/markets/router.py : L137-145]"
   - "[backend/app/markets/router.py : L149-188]"
   - "[backend/app/markets/sports.py : L58-65]"
-  - "[backend/app/amm/router.py : L9-32]"
+  - "[backend/app/markets/router.py : L191-334]"
+  - "[backend/app/amm/router.py : L9-28]"
   - "[backend/app/oracle/router.py : L29-66]"
   - "[backend/app/ramps/router.py : L28-129]"
   - "[backend/app/kyc/router.py : L29-168]"
@@ -30,7 +31,7 @@ pointers:
 
 # Backend
 
-- [SHIPPED] FastAPI app `create_app` mounts auth, markets, orderbook, amm, ramps, oracle, portfolio under `/api/v1`, plus `/health`. [backend/app/main.py : L23-48]
+- [SHIPPED] FastAPI app `create_app` mounts auth, markets, orderbook, amm, ramps, oracle, portfolio under `/api/v1`, plus `/health`. [backend/app/main.py : L41-48]
 - [SHIPPED] Settings from `.env` via pydantic: RPC, chain id, JWT, fee bps, optional Privy/Coinbase/relayer keys. [backend/app/config.py : L9-33]
 - [SHIPPED] SQLite aiosqlite (`overunder.db`) created on lifespan. Gitignored.
 
@@ -47,9 +48,8 @@ pointers:
 - [SHIPPED] `GET /markets` returns EventCard[] of unpaused primaries with nested unpaused wildcard children. Wildcards whose parent is missing or paused list alone. `?parentId=` stays a flat MarketPublic[] filter. [backend/app/markets/router.py : L59-90]
 - [SHIPPED] `GET /markets/{id}` returns MarketDetail with the same child filter; `children` is always present and may be `[]`. [backend/app/markets/router.py : L137-145]
 - [SHIPPED] Operator-fed LiveScore on sports primaries only: `POST /markets/{id}/score` (`require_operator`) rejects wildcards and non-sports questions server-side via the sports allowlist, rejects invented `scheduled` 0–0, and upserts labels, nullable scores, status, and display-only period; `MarketDetail.score` embeds it, `null` when absent, always `null` on wildcards — nulls are never coerced to 0. [backend/app/markets/router.py : L149-188]
-- [SHIPPED] Operator `POST /markets` and pause. [backend/app/markets/router.py : L191-398]
-- [STUB] Create writes SQLite only. It does not call `MarketFactory.createPrimaryMarket` / `createWildcardMarket`.
-- [PHASE2] Atomic create: operator/relayer submits the factory tx, indexer confirms `MarketCreated`, API returns the on-chain `conditionId`.
+- [SHIPPED] Operator `POST /markets` submits factory `createPrimaryMarket` / `createWildcardMarket` (fail-closed on missing key, RPC, or `seed_usdc <= 0`), then upserts SQLite from `MarketCreated`. [backend/app/markets/router.py : L191-334]
+- [PHASE2] Permissionless listing so AMM seed—not the operator—bootstraps a market (OU-T010).
 
 ## Orderbook
 
@@ -62,9 +62,8 @@ pointers:
 
 ## AMM proxy
 
-- [SHIPPED] `GET /amm/{id}/quote` calls `quoteBuy` when deployment+RPC exist. [backend/app/amm/router.py : L9-23]
-- [STUB] On any failure, returns `tokensOut = usdc_in - amm_fee` with `simulated: true`. [backend/app/amm/router.py : L24-32]
-- [PHASE2] Server-side `buyWithUSDC` / `sellToUSDC` relay for AA wallets, plus pool seed from protocol inventory.
+- [SHIPPED] `GET /amm/{id}/quote` calls `quoteBuy` or `quoteSell` when deployment+RPC exist. [backend/app/amm/router.py : L9-28]
+- [PHASE2] Server-side `buyWithUSDC` / `sellToUSDC` relay for AA wallets.
 
 ## Oracle records
 
@@ -94,7 +93,7 @@ pointers:
 - [SHIPPED] `GET /portfolio/{address}` returns positions (CTF balances), open orders, and trades. [backend/app/portfolio/router.py : L13-101]
 - [SHIPPED] Positions are AMM outcome holdings queried from ConditionalTokens.balanceOf for all markets. Returns 503 if CTF query fails. [backend/app/portfolio/router.py : L22-74]
 - [STUB] `GET /fee-vault/nav` returns `nav: 0, simulated: true` if RPC/deploy missing. [backend/app/portfolio/router.py : L104-119]
-- [STUB] `index_once` polls factory logs when connected; `run_indexer_loop` is started from `main.py` lifespan. [backend/app/indexer/listener.py : L64-172]
+- [SHIPPED] `index_once` polls factory logs when connected; `run_indexer_loop` is started from `main.py` lifespan. [backend/app/indexer/listener.py : L64-172] [backend/app/main.py : L22-38]
 - [SHIPPED] AMM history: `PoolSeeded` stores the first `PricePoint` at 0.5; each `Swap` stores pool-mid `noReserve / (yes+no)` via `pools(conditionId)` at that block — the YES price is the NO reserve share, never trade-implied amounts. [backend/app/indexer/listener.py : L20-49]
 - [SHIPPED] Failed AMM ranges never advance the checkpoint: `get_logs`/`pools().call` failures return False so `last_block` holds and the range retries instead of committing a gap. [backend/app/indexer/listener.py : L175-237]
 - [SHIPPED] `PricePoint{condition_id, ts, block_number, log_index, yes_price_micros}` deduped per block+logIndex. [backend/app/models.py : L96-103]

@@ -1,29 +1,30 @@
-# OverUnder — JIT Plan (MVP Execute Cycle)
+# OverUnder — JIT Plan (Phase 1 closeout)
 
-Greenfield implementation of the approved OverUnder MVP Architecture.
+Picking up grokbots: AMM-first Phase 1 closeout. No uniform-LVR math, paymaster, JWKS, or Exchange deletion.
 
 ## Product slice
 
-- Operator creates one primary binary market (CLOB).
-- AI wildcard generator publishes child AMM markets with `parentMarketId`.
+- Operator creates a seeded primary CPMM; generator seeds a wildcard.
+- Trader `buyWithUSDC` then partial `sellToUSDC` on the seeded primary.
 - Settlement: 3/3 AI oracle unanimity, else 24h agent majority + position-weighted votes.
 - USDC on Anvil (MockUSDC) / Base Sepolia. OU redeems from FeeVault at NAV.
-- Web: Privy + Coinbase Smart Wallet + EOA. Flutter: carryover contract only.
+- Web: AmmSwap is the only ticket. OrderTicket unrendered leftover.
 
 ## Architectural decisions
 
-See approved plan: hybrid CLOB + CPMM, binary CTF, 75 bps taker / 100 bps AMM (50/50 vault-LP), 100M OU, 24h redeem cooldown.
+See ADR-0007. Seeded CPMM is the Phase 1 book. CLOB is leftover overlay, not a required Phase 2 destination. Uniform-LVR is OU-T008/T009.
 
 ## Execute order
 
-1. Monorepo skeleton, env, compose.
-2. Vyper core: MockUSDC, RevenueToken, ConditionalTokens, MarketFactory.
-3. ConsensusOracle, Exchange, MarketAMM, FeeVault.
-4. Tests + deploy.py.
-5. FastAPI + indexer + CLOB matcher.
-6. Oracle agents + wildcard generator.
-7. Next.js + shared tokens/OpenAPI + e2e.
+1. Delete unused `backend/app/markets/onchain.py` and `web/src/shared/contracts.ts`.
+2. Rewrite factory tests for required seed.
+3. Rewrite `scripts/e2e_local.py` AMM buy+sell; zero `matchOrders`.
+4. Land ADR-0007; supersede ADR-0001 Status; TODOs T008–T010 only.
+5. Refresh AGENTS, architecture, roadmaps, this index.
 
 ## Acceptance
 
-`moccasin test` green; e2e happy path + fallback; web CLOB + AMM; NAV matches on-chain.
+- Factory zero-seed reverts; seed-creates-pool passes.
+- e2e seeds, buys, sells, resolves, redeems; `rg matchOrders scripts/` empty.
+- ADR-0007 landed; T004–T007 still done; no T011/T012.
+- Docs MIXED-tagged; no CLOB happy path / SQLite-only create / quote-only AMM / indexer-not-in-lifespan claims.

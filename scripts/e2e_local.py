@@ -15,27 +15,13 @@ sys.path.insert(0, str(ROOT / "oracles"))
 import boa
 
 from tests.conftest import COOLDOWN, deploy_protocol
-from tests.eip712 import sign_attestation, sign_order
+from tests.eip712 import sign_attestation
 from consensus.coordinator import Coordinator
 from agents.alpha import AlphaAgent
 from agents.beta import BetaAgent
 from agents.gamma import GammaAgent
 from agents.base import MockSearch
 from wildcard.generator import propose
-
-
-def _tup(o: dict):
-    return (
-        o["maker"],
-        o["isBuy"],
-        o["conditionId"],
-        o["outcome"],
-        o["price"],
-        o["amount"],
-        o["salt"],
-        o["nonce"],
-        o["expiry"],
-    )
 
 
 def happy_path(proto) -> dict:
@@ -51,7 +37,6 @@ def happy_path(proto) -> dict:
     )
     operator = proto["accounts"]["operator"]
     generator = proto["accounts"]["generator"]
-    seller = proto["accounts"]["trader_a"]
     buyer = proto["accounts"]["trader_b"]
     treasury = proto["accounts"]["treasury"]
 
@@ -69,46 +54,18 @@ def happy_path(proto) -> dict:
         child = factory.createWildcardMarket(
             b"\xbb" * 32, parent, close, kids[0].question[:256], seed
         )
+    assert amm.pools(child)[3] is True
 
-    amount = 1_000_000
-    price = 500_000
-    with boa.env.prank(seller.address):
-        usdc.faucet(amount)
-        usdc.approve(ctf.address, amount)
-        ctf.splitPosition(parent, amount)
-        ctf.setApprovalForAll(exchange.address, True)
+    usdc_in = 5_000_000
     with boa.env.prank(buyer.address):
-        usdc.faucet(2_000_000)
-        usdc.approve(exchange.address, 2_000_000)
-
-    expiry = boa.env.timestamp + 30
-    sell = {
-        "maker": seller.address,
-        "isBuy": False,
-        "conditionId": parent,
-        "outcome": 0,
-        "price": price,
-        "amount": amount,
-        "salt": 1,
-        "nonce": 0,
-        "expiry": expiry,
-    }
-    buy = dict(sell)
-    buy["maker"] = buyer.address
-    buy["isBuy"] = True
-    buy["salt"] = 2
-    exchange.matchOrders(
-        _tup(buy),
-        _tup(sell),
-        amount,
-        sign_order(buyer.key, exchange.address, proto["chain_id"], buy),
-        sign_order(seller.key, exchange.address, proto["chain_id"], sell),
-    )
-
-    with boa.env.prank(buyer.address):
-        usdc.faucet(5_000_000)
-        usdc.approve(amm.address, 5_000_000)
-        amm.buyWithUSDC(child, True, 5_000_000, 0)
+        usdc.faucet(usdc_in)
+        usdc.approve(amm.address, usdc_in)
+        quoted_buy = amm.quoteBuy(parent, True, usdc_in)
+        out = amm.buyWithUSDC(parent, True, usdc_in, quoted_buy)
+        ctf.setApprovalForAll(amm.address, True)
+        sell_amt = out // 2
+        quoted_sell = amm.quoteSell(parent, True, sell_amt)
+        amm.sellToUSDC(parent, True, sell_amt, quoted_sell)
 
     search = MockSearch(["Chiefs defeated Broncos. Kelce fumbled once."])
     result = Coordinator(
