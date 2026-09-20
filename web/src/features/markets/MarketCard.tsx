@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { parseMatchup } from "@/shared/utils/categorize";
 import type { Market } from "./MarketList";
 
 function formatCloseTime(unixSeconds: number): string {
@@ -24,7 +25,7 @@ function formatMultiplier(probability: number): string {
   return multiplier < 10 ? multiplier.toFixed(2) : multiplier.toFixed(1);
 }
 
-export function MarketCard({ market }: { market: Market }) {
+export function MarketCard({ market, childCount }: { market: Market; childCount?: number }) {
   const yesPct = Math.round((market.suggestedProbability || 0.5) * 100);
   const noPct = 100 - yesPct;
   const isLeading = (side: "yes" | "no") => side === "yes" ? yesPct > noPct : noPct > yesPct;
@@ -34,25 +35,36 @@ export function MarketCard({ market }: { market: Market }) {
   const yesMultiplier = formatMultiplier(yesProb);
   const noMultiplier = formatMultiplier(noProb);
   
+  const matchup = parseMatchup(market.question);
+  const displayTitle = matchup 
+    ? `${matchup.teamA} vs ${matchup.teamB}` 
+    : market.question;
+  
   return (
     <div className="card">
-      <Link href={`/markets/${encodeURIComponent(market.conditionId)}`} style={{ display: "block", marginBottom: 12 }}>
-        <h3 style={{ marginBottom: 8 }}>{market.question}</h3>
-        <div className="muted" style={{ fontSize: 12 }}>{formatCloseTime(market.closeTime)}</div>
+      <Link href={`/markets/${encodeURIComponent(market.conditionId)}`} style={{ display: "block", marginBottom: 8 }}>
+        <h3 style={{ marginBottom: 4, fontSize: 16, lineHeight: 1.3 }}>{displayTitle}</h3>
+        <div className="muted" style={{ fontSize: 11 }}>{formatCloseTime(market.closeTime)}</div>
       </Link>
       
-      <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 12 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 8 }}>
         <div style={{ textAlign: "center", flex: 1 }}>
-          <div style={{ fontSize: 32, fontWeight: 600, opacity: isLeading("yes") ? 1 : 0.7 }} className="yes">{yesPct}%</div>
-          <div className="muted" style={{ fontSize: 11, marginTop: 2 }}>yes</div>
+          <div className="muted" style={{ fontSize: 10, marginBottom: 2, textTransform: "uppercase", letterSpacing: "0.05em" }}>Yes</div>
+          <div style={{ fontSize: 28, fontWeight: 600, opacity: isLeading("yes") ? 1 : 0.7 }} className="yes">{yesPct}%</div>
           <div className="muted" style={{ fontSize: 10, marginTop: 1 }}>{yesMultiplier}×</div>
         </div>
         <div style={{ textAlign: "center", flex: 1 }}>
-          <div style={{ fontSize: 32, fontWeight: 600, opacity: isLeading("no") ? 1 : 0.7 }} className="no">{noPct}%</div>
-          <div className="muted" style={{ fontSize: 11, marginTop: 2 }}>no</div>
+          <div className="muted" style={{ fontSize: 10, marginBottom: 2, textTransform: "uppercase", letterSpacing: "0.05em" }}>No</div>
+          <div style={{ fontSize: 28, fontWeight: 600, opacity: isLeading("no") ? 1 : 0.7 }} className="no">{noPct}%</div>
           <div className="muted" style={{ fontSize: 10, marginTop: 1 }}>{noMultiplier}×</div>
         </div>
       </div>
+      
+      {childCount !== undefined && childCount > 0 && (
+        <div className="muted" style={{ fontSize: 11, marginBottom: 8 }}>
+          {childCount} market{childCount === 1 ? "" : "s"}
+        </div>
+      )}
       
       <div className="row">
         <Link href={`/markets/${encodeURIComponent(market.conditionId)}?side=yes`} className="btn yes" style={{ flex: 1, textAlign: "center" }}>

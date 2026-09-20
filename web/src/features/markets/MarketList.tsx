@@ -153,15 +153,16 @@ export function MarketList() {
         <div className="grid" style={gridStyle}>
           {visiblePrimaries.map((primary) => {
             const wildcards = allWildcards.filter(
-              (w) => w.parentConditionId === primary.conditionId && matchesFilter(w)
+              (w) => w.parentConditionId === primary.conditionId
             );
+            const visibleWildcards = wildcards.filter(matchesFilter);
             return (
               <div key={primary.conditionId}>
-                <MarketCard market={primary} />
-                {wildcards.length > 0 && (
+                <MarketCard market={primary} childCount={wildcards.length} />
+                {visibleWildcards.length > 0 && (
                   <div className="muted" style={{ marginTop: 8 }}>
                     Wildcards:{" "}
-                    {wildcards.map((c) => (
+                    {visibleWildcards.map((c) => (
                       <Link key={c.conditionId} href={`/markets/${c.conditionId}`}>
                         {c.question}{" "}
                       </Link>
