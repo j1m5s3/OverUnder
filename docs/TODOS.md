@@ -2,13 +2,14 @@
 title: TODO registry
 status: PHASE2
 area: cross
-summary: Machine-parseable gaps for paymaster, JWKS, relayer, emissions, oracle mocks, Flutter, and KYC.
-last_verified: 2026-09-19
+summary: Machine-parseable gaps for paymaster, JWKS, leftover CLOB relayer, uniform-LVR, and permissionless listing.
+last_verified: 2026-09-20
 pointers:
   - "[backend/app/auth/router.py : L90-102]"
   - "[backend/app/orderbook/matcher.py : L88-136]"
-  - "[oracles/agents/base.py : L10-63]"
-  - "[mobile/README.md : L1-25]"
+  - "[contracts/src/MarketAMM.vy : L40]"
+  - "[contracts/src/MarketFactory.vy : L82-89]"
+  - "[docs/adr/0007-amm-first-uniform-lvr.md : L29-36]"
 ---
 
 # TODOs
@@ -22,6 +23,9 @@ Machine registry below. Human index:
 - [SHIPPED] OU-T005 Live LLM agents; MockSearch tests-only
 - [SHIPPED] OU-T006 Flutter from `mobile/README.md`
 - [SHIPPED] OU-T007 MoonPay + KYC
+- [PHASE2] OU-T008 Uniform-LVR Vyper spike
+- [PHASE2] OU-T009 Migrate MarketAMM CPMM to uniform-LVR
+- [PHASE2] OU-T010 Permissionless or loosely gated listing
 
 YAML status values: `open` | `blocked` | `done`.
 
@@ -99,4 +103,32 @@ todos:
       - "[backend/app/ramps/router.py : L28-129]"
       - "[backend/app/kyc/router.py : L29-168]"
       - "[backend/app/models.py : L98-115]"
+  - id: OU-T008
+    title: Uniform-LVR AMM spike in Vyper
+    status: open
+    area: contracts
+    phase: 2
+    summary: Spike pm-AMM / Moallemi–Robinson–Zhu formula, gas, and Gaussian vs jump-event fit. Shipped MarketAMM stays CPMM until this lands.
+    pointers:
+      - "[docs/adr/0007-amm-first-uniform-lvr.md : L29-36]"
+      - "[contracts/src/MarketAMM.vy : L40]"
+      - "[contracts/src/MarketAMM.vy : L86-119]"
+  - id: OU-T009
+    title: Migrate MarketAMM CPMM to uniform-LVR default pool
+    status: open
+    area: contracts
+    phase: 2
+    summary: Replace CPMM buy/sell with the uniform-LVR default pool after T008. Keep 100 bps 50/50 vault/LP unless a new ADR changes fees.
+    pointers:
+      - "[docs/adr/0007-amm-first-uniform-lvr.md : L29-36]"
+      - "[contracts/src/MarketAMM.vy : L122-201]"
+  - id: OU-T010
+    title: Permissionless or loosely gated market listing
+    status: open
+    area: contracts
+    phase: 2
+    summary: Let AMM seed—not operator-recruited makers—bootstrap a market. Factory stays permissioned until this lands.
+    pointers:
+      - "[docs/adr/0007-amm-first-uniform-lvr.md : L35]"
+      - "[contracts/src/MarketFactory.vy : L82-98]"
 ```

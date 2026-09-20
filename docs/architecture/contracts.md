@@ -3,19 +3,22 @@ title: Contracts
 status: SHIPPED
 area: contracts
 summary: Vyper contract graph for CTF, CLOB, AMM, oracle, OU NAV, emissions, and ERC-4337 paymaster.
-last_verified: 2026-09-19
+last_verified: 2026-09-20
 pointers:
   - "[contracts/src/ConditionalTokens.vy : L52-60]"
   - "[contracts/src/ConditionalTokens.vy : L63-72]"
   - "[contracts/src/ConditionalTokens.vy : L86-95]"
   - "[contracts/src/ConditionalTokens.vy : L97-105]"
   - "[contracts/src/MarketFactory.vy : L61-79]"
-  - "[contracts/src/MarketFactory.vy : L81-94]"
+  - "[contracts/src/MarketFactory.vy : L82-89]"
+  - "[contracts/src/MarketFactory.vy : L92-99]"
   - "[contracts/src/Exchange.vy : L22-35]"
   - "[contracts/src/Exchange.vy : L128-159]"
   - "[contracts/src/MarketAMM.vy : L40-48]"
-  - "[contracts/src/MarketAMM.vy : L74-82]"
-  - "[contracts/src/MarketAMM.vy : L103-140]"
+  - "[contracts/src/MarketAMM.vy : L73-82]"
+  - "[contracts/src/MarketAMM.vy : L104-119]"
+  - "[contracts/src/MarketAMM.vy : L122-159]"
+  - "[contracts/src/MarketAMM.vy : L162-201]"
   - "[contracts/src/ConsensusOracle.vy : L37-38]"
   - "[contracts/src/ConsensusOracle.vy : L144-161]"
   - "[contracts/src/ConsensusOracle.vy : L197-217]"
@@ -44,12 +47,13 @@ Binary Gnosis-style CTF. `prepareCondition` binds an oracle and questionId to a 
 Permissioned factory. Operator creates primaries (`marketType=0`). Wildcard generator or operator creates children (`marketType=1`) that must close no later than the parent.
 
 - `_create` prepares the CTF condition and registers closeTime on the oracle. [contracts/src/MarketFactory.vy : L61-79]
-- Wildcard optional `seedUsdc` pulls USDC then `seedPool`. [contracts/src/MarketFactory.vy : L86-94]
+- [SHIPPED] Primary required `seedUsdc` pulls USDC then `seedPool`. [contracts/src/MarketFactory.vy : L82-89]
+- [SHIPPED] Wildcard optional `seedUsdc` pulls USDC then `seedPool`. [contracts/src/MarketFactory.vy : L92-99]
 - Operator pause is a factory flag; Exchange/AMM still check CTF resolution, not this flag, on every trade.
 
-## Exchange (CLOB settlement)
+## Exchange (leftover CLOB overlay)
 
-EIP-712 `Order` struct. Price is USDC per token with `PRICE_SCALE = 1e6` (1.00 USD = 1_000_000).
+EIP-712 `Order` struct. Price is USDC per token with `PRICE_SCALE = 1e6` (1.00 USD = 1_000_000). Deployed leftover; not the product path. See [ADR-0007](../adr/0007-amm-first-uniform-lvr.md).
 
 - `TAKER_FEE_BPS = 75`. [contracts/src/Exchange.vy : L33]
 - `matchOrders` requires opposite sides, same condition/outcome, price cross, valid maker signatures, unused fill. [contracts/src/Exchange.vy : L128-159]
@@ -59,11 +63,12 @@ EIP-712 `Order` struct. Price is USDC per token with `PRICE_SCALE = 1e6` (1.00 U
 
 ## MarketAMM
 
-Constant-product pool of YES and NO reserves. Seed splits USDC 50/50 into both tokens.
+Constant-product pool of YES and NO reserves. Seed splits USDC 50/50 into both tokens. Remains CPMM until OU-T008/OU-T009; do not invent uniform-LVR as shipped.
 
 - `AMM_FEE_BPS = 100`, applied as 50 vault + 50 LP on buy and sell. [contracts/src/MarketAMM.vy : L40]
-- `buyWithUSDC` splits trade+LP fee into tokens, swaps against k, sends the bought outcome to trader. [contracts/src/MarketAMM.vy : L103-140]
-- `sellToUSDC` solves for merge amount `x`, takes fees from `x`, returns net USDC.
+- `quoteSell` shares sell math with `sellToUSDC`. [contracts/src/MarketAMM.vy : L104-119]
+- `buyWithUSDC` splits trade+LP fee into tokens, swaps against k, sends the bought outcome to trader. [contracts/src/MarketAMM.vy : L122-159]
+- `sellToUSDC` solves for merge amount `x`, takes fees from `x`, returns net USDC. [contracts/src/MarketAMM.vy : L162-201]
 - `addLiquidity` mints LP shares proportional to the thin reserve.
 
 ## ConsensusOracle

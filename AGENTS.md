@@ -3,13 +3,13 @@ title: Agent entrypoint
 status: SHIPPED
 area: cross
 summary: Read this first. Routes agents into docs, pointer rules, and the TODO registry.
-last_verified: 2026-09-16
+last_verified: 2026-09-20
 pointers: []
 ---
 
 # OverUnder — agent entrypoint
 
-Prediction markets on Base. Primaries trade on an off-chain CLOB settled in USDC. Wildcards are AI-generated child AMM markets. Three AI oracles must agree to resolve; otherwise 24h majority plus participant votes. Protocol fees accrue to a vault; OU redeems for USDC at NAV.
+Prediction markets on Base. Primaries and wildcards trade on a seeded CPMM settled in USDC. Three AI oracles must agree to resolve; otherwise 24h majority plus participant votes. Protocol fees accrue to a vault; OU redeems for USDC at NAV.
 
 ## Read next
 
@@ -17,7 +17,7 @@ Prediction markets on Base. Primaries trade on an off-chain CLOB settled in USDC
 2. [docs/architecture/overview.md](docs/architecture/overview.md) — layers
 3. Area file for the subsystem you will edit
 4. [docs/TODOS.md](docs/TODOS.md) — open gaps
-5. [docs/adr/](docs/adr/) — why, not how
+5. [docs/adr/](docs/adr/) — why, not how (book of record: [docs/adr/0007-amm-first-uniform-lvr.md](docs/adr/0007-amm-first-uniform-lvr.md))
 
 ## Conventions
 
@@ -25,7 +25,7 @@ Prediction markets on Base. Primaries trade on an off-chain CLOB settled in USDC
 - MIXED docs prefix bullets `[SHIPPED]` / `[STUB]` / `[PHASE2]`
 - Do not dump source into docs. Quote at most 3 lines.
 - When you change a cited function, update `pointers` and `last_verified` on the matching doc.
-- Do not invent ERC-4337, Privy JWKS, Flutter app, or emissions as shipped; they are PHASE2 or STUB.
+- Do not invent ERC-4337, Privy JWKS, or uniform-LVR as shipped. OU-T004–T007 stay done.
 
 ## Local commands
 

@@ -1,6 +1,6 @@
 # OverUnder
 
-Prediction markets on Base: Polymarket-style CLOB primaries, AMM wildcards, and AI-agent oracles.
+Prediction markets on Base: seeded CPMM on primaries and wildcards, leftover CLOB overlay, and AI-agent oracles.
 
 MVP settlement is **USDC**. Oracles must reach **unanimous (3/3)** consensus to resolve; otherwise **agent majority + participant votes** after 24 hours. Protocol fees accrue to a vault; **OU** redeems for USDC at NAV.
 
@@ -12,7 +12,7 @@ MVP settlement is **USDC**. Oracles must reach **unanimous (3/3)** consensus to 
 | API | FastAPI |
 | Oracles | Python agents (Claude/GPT/Gemini + search) |
 | Web | Next.js, Tailwind, wagmi, Privy |
-| Mobile | Flutter later — see `mobile/README.md` |
+| Mobile | Flutter — see `mobile/README.md` |
 
 ## Quickstart (local)
 
@@ -52,4 +52,4 @@ cd .. && .\contracts\.venv\Scripts\python.exe scripts\e2e_local.py
 
 ## Architecture
 
-Primary markets trade on an off-chain CLOB settled by `Exchange.vy`. Wildcard child markets use `MarketAMM.vy` (CPMM). Both share `ConditionalTokens.vy`, `ConsensusOracle.vy`, and `FeeVault.vy`.
+Primary and wildcard markets trade on `MarketAMM.vy` (seeded CPMM). `Exchange.vy` remains deployed as leftover CLOB overlay. Both share `ConditionalTokens.vy`, `ConsensusOracle.vy`, and `FeeVault.vy`. Book of record: [docs/adr/0007-amm-first-uniform-lvr.md](docs/adr/0007-amm-first-uniform-lvr.md).

@@ -2,22 +2,27 @@
 title: Data flow
 status: MIXED
 area: cross
-summary: End-to-end traces for primary CLOB fills, wildcard AMM swaps, and oracle resolution.
+summary: End-to-end traces for seeded AMM swaps, leftover CLOB overlay, and oracle resolution.
 last_verified: 2026-09-20
 pointers:
-  - "[contracts/src/MarketFactory.vy : L81-84]"
-  - "[backend/app/orderbook/router.py : L28-58]"
+  - "[contracts/src/MarketFactory.vy : L82-89]"
+  - "[contracts/src/MarketFactory.vy : L92-99]"
+  - "[backend/app/markets/router.py : L191-334]"
+  - "[backend/app/amm/router.py : L9-28]"
+  - "[contracts/src/MarketAMM.vy : L73-82]"
+  - "[contracts/src/MarketAMM.vy : L104-119]"
+  - "[contracts/src/MarketAMM.vy : L122-159]"
+  - "[contracts/src/MarketAMM.vy : L162-201]"
+  - "[web/src/features/trade/AmmSwap.tsx : L163-216]"
+  - "[web/src/features/trade/AmmSwap.tsx : L219-272]"
   - "[backend/app/orderbook/matcher.py : L37-86]"
   - "[contracts/src/Exchange.vy : L128-159]"
-  - "[contracts/src/MarketFactory.vy : L86-94]"
-  - "[contracts/src/MarketAMM.vy : L74-82]"
-  - "[contracts/src/MarketAMM.vy : L103-140]"
   - "[oracles/consensus/coordinator.py : L36-52]"
   - "[contracts/src/ConsensusOracle.vy : L144-161]"
   - "[contracts/src/ConsensusOracle.vy : L197-226]"
   - "[contracts/src/ConditionalTokens.vy : L86-105]"
   - "[web/src/features/trade/OrderTicket.tsx : L18-39]"
-  - "[backend/app/indexer/listener.py : L161-210]"
+  - "[backend/app/indexer/listener.py : L175-237]"
   - "[backend/app/markets/router.py : L99-116]"
   - "[web/src/features/markets/PriceChart.tsx : L16-90]"
   - "[contracts/src/FeeVault.vy : L61-83]"
@@ -27,29 +32,25 @@ pointers:
 
 ## Primary AMM swap (MVP)
 
-1. [SHIPPED] Operator calls `createPrimaryMarket` with `seedUsdc`; factory seeds 50/50 YES/NO pool. [contracts/src/MarketFactory.vy : L82-90] [contracts/src/MarketAMM.vy : L74-82]
-2. [STUB] API `POST /markets` currently inserts SQLite independently; production must key off the on-chain `conditionId`.
-3. [SHIPPED] Trader calls `GET /amm/{id}/quote` → `quoteBuy`.
-4. [SHIPPED] Web AmmSwap: approve USDC, then `buyWithUSDC` with `minOut` from quote*(1-slippage). [web/src/features/trade/AmmSwap.tsx : L81-102]
-5. [SHIPPED] On-chain `buyWithUSDC`: pull USDC, 50 bps vault, 50 bps LP, split remainder+LP into tokens, swap k, send bought outcome. [contracts/src/MarketAMM.vy : L103-140]
-6. [SHIPPED] Indexer stores pool-mid `PricePoint`s (`PoolSeeded` → 0.5, each `Swap` → `pools(conditionId)` mid); failed ranges hold the checkpoint and retry. `GET /markets/{id}/history` feeds the hub chart, empty until the pool is seeded. [backend/app/indexer/listener.py : L175-237]
-7. [PHASE2] Paymaster-sponsored UserOp for gasless swaps.
+1. [SHIPPED] Operator calls `createPrimaryMarket` with required `seedUsdc`; factory seeds 50/50 YES/NO pool. [contracts/src/MarketFactory.vy : L82-89] [contracts/src/MarketAMM.vy : L73-82]
+2. [SHIPPED] API `POST /markets` submits the factory tx (fail-closed) and upserts SQLite from `MarketCreated`. [backend/app/markets/router.py : L191-334]
+3. [SHIPPED] Trader calls `GET /amm/{id}/quote` → `quoteBuy` or `quoteSell`. [backend/app/amm/router.py : L9-28]
+4. [SHIPPED] Web AmmSwap buy: approve USDC, then `buyWithUSDC` with `minOut` from quote*(1-slippage). [web/src/features/trade/AmmSwap.tsx : L163-216]
+5. [SHIPPED] Web AmmSwap sell: CTF `setApprovalForAll`, then `sellToUSDC` with `minUsdc`. [web/src/features/trade/AmmSwap.tsx : L219-272]
+6. [SHIPPED] On-chain `buyWithUSDC` / `sellToUSDC` apply 50 bps vault + 50 bps LP. [contracts/src/MarketAMM.vy : L122-159] [contracts/src/MarketAMM.vy : L162-201]
+7. [SHIPPED] Indexer stores pool-mid `PricePoint`s (`PoolSeeded` → 0.5, each `Swap` → `pools(conditionId)` mid); failed ranges hold the checkpoint and retry. `GET /markets/{id}/history` feeds the hub chart, empty until the pool is seeded. [backend/app/indexer/listener.py : L175-237]
+8. [PHASE2] Paymaster-sponsored UserOp for gasless swaps.
 
 ## Wildcard AMM swap
 
-1. [SHIPPED] Generator or operator `createWildcardMarket` with `seedUsdc`; factory seeds 50/50 YES/NO. [contracts/src/MarketFactory.vy : L86-94] [contracts/src/MarketAMM.vy : L74-82]
-2. [SHIPPED] Trader calls `GET /amm/{id}/quote` → `quoteBuy`.
-3. [SHIPPED] Web AmmSwap: approve USDC, then `buyWithUSDC` with `minOut` from quote*(1-slippage). [web/src/features/trade/AmmSwap.tsx : L81-102]
-4. [SHIPPED] On-chain `buyWithUSDC`: pull USDC, 50 bps vault, 50 bps LP, split remainder+LP into tokens, swap k, send bought outcome. [contracts/src/MarketAMM.vy : L103-140]
-5. [PHASE2] Paymaster-sponsored UserOp for gasless swaps.
+1. [SHIPPED] Generator or operator `createWildcardMarket` with optional `seedUsdc`; factory seeds 50/50 YES/NO when seed > 0. [contracts/src/MarketFactory.vy : L92-99] [contracts/src/MarketAMM.vy : L73-82]
+2. [SHIPPED] Same quote + AmmSwap buy/sell path as primaries. [web/src/features/trade/AmmSwap.tsx : L163-272]
+3. [PHASE2] Paymaster-sponsored UserOp for gasless swaps.
 
-## Primary CLOB fill (PHASE2)
+## Leftover CLOB overlay (not required)
 
-1. [PHASE2] Maker splits USDC into YES/NO (or holds inventory) and `setApprovalForAll` on Exchange.
-2. [PHASE2] Web OrderTicket posts EIP-712 signed order to `POST /orders`. [web/src/features/trade/OrderTicket.tsx : L18-39]
-3. [PHASE2] Matcher finds a crossing rester, records `Trade`, calls `matchOrders`. [backend/app/orderbook/matcher.py : L37-86]
-4. [PHASE2] Exchange moves USDC (volume + 75 bps taker fee to FeeVault) and ERC-1155 outcome tokens. [contracts/src/Exchange.vy : L128-159]
-5. [PHASE2] Relayer verifies allowances/signatures before ACK; user sees confirmed `txHash` in portfolio.
+1. [SHIPPED] `Exchange.matchOrders` and OrderTicket remain in tree as leftover overlay, unused by the happy path. [contracts/src/Exchange.vy : L128-159] [web/src/features/trade/OrderTicket.tsx : L18-39]
+2. [PHASE2] A CLOB overlay may be scheduled later; it is not a required destination. Matcher `matchOrders` stays leftover. [backend/app/orderbook/matcher.py : L37-86]
 
 ## Resolve market
 
@@ -61,6 +62,6 @@ pointers:
 
 ## OU redeem
 
-1. [SHIPPED] Fees from Exchange and AMM sit as USDC on FeeVault.
+1. [SHIPPED] Phase 1 fees into FeeVault are AMM 100 bps (50 vault / 50 LP). Leftover Exchange fills may also pay 75 bps if matching is used.
 2. [SHIPPED] Holder `requestRedeem` (24h cooldown at deploy), then `claim` burns OU and pays pro-rata USDC. [contracts/src/FeeVault.vy : L61-83]
-3. [PHASE2] Emissions do not mint into this vault; see [phase-2.md](../roadmap/phase-2.md).
+3. [SHIPPED] Emissions transfer from treasury; they do not mint into this vault.
