@@ -1,7 +1,7 @@
 export type Category = "all" | "sports" | "other";
 
-export function categorizeMarket(question: string): Category {
-  const q = question.toLowerCase();
+export function categorizeMarket(input: string | { question: string }): Category {
+  const q = typeof input === "string" ? input.toLowerCase() : input.question.toLowerCase();
   
   const sportsTokens = [
     "nfl", "nba", "mlb", "nhl", "mls", "ncaa", "epl", "uefa",
