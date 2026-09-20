@@ -26,19 +26,16 @@ function categorizeMarket(market: Market): Category {
     "soccer", "football", "basketball", "baseball", "hockey", "tennis",
     "golf", "boxing", "ufc", "mma", "nascar", "f1", "formula 1",
     "chiefs", "broncos", "yankees", "red sox", "dodgers", "mets",
-    "lakers", "celtics", "warriors", "knicks", "bucks",
-    "cowboys", "patriots", "packers", "eagles", "rams", "ravens",
-    "steelers", "raiders", "seahawks", "chargers",
+    "lakers", "celtics", "warriors", "knicks",
+    "cowboys", "patriots", "packers", "ravens",
+    "steelers", "seahawks", "chargers",
     "touchdown", "fumble", "home run", "strikeout", "grand slam",
-    "three-pointer", "dunk", "slam dunk", "hat trick"
+    "three-pointer", "slam dunk", "hat trick"
   ];
   
-  const shortTokens = ["f1", "ufc", "mma", "nfl", "nba", "mlb", "nhl", "mls", "epl"];
-  
   for (const token of sportsTokens) {
-    const pattern = shortTokens.includes(token)
-      ? new RegExp(`\\b${token}\\b`, "i")
-      : new RegExp(`\\b${token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`, "i");
+    const escaped = token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const pattern = new RegExp(`\\b${escaped}\\b`, "i");
     if (pattern.test(q)) {
       return "sports";
     }
