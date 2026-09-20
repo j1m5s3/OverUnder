@@ -32,7 +32,7 @@ pointers:
 3. [SHIPPED] Trader calls `GET /amm/{id}/quote` → `quoteBuy`.
 4. [SHIPPED] Web AmmSwap: approve USDC, then `buyWithUSDC` with `minOut` from quote*(1-slippage). [web/src/features/trade/AmmSwap.tsx : L81-102]
 5. [SHIPPED] On-chain `buyWithUSDC`: pull USDC, 50 bps vault, 50 bps LP, split remainder+LP into tokens, swap k, send bought outcome. [contracts/src/MarketAMM.vy : L103-140]
-6. [SHIPPED] Indexer stores pool-mid `PricePoint`s (`PoolSeeded` → 0.5, each `Swap` → `pools(conditionId)` mid); `GET /markets/{id}/history` feeds the hub chart, empty until the first swap. [backend/app/indexer/listener.py : L161-210]
+6. [SHIPPED] Indexer stores pool-mid `PricePoint`s (`PoolSeeded` → 0.5, each `Swap` → `pools(conditionId)` mid); failed ranges hold the checkpoint and retry. `GET /markets/{id}/history` feeds the hub chart, empty until the pool is seeded. [backend/app/indexer/listener.py : L175-237]
 7. [PHASE2] Paymaster-sponsored UserOp for gasless swaps.
 
 ## Wildcard AMM swap

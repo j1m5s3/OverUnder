@@ -18,11 +18,18 @@ SEED_PRICE_MICROS = 500_000
 
 
 def mid_to_micros(yes_reserve: int, no_reserve: int) -> int:
-    """Pool-mid YES price in micros: yes / (yes + no). Empty pool seeds at 0.5."""
-    total = (yes_reserve or 0) + (no_reserve or 0)
+    """Pool-mid YES price in micros: no / (yes + no).
+
+    On this CPMM a yes buy drains yesReserve and fills noReserve while
+    real p(yes) rises, so the YES price is the NO reserve share.
+    Empty pool seeds at 0.5.
+    """
+    yes_reserve = yes_reserve or 0
+    no_reserve = no_reserve or 0
+    total = yes_reserve + no_reserve
     if total <= 0:
         return SEED_PRICE_MICROS
-    return int((yes_reserve or 0) * 1_000_000 // total)
+    return int(no_reserve * 1_000_000 // total)
 
 
 def build_swap_point(
@@ -152,24 +159,36 @@ async def index_once() -> None:
                 continue
 
         if amm is not None:
-            await _index_amm_history(w3, amm, db, start, end)
+            amm_ok = await _index_amm_history(w3, amm, db, start, end)
+            if not amm_ok:
+                # Hold the checkpoint so the failed AMM range retries next
+                # tick. Factory writes above stay committed (they replay
+                # idempotently); partial AMM points stay too (deduped).
+                logger.error(f"AMM history range {start}-{end} incomplete; holding last_block at {cp.last_block}")
+                await db.commit()
+                return
 
         cp.last_block = end
         await db.commit()
 
 
-async def _index_amm_history(w3, amm, db, start: int, end: int) -> None:
-    """Index PoolSeeded (first point at 0.5) and Swap (pool-mid) into price_points."""
+async def _index_amm_history(w3, amm, db, start: int, end: int) -> bool:
+    """Index PoolSeeded (first point at 0.5) and Swap (pool-mid) into price_points.
+
+    Returns True only if the whole range was captured. Any fetch failure
+    returns False so the caller holds the checkpoint and the range retries
+    instead of committing a permanent gap that would read as empty history.
+    """
     try:
         seeded_logs = amm.events.PoolSeeded().get_logs(from_block=start, to_block=end)
     except Exception as e:
-        logger.warning(f"Skipping PoolSeeded range {start}-{end}: {e}")
-        seeded_logs = []
+        logger.error(f"AMM range {start}-{end} incomplete: PoolSeeded get_logs failed ({e}); will retry")
+        return False
     try:
         swap_logs = amm.events.Swap().get_logs(from_block=start, to_block=end)
     except Exception as e:
-        logger.warning(f"Skipping Swap range {start}-{end}: {e}")
-        swap_logs = []
+        logger.error(f"AMM range {start}-{end} incomplete: Swap get_logs failed ({e}); will retry")
+        return False
 
     amm_events = []
     for ev in seeded_logs:
@@ -184,33 +203,38 @@ async def _index_amm_history(w3, amm, db, start: int, end: int) -> None:
             cid = "0x" + args["conditionId"].hex()
             block_number = event["blockNumber"]
             log_index = event["logIndex"]
-            existing = (
-                await db.execute(
-                    select(PricePoint).where(
-                        PricePoint.condition_id == cid,
-                        PricePoint.block_number == block_number,
-                        PricePoint.log_index == log_index,
-                    )
+        except Exception as e:
+            logger.warning(f"Skipping malformed AMM event {event.get('type')}: {e}")
+            continue
+        existing = (
+            await db.execute(
+                select(PricePoint).where(
+                    PricePoint.condition_id == cid,
+                    PricePoint.block_number == block_number,
+                    PricePoint.log_index == log_index,
                 )
-            ).scalars().first()
-            if existing is not None:
-                continue
+            )
+        ).scalars().first()
+        if existing is not None:
+            continue
+        try:
+            block = w3.eth.get_block(block_number)
+            ts = block["timestamp"] if isinstance(block, dict) else block.timestamp
+        except Exception as e:
+            logger.error(f"AMM range {start}-{end} incomplete: no timestamp for block {block_number} ({e}); will retry")
+            return False
+        if event["type"] == "seeded":
+            db.add(build_seed_point(cid, int(ts), block_number, log_index))
+        else:
             try:
-                block = w3.eth.get_block(block_number)
-                ts = block["timestamp"] if isinstance(block, dict) else block.timestamp
-            except Exception as e:
-                logger.warning(f"Skipping AMM event at block {block_number}: no timestamp ({e})")
-                continue
-            if event["type"] == "seeded":
-                db.add(build_seed_point(cid, int(ts), block_number, log_index))
-            else:
                 cid_bytes = bytes.fromhex(cid[2:] if cid.startswith("0x") else cid)
                 pool = amm.functions.pools(cid_bytes).call(block_identifier=block_number)
                 yes_reserve, no_reserve = int(pool[0]), int(pool[1])
-                db.add(build_swap_point(cid, int(ts), block_number, log_index, yes_reserve, no_reserve))
-        except Exception as e:
-            logger.warning(f"Skipping AMM event {event.get('type')} at block {event.get('blockNumber')}: {e}")
-            continue
+            except Exception as e:
+                logger.error(f"AMM range {start}-{end} incomplete: pools() failed at block {block_number} ({e}); will retry")
+                return False
+            db.add(build_swap_point(cid, int(ts), block_number, log_index, yes_reserve, no_reserve))
+    return True
 
 
 async def run_indexer_loop(interval: float = 5.0) -> None:

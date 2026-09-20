@@ -57,7 +57,7 @@ export function PriceChart({ conditionId }: { conditionId: string }) {
       <div className="card" style={{ marginTop: 16 }}>
         <h3 style={{ marginBottom: 8 }}>Price history</h3>
         <p className="muted" style={{ margin: 0 }}>
-          No price history yet — prices appear after the first swap.
+          No price history yet — prices appear once the pool is seeded.
         </p>
         {spotText ? <p className="muted" style={{ marginTop: 8 }}>{spotText}</p> : null}
       </div>
