@@ -3,7 +3,7 @@ title: Backend
 status: MIXED
 area: backend
 summary: FastAPI routers for auth, markets, CLOB, AMM quotes, oracle records, ramps, KYC, emissions, and portfolio.
-last_verified: 2026-09-19
+last_verified: 2026-09-20
 pointers:
   - "[backend/app/main.py : L23-48]"
   - "[backend/app/auth/router.py : L61-102]"
@@ -82,8 +82,9 @@ pointers:
 
 ## Portfolio + indexer
 
-- [SHIPPED] Open orders and trades by address. [backend/app/portfolio/router.py : L13-44]
-- [STUB] `GET /fee-vault/nav` returns `nav: 0, simulated: true` if RPC/deploy missing. [backend/app/portfolio/router.py : L47-61]
+- [SHIPPED] `GET /portfolio/{address}` returns positions (CTF balances), open orders, and trades. [backend/app/portfolio/router.py : L13-89]
+- [SHIPPED] Positions are AMM outcome holdings queried from ConditionalTokens.balanceOf for all markets. [backend/app/portfolio/router.py : L22-62]
+- [STUB] `GET /fee-vault/nav` returns `nav: 0, simulated: true` if RPC/deploy missing. [backend/app/portfolio/router.py : L92-107]
 - [STUB] `index_once` polls factory logs when connected; not started as a background task from `main.py`. [backend/app/indexer/listener.py : L20-40]
 - [PHASE2] Always-on indexer, CTF balance snapshots, and OU NAV history.
 
