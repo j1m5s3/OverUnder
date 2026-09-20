@@ -44,6 +44,12 @@ class EventCard(BaseModel):
     children: list[MarketPublic]
 
 
+class PricePointPublic(BaseModel):
+    conditionId: str
+    ts: int
+    yesPriceMicros: int
+
+
 def _visible():
     return Market.paused.is_(False)
 
@@ -88,6 +94,26 @@ async def list_markets(
     for orphan in orphans:
         cards.append(EventCard(primary=_to_public(orphan), children=[]))
     return cards
+
+
+@router.get("/{condition_id}/history")
+async def get_market_history(condition_id: str, db: AsyncSession = Depends(get_db)) -> list[PricePointPublic]:
+    from app.models import PricePoint
+
+    m = await db.get(Market, condition_id)
+    if m is None:
+        raise HTTPException(404, "market not found")
+    rows = (
+        await db.execute(
+            select(PricePoint)
+            .where(PricePoint.condition_id == condition_id)
+            .order_by(PricePoint.ts, PricePoint.block_number, PricePoint.log_index, PricePoint.id)
+        )
+    ).scalars().all()
+    return [
+        PricePointPublic(conditionId=r.condition_id, ts=r.ts, yesPriceMicros=r.yes_price_micros)
+        for r in rows
+    ]
 
 
 @router.get("/{condition_id}")

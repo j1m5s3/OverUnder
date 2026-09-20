@@ -93,6 +93,16 @@ class Checkpoint(Base):
     last_block: Mapped[int] = mapped_column(Integer, default=0)
 
 
+class PricePoint(Base):
+    __tablename__ = "price_points"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    condition_id: Mapped[str] = mapped_column(String(66), index=True)
+    ts: Mapped[int] = mapped_column(Integer, index=True)
+    block_number: Mapped[int] = mapped_column(Integer, default=0)
+    log_index: Mapped[int] = mapped_column(Integer, default=0)
+    yes_price_micros: Mapped[int] = mapped_column(Integer, default=500_000)
+
+
 class RampTx(Base):
     __tablename__ = "ramp_txs"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)

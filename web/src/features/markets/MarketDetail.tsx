@@ -7,6 +7,7 @@ import { AmmSwap } from "@/features/trade/AmmSwap";
 import { OraclePanel } from "@/features/oracle/OraclePanel";
 import { MatchupHero } from "./MatchupHero";
 import { MarketInfo } from "./MarketInfo";
+import { PriceChart } from "./PriceChart";
 import { isSportsMarket } from "@/shared/utils/categorize";
 import {
   applyActiveMarketQuery,
@@ -132,6 +133,7 @@ export function MarketDetail({ conditionId }: { conditionId: string }) {
             })}
           </div>
         )}
+        <PriceChart key={`chart-${activeConditionId}`} conditionId={activeConditionId} />
         <MarketInfo market={market} />
         <OraclePanel conditionId={market.conditionId} />
       </div>
