@@ -24,7 +24,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               </button>
               <nav className={`nav-links ${menuOpen ? "open" : ""}`}>
                 <Link href="/" onClick={() => setMenuOpen(false)}>Markets</Link>
-                <Link href="/portfolio" onClick={() => setMenuOpen(false)}>Portfolio</Link>
+                <Link href="/bets" onClick={() => setMenuOpen(false)}>My Bets</Link>
                 <Link href="/wallet" onClick={() => setMenuOpen(false)}>Wallet</Link>
                 <ConnectBar />
               </nav>
