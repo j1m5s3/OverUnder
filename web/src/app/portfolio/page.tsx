@@ -47,8 +47,11 @@ export default function PortfolioPage() {
   }
 
   const positions = data?.positions || [];
+  const openOrders = data?.openOrders || [];
+  const trades = data?.trades || [];
+  const hasActivity = positions.length > 0 || openOrders.length > 0 || trades.length > 0;
 
-  if (positions.length === 0) {
+  if (!hasActivity) {
     return (
       <div>
         <h1>Portfolio</h1>
@@ -68,7 +71,41 @@ export default function PortfolioPage() {
     <div>
       <h1>Portfolio</h1>
       <p className="muted">{address}</p>
-      <pre className="card">{JSON.stringify(data, null, 2)}</pre>
+      
+      {positions.length > 0 && (
+        <div className="card">
+          <h3>Positions</h3>
+          <div style={{ marginTop: "12px" }}>
+            {positions.map((pos: any, i: number) => (
+              <div key={i} style={{ padding: "8px 0", borderBottom: i < positions.length - 1 ? "1px solid var(--border)" : "none" }}>
+                <div>{pos.question || pos.marketId}</div>
+                <div className="row" style={{ marginTop: "4px" }}>
+                  <span className={pos.side === "YES" ? "yes" : "no"}>{pos.side}</span>
+                  <span className="muted" style={{ marginLeft: "8px" }}>{pos.amount} shares</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {openOrders.length > 0 && (
+        <div className="card" style={{ marginTop: "16px" }}>
+          <h3>Open Orders</h3>
+          <p className="muted" style={{ marginTop: "8px" }}>
+            You have {openOrders.length} open {openOrders.length === 1 ? "order" : "orders"}
+          </p>
+        </div>
+      )}
+
+      {trades.length > 0 && (
+        <div className="card" style={{ marginTop: "16px" }}>
+          <h3>Trade History</h3>
+          <p className="muted" style={{ marginTop: "8px" }}>
+            {trades.length} {trades.length === 1 ? "trade" : "trades"}
+          </p>
+        </div>
+      )}
     </div>
   );
 }
