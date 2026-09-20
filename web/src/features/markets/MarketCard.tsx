@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { parseMatchup } from "@/shared/utils/categorize";
-import type { Market } from "./MarketList";
+import type { Market } from "./eventHub";
 
 function formatCloseTime(unixSeconds: number): string {
   const date = new Date(unixSeconds * 1000);

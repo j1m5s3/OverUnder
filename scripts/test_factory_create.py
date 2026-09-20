@@ -103,7 +103,8 @@ async def test_create_market():
         assert list_resp.status_code == 200
         markets = list_resp.json()
         assert len(markets) == 1
-        assert markets[0]["conditionId"] == market["conditionId"]
+        assert markets[0]["primary"]["conditionId"] == market["conditionId"]
+        assert markets[0]["children"] == []
         
         print("✓ Factory-backed market creation works")
         return True

@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.router import require_operator
@@ -21,24 +21,83 @@ class CreateMarketIn(BaseModel):
     suggested_probability: float = 0.5
 
 
+class MarketPublic(BaseModel):
+    conditionId: str
+    parentConditionId: str | None = None
+    question: str
+    resolutionCriteria: str = ""
+    marketType: int
+    closeTime: int
+    paused: bool
+    resolved: bool
+    payoutYes: int = 0
+    payoutNo: int = 0
+    suggestedProbability: float = 0.5
+
+
+class MarketDetail(MarketPublic):
+    children: list[MarketPublic]
+
+
+class EventCard(BaseModel):
+    primary: MarketPublic
+    children: list[MarketPublic]
+
+
+def _visible():
+    return Market.paused.is_(False)
+
+
+def _child_of(parent_condition_id: str):
+    return and_(
+        _visible(),
+        Market.market_type == 1,
+        Market.parent_condition_id == parent_condition_id,
+    )
+
+
 @router.get("")
 async def list_markets(
     parent_id: str | None = Query(default=None, alias="parentId"),
     db: AsyncSession = Depends(get_db),
-):
-    stmt = select(Market).where(Market.paused.is_(False))
+) -> list[EventCard] | list[MarketPublic]:
     if parent_id:
-        stmt = stmt.where(Market.parent_condition_id == parent_id)
-    rows = (await db.execute(stmt)).scalars().all()
-    return [_public(m) for m in rows]
+        stmt = select(Market).where(_visible(), Market.parent_condition_id == parent_id)
+        rows = (await db.execute(stmt)).scalars().all()
+        return [_to_public(m) for m in rows]
+
+    visible = list((await db.execute(select(Market).where(_visible()))).scalars().all())
+    primary_ids = {m.condition_id for m in visible if m.market_type == 0}
+    children_by_parent: dict[str, list[Market]] = {}
+    orphans: list[Market] = []
+    for m in visible:
+        if m.market_type != 1:
+            continue
+        parent = m.parent_condition_id or ""
+        if parent and parent in primary_ids:
+            children_by_parent.setdefault(parent, []).append(m)
+        else:
+            orphans.append(m)
+
+    cards: list[EventCard] = []
+    for primary in visible:
+        if primary.market_type != 0:
+            continue
+        kids = sorted(children_by_parent.get(primary.condition_id, []), key=lambda row: row.condition_id)
+        cards.append(EventCard(primary=_to_public(primary), children=[_to_public(c) for c in kids]))
+    for orphan in orphans:
+        cards.append(EventCard(primary=_to_public(orphan), children=[]))
+    return cards
 
 
 @router.get("/{condition_id}")
-async def get_market(condition_id: str, db: AsyncSession = Depends(get_db)):
+async def get_market(condition_id: str, db: AsyncSession = Depends(get_db)) -> MarketDetail:
     m = await db.get(Market, condition_id)
     if m is None:
         raise HTTPException(404, "market not found")
-    return _public(m)
+    kids = (await db.execute(select(Market).where(_child_of(m.condition_id)).order_by(Market.condition_id))).scalars().all()
+    public = _to_public(m)
+    return MarketDetail(**public.model_dump(), children=[_to_public(c) for c in kids])
 
 
 @router.post("")
@@ -249,6 +308,10 @@ async def pause_market(
         raise
     except Exception as e:
         raise HTTPException(500, f"failed to pause market on chain: {e}")
+
+
+def _to_public(m: Market) -> MarketPublic:
+    return MarketPublic.model_validate(_public(m))
 
 
 def _public(m: Market) -> dict:

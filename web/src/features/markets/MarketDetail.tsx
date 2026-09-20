@@ -8,10 +8,10 @@ import { OraclePanel } from "@/features/oracle/OraclePanel";
 import { MatchupHero } from "./MatchupHero";
 import { MarketInfo } from "./MarketInfo";
 import { isSportsMarket } from "@/shared/utils/categorize";
-import type { Market } from "./MarketList";
+import type { MarketDetailData } from "./eventHub";
 
 export function MarketDetail({ conditionId }: { conditionId: string }) {
-  const [market, setMarket] = useState<Market | null>(null);
+  const [market, setMarket] = useState<MarketDetailData | null>(null);
   const searchParams = useSearchParams();
   const sideParam = searchParams.get("side");
   const initialSide = (sideParam === "yes" || sideParam === "no") ? sideParam : undefined;
@@ -30,6 +30,7 @@ export function MarketDetail({ conditionId }: { conditionId: string }) {
           paused: false,
           resolved: false,
           suggestedProbability: 0.5,
+          children: [],
         }),
       );
   }, [conditionId]);
