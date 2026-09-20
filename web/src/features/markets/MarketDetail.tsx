@@ -8,32 +8,55 @@ import { OraclePanel } from "@/features/oracle/OraclePanel";
 import { MatchupHero } from "./MatchupHero";
 import { MarketInfo } from "./MarketInfo";
 import { isSportsMarket } from "@/shared/utils/categorize";
-import type { MarketDetailData } from "./eventHub";
+import { resolveActiveConditionId, type Market, type MarketDetailData } from "./eventHub";
+
+const DEMO_KELCE: Market = {
+  conditionId: "0xdemo2",
+  parentConditionId: "0xdemo1",
+  question: "Travis Kelce to fumble at least once?",
+  marketType: 1,
+  closeTime: Math.floor(Date.now() / 1000) + 86400,
+  paused: false,
+  resolved: false,
+  suggestedProbability: 0.22,
+};
+
+function demoDetail(conditionId: string): MarketDetailData {
+  const isKelce = conditionId.startsWith("0xdemo2") || conditionId.includes("demo2");
+  return {
+    conditionId,
+    question: isKelce ? DEMO_KELCE.question : "Chiefs vs Broncos: Chiefs win?",
+    marketType: isKelce ? 1 : 0,
+    closeTime: Math.floor(Date.now() / 1000) + 3600,
+    paused: false,
+    resolved: false,
+    suggestedProbability: isKelce ? 0.22 : 0.58,
+    children: conditionId === "0xdemo1" ? [{ ...DEMO_KELCE }] : [],
+  };
+}
+
+function yesPct(probability: number): string {
+  return `${Math.round((probability || 0.5) * 100)}%`;
+}
 
 export function MarketDetail({ conditionId }: { conditionId: string }) {
   const [market, setMarket] = useState<MarketDetailData | null>(null);
+  const [activeConditionId, setActiveConditionId] = useState(conditionId);
   const searchParams = useSearchParams();
   const sideParam = searchParams.get("side");
+  const mParam = searchParams.get("m");
   const initialSide = (sideParam === "yes" || sideParam === "no") ? sideParam : undefined;
 
   useEffect(() => {
     api(`/api/v1/markets/${encodeURIComponent(conditionId)}`)
       .then(setMarket)
-      .catch(() =>
-        setMarket({
-          conditionId,
-          question: conditionId.startsWith("0xdemo2")
-            ? "Travis Kelce to fumble at least once?"
-            : "Chiefs vs Broncos: Chiefs win?",
-          marketType: conditionId.includes("demo2") ? 1 : 0,
-          closeTime: Math.floor(Date.now() / 1000) + 3600,
-          paused: false,
-          resolved: false,
-          suggestedProbability: 0.5,
-          children: [],
-        }),
-      );
+      .catch(() => setMarket(demoDetail(conditionId)));
   }, [conditionId]);
+
+  useEffect(() => {
+    if (!market || market.conditionId !== conditionId) return;
+    setActiveConditionId(resolveActiveConditionId(market, mParam));
+  }, [market, mParam, conditionId]);
 
   if (!market) {
     return (
@@ -44,9 +67,10 @@ export function MarketDetail({ conditionId }: { conditionId: string }) {
       </div>
     );
   }
-  
+
   const showMatchup = isSportsMarket(market.question);
-  
+  const hubRows: Market[] = [market, ...market.children];
+
   return (
     <div className="market-detail-layout">
       <div className="market-header">
@@ -61,10 +85,31 @@ export function MarketDetail({ conditionId }: { conditionId: string }) {
       </div>
       <div className="market-sidebar">
         <div className="sticky-ticket">
-          <AmmSwap key={initialSide ?? "yes"} conditionId={market.conditionId} initialSide={initialSide} />
+          <AmmSwap key={activeConditionId} conditionId={activeConditionId} initialSide={initialSide} />
         </div>
       </div>
       <div className="market-content">
+        {market.children.length > 0 && (
+          <div className="hub-board">
+            <div className="muted">
+              {market.children.length} market{market.children.length === 1 ? "" : "s"}
+            </div>
+            {hubRows.map((row) => {
+              const selected = row.conditionId === activeConditionId;
+              return (
+                <button
+                  key={row.conditionId}
+                  type="button"
+                  className={selected ? "hub-row selected" : "hub-row"}
+                  onClick={() => setActiveConditionId(row.conditionId)}
+                >
+                  <span>{row.question}</span>
+                  <span className="yes">{yesPct(row.suggestedProbability)}</span>
+                </button>
+              );
+            })}
+          </div>
+        )}
         <MarketInfo market={market} />
         <OraclePanel conditionId={market.conditionId} />
       </div>

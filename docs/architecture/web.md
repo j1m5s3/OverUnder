@@ -12,8 +12,9 @@ pointers:
   - "[web/src/features/oracle/OraclePanel.tsx : L6-17]"
   - "[web/src/features/wallet/RampCard.tsx : L8-13]"
   - "[web/src/shared/api/client.ts : L1-11]"
-  - "[web/src/features/markets/MarketList.tsx : L36-157]"
-  - "[web/src/features/markets/eventHub.ts : L26-45]"
+  - "[web/src/features/markets/MarketList.tsx : L36-160]"
+  - "[web/src/features/markets/eventHub.ts : L26-54]"
+  - "[web/src/features/markets/MarketDetail.tsx : L42-116]"
   - "[mobile/README.md : L1-25]"
 ---
 
@@ -24,7 +25,8 @@ Next.js App Router under `web/`. Feature folders are the Flutter carryover map.
 ## Shell
 
 - [SHIPPED] Markets home, market detail, portfolio, wallet routes.
-- [SHIPPED] Market list consumes EventCard[]; `childCount` is `children.length`. Tabs categorize the primary only. Missing or paused parents stay as standalone EventCards from the API. [web/src/features/markets/eventHub.ts : L26-45]
+- [SHIPPED] Market list consumes EventCard[]; `childCount` is `children.length`. Tabs categorize the primary only. Missing or paused parents stay as standalone EventCards from the API. List child links stay on the primary route with `?m=`. [web/src/features/markets/eventHub.ts : L26-45]
+- [SHIPPED] Primary detail is the event hub. When `children.length > 0`, a board lists the primary then each child. Picking a row sets `activeConditionId` only (default is the primary; `?m=` deep-links a nested child). AmmSwap remounts with `key={activeConditionId}`. MatchupHero, MarketInfo, and OraclePanel stay on the primary. [web/src/features/markets/MarketDetail.tsx : L42-116]
 - [SHIPPED] `api()` prefixes `NEXT_PUBLIC_API_URL` and attaches `ou_token` bearer. [web/src/shared/api/client.ts : L1-11]
 - [SHIPPED] wagmi config: Anvil/Base Sepolia/Base, **injected connector only** (Coinbase/x402 barrel omitted to keep `next build` green). [web/src/app/providers.tsx : L10-17]
 

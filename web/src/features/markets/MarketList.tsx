@@ -141,7 +141,10 @@ export function MarketList() {
                   <div className="muted" style={{ marginTop: 8 }}>
                     Wildcards:{" "}
                     {chipChildren.map((child) => (
-                      <Link key={child.conditionId} href={`/markets/${child.conditionId}`}>
+                      <Link
+                        key={child.conditionId}
+                        href={`/markets/${encodeURIComponent(card.primary.conditionId)}?m=${encodeURIComponent(child.conditionId)}`}
+                      >
                         {child.question}{" "}
                       </Link>
                     ))}

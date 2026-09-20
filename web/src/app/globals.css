@@ -50,6 +50,26 @@ details[open] summary::before { transform: rotate(90deg); }
   gap: 16px; 
 }
 
+.hub-board { display: flex; flex-direction: column; gap: 8px; }
+.hub-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  text-align: left;
+  background: var(--bg-card);
+  color: inherit;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px 16px;
+  cursor: pointer;
+}
+.hub-row.selected {
+  border-color: var(--accent);
+  background: var(--bg-elevated);
+}
+
 @keyframes skeleton-loading {
   0% { background-position: 200% 0; }
   100% { background-position: -200% 0; }

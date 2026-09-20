@@ -43,3 +43,12 @@ export function selectHubs(
 
   return hubs;
 }
+
+export function resolveActiveConditionId(
+  detail: MarketDetailData,
+  requestedId: string | null | undefined,
+): string {
+  if (!requestedId || requestedId === detail.conditionId) return detail.conditionId;
+  const nested = detail.children.some((row) => row.conditionId === requestedId);
+  return nested ? requestedId : detail.conditionId;
+}
