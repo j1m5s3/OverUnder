@@ -18,10 +18,21 @@ function formatCloseTime(unixSeconds: number): string {
   return "Closes soon";
 }
 
+function formatMultiplier(probability: number): string {
+  if (probability <= 0 || probability >= 1) return "—";
+  const multiplier = 1 / probability;
+  return multiplier < 10 ? multiplier.toFixed(2) : multiplier.toFixed(1);
+}
+
 export function MarketCard({ market }: { market: Market }) {
   const yesPct = Math.round((market.suggestedProbability || 0.5) * 100);
   const noPct = 100 - yesPct;
   const isLeading = (side: "yes" | "no") => side === "yes" ? yesPct > noPct : noPct > yesPct;
+  
+  const yesProb = market.suggestedProbability || 0.5;
+  const noProb = 1 - yesProb;
+  const yesMultiplier = formatMultiplier(yesProb);
+  const noMultiplier = formatMultiplier(noProb);
   
   return (
     <div className="card">
@@ -31,13 +42,15 @@ export function MarketCard({ market }: { market: Market }) {
       </Link>
       
       <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 12 }}>
-        <div style={{ textAlign: "center" }}>
+        <div style={{ textAlign: "center", flex: 1 }}>
           <div style={{ fontSize: 32, fontWeight: 600, opacity: isLeading("yes") ? 1 : 0.7 }} className="yes">{yesPct}%</div>
           <div className="muted" style={{ fontSize: 11, marginTop: 2 }}>yes</div>
+          <div className="muted" style={{ fontSize: 10, marginTop: 1 }}>{yesMultiplier}×</div>
         </div>
-        <div style={{ textAlign: "center" }}>
+        <div style={{ textAlign: "center", flex: 1 }}>
           <div style={{ fontSize: 32, fontWeight: 600, opacity: isLeading("no") ? 1 : 0.7 }} className="no">{noPct}%</div>
           <div className="muted" style={{ fontSize: 11, marginTop: 2 }}>no</div>
+          <div className="muted" style={{ fontSize: 10, marginTop: 1 }}>{noMultiplier}×</div>
         </div>
       </div>
       

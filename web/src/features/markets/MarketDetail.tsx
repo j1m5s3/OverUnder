@@ -5,6 +5,9 @@ import { useSearchParams } from "next/navigation";
 import { api } from "@/shared/api/client";
 import { AmmSwap } from "@/features/trade/AmmSwap";
 import { OraclePanel } from "@/features/oracle/OraclePanel";
+import { MatchupHero } from "./MatchupHero";
+import { MarketInfo } from "./MarketInfo";
+import { isSportsMarket } from "@/shared/utils/categorize";
 import type { Market } from "./MarketList";
 
 export function MarketDetail({ conditionId }: { conditionId: string }) {
@@ -40,11 +43,58 @@ export function MarketDetail({ conditionId }: { conditionId: string }) {
       </div>
     );
   }
+  
+  const showMatchup = isSportsMarket(market.question);
+  
   return (
-    <div>
-      <h1>{market.question}</h1>
-      <AmmSwap key={initialSide ?? "yes"} conditionId={market.conditionId} initialSide={initialSide} />
-      <OraclePanel conditionId={market.conditionId} />
+    <div className="market-detail-layout">
+      <div className="market-main">
+        {showMatchup ? (
+          <>
+            <MatchupHero question={market.question} />
+            <h1 style={{ fontSize: "24px", marginBottom: "16px" }}>{market.question}</h1>
+          </>
+        ) : (
+          <h1>{market.question}</h1>
+        )}
+        <MarketInfo market={market} />
+        <OraclePanel conditionId={market.conditionId} />
+      </div>
+      <div className="market-sidebar">
+        <div className="sticky-ticket">
+          <AmmSwap key={initialSide ?? "yes"} conditionId={market.conditionId} initialSide={initialSide} />
+        </div>
+      </div>
+      <style jsx>{`
+        .market-detail-layout {
+          display: grid;
+          grid-template-columns: 1fr;
+          gap: 16px;
+        }
+        
+        @media (min-width: 768px) {
+          .market-detail-layout {
+            grid-template-columns: 1fr 400px;
+            gap: 24px;
+          }
+          
+          .sticky-ticket {
+            position: sticky;
+            top: 24px;
+          }
+        }
+        
+        @media (max-width: 767px) {
+          .market-detail-layout {
+            display: flex;
+            flex-direction: column;
+          }
+          
+          .market-sidebar {
+            order: -1;
+          }
+        }
+      `}</style>
     </div>
   );
 }
