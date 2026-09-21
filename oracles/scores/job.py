@@ -143,7 +143,26 @@ def run_job(
         try:
             coord = factory()
             outcome = coord.run(question, condition_id=cid)
-            results.append({"conditionId": cid, "ok": True, "unanimous": outcome.get("unanimous")})
+            compact = [
+                {
+                    "home": r.get("home_label"),
+                    "away": r.get("away_label"),
+                    "homeScore": r.get("home_score"),
+                    "awayScore": r.get("away_score"),
+                    "status": r.get("status"),
+                    "facts": r.get("facts"),
+                }
+                for r in (outcome.get("reports") or [])
+            ]
+            print(f"scout {cid} unanimous={outcome.get('unanimous')} reports={compact}", file=sys.stderr)
+            results.append(
+                {
+                    "conditionId": cid,
+                    "ok": True,
+                    "unanimous": outcome.get("unanimous"),
+                    "reports": compact,
+                }
+            )
         except Exception as exc:
             print(f"scout failed {cid}: {exc}", file=sys.stderr)
             results.append({"conditionId": cid, "ok": False, "error": str(exc)})

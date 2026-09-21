@@ -58,6 +58,40 @@ class ScoreReport:
         }
 
 
+_STATUSES = {"scheduled", "in_progress", "final", "postponed", "cancelled"}
+
+
+def canonicalize(report: ScoreReport, question: str) -> ScoreReport:
+    """Pin labels to the market question so 3/3 is not blocked by team-name aliases."""
+    home, away = parse_teams(question)
+    keys = requested_facts(question)
+    status = report.status if report.status in _STATUSES else "scheduled"
+    home_score, away_score = report.home_score, report.away_score
+    src = report.facts or {}
+    facts = {}
+    for key in keys:
+        value = src.get(key)
+        if value is None and key == "home_score":
+            value = home_score
+        elif value is None and key == "away_score":
+            value = away_score
+        facts[key] = value
+    if status == "scheduled":
+        home_score, away_score = None, None
+        facts = {key: None for key in keys}
+    return ScoreReport(
+        home_label=home,
+        away_label=away,
+        home_score=home_score,
+        away_score=away_score,
+        status=status,
+        period_label=report.period_label,
+        summary=report.summary,
+        evidence_urls=report.evidence_urls,
+        facts=facts,
+    )
+
+
 def parse_teams(question: str) -> tuple[str, str]:
     m = _VS.search(question.strip())
     if m:
@@ -261,8 +295,10 @@ def extract_score(question: str, hits: list[SearchHit]) -> ScoreReport:
 def scout(question: str, search=None, slot: str = "alpha") -> ScoreReport:
     if search is not None or should_use_mock():
         hits = hits_from_search(search, f"{question} score box score")
-        return extract_score(question, hits)
-    return _cursor_extract(question, slot)
+        report = extract_score(question, hits)
+    else:
+        report = _cursor_extract(question, slot)
+    return canonicalize(report, question)
 
 
 class ScoreCoordinator:

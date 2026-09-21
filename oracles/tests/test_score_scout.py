@@ -3,7 +3,7 @@ import os
 import pytest
 
 from agents.base import MockSearch
-from scores.scout import ScoreCoordinator, extract_score, parse_teams, requested_facts, scout
+from scores.scout import ScoreCoordinator, ScoreReport, canonicalize, extract_score, parse_teams, requested_facts, scout
 
 
 def test_parse_teams():
@@ -98,6 +98,13 @@ def test_fail_closed_missing_fumble_number():
             scout("Travis Kelce to fumble at least once?", search=search)
     finally:
         os.environ.pop("OU_ORACLE_MOCK", None)
+
+
+def test_canonicalize_ignores_team_aliases():
+    question = "Chiefs vs Broncos: Chiefs win?"
+    a = ScoreReport("Kansas City Chiefs", "Denver Broncos", 27, 24, "final", None, "", [], {"home_score": 27, "away_score": 24})
+    b = ScoreReport("Chiefs", "Broncos", 27, 24, "final", None, "", [], {"home_score": 27, "away_score": 24})
+    assert canonicalize(a, question).key() == canonicalize(b, question).key()
 
 
 def test_vs_box_facts_populated():
