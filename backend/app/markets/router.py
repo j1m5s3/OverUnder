@@ -165,7 +165,7 @@ async def upsert_score(
         raise HTTPException(400, "scores only on sports primaries")
     if body.status == "scheduled" and body.homeScore == 0 and body.awayScore == 0:
         raise HTTPException(400, "scheduled games have no score yet")
-    now = datetime.now(timezone.utc)
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
     row = await db.get(LiveScore, condition_id)
     if row is None:
         row = LiveScore(

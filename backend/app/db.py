@@ -27,17 +27,3 @@ def ensure_live_score_facts(connection) -> None:
 async def get_db():
     async with SessionLocal() as session:
         yield session
-
-
-class Base(DeclarativeBase):
-    pass
-
-
-settings = get_settings()
-engine = create_async_engine(settings.database_url, echo=False)
-SessionLocal = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
-
-
-async def get_db():
-    async with SessionLocal() as session:
-        yield session
