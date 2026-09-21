@@ -1,4 +1,5 @@
 import os
+import sys
 import pytest
 
 from agents.alpha import AlphaAgent
@@ -95,43 +96,49 @@ def test_mock_flag_allowed_in_pytest():
 
 
 def test_hard_fail_on_missing_keys_without_mock():
-    """Test that missing API keys cause hard failures when not in mock mode."""
-    # Clear mock flag
+    """Test that missing Cursor env causes hard failures when not in mock mode."""
     os.environ.pop("OU_ORACLE_MOCK", None)
-
-    # Clear API keys to simulate production without keys
-    old_tavily = os.environ.pop("TAVILY_API_KEY", None)
-    old_anthropic = os.environ.pop("ANTHROPIC_API_KEY", None)
+    old_cursor = os.environ.pop("CURSOR_API_KEY", None)
+    old_mcp = os.environ.pop("CURSOR_SEARCH_MCP_URL", None)
 
     try:
         agent = AlphaAgent()
-        with pytest.raises(RuntimeError, match="TAVILY_API_KEY required"):
+        with pytest.raises(RuntimeError, match="CURSOR_API_KEY required"):
             agent.research("test question")
     finally:
-        # Restore keys
-        if old_tavily:
-            os.environ["TAVILY_API_KEY"] = old_tavily
-        if old_anthropic:
-            os.environ["ANTHROPIC_API_KEY"] = old_anthropic
+        if old_cursor:
+            os.environ["CURSOR_API_KEY"] = old_cursor
+        if old_mcp:
+            os.environ["CURSOR_SEARCH_MCP_URL"] = old_mcp
+
+
+def test_mock_path_never_imports_cursor_sdk():
+    os.environ["OU_ORACLE_MOCK"] = "1"
+    sys.modules.pop("cursor_sdk", None)
+    try:
+        search = MockSearch(["Chiefs defeated Broncos 27-24. Kelce fumbled once."])
+        attestation = AlphaAgent(search=search).research("Who won Chiefs vs Broncos?")
+        assert attestation.outcome == 0
+        assert "cursor_sdk" not in sys.modules
+    finally:
+        os.environ.pop("OU_ORACLE_MOCK", None)
 
 
 @pytest.mark.skipif(
-    not (os.getenv("ANTHROPIC_API_KEY") and os.getenv("TAVILY_API_KEY")),
-    reason="Live API keys not available",
+    not (os.getenv("CURSOR_API_KEY") and os.getenv("CURSOR_SEARCH_MCP_URL")),
+    reason="Live Cursor key / search MCP URL not available",
 )
 def test_live_alpha_agent_smoke():
-    """Smoke test with real Claude + Tavily (gated on keys)."""
+    """Smoke test with real Cursor agent + HTTP search MCP (gated on env)."""
     os.environ.pop("OU_ORACLE_MOCK", None)
     agent = AlphaAgent()
     attestation = agent.research("Who won the 2024 Super Bowl?")
 
-    # Basic structure checks
     assert attestation.outcome in (0, 1)
     assert 0.0 <= attestation.confidence <= 1.0
     assert len(attestation.summary) > 0
     assert len(attestation.evidence_urls) > 0
 
-    # Evidence URLs should be real URLs, not mock
     for url in attestation.evidence_urls:
         assert url.startswith("http"), f"Expected real URL, got {url}"
         assert "mock.local" not in url, "Should not contain mock URLs"

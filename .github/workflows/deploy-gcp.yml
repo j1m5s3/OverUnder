@@ -11,6 +11,7 @@ env:
   ARTIFACT_REGISTRY: us-central1-docker.pkg.dev/overunder-509107/overunder
   API_SERVICE_NAME: overunder-api
   WEB_SERVICE_NAME: overunder-web
+  ORACLE_JOB_NAME: overunder-oracle
 
 jobs:
   deploy:
@@ -81,6 +82,19 @@ jobs:
           
           echo "Preflight checks passed."
       
+      - name: Preflight Cursor oracle secrets
+        run: |
+          echo "Checking Cursor oracle Secret Manager secrets..."
+          for SECRET in OU_CURSOR_API_KEY OU_CURSOR_SEARCH_MCP_URL; do
+            if ! gcloud secrets versions list "$SECRET" --project=${{ env.GCP_PROJECT_ID }} --limit=1 --format="value(name)" 2>/dev/null | grep -q .; then
+              echo "ERROR: Secret $SECRET has no versions. Create it before deploying the oracle job."
+              echo "gcloud secrets create $SECRET --project=${{ env.GCP_PROJECT_ID }}"
+              echo "Then add a version. Deploy fails closed and does not invent keys."
+              exit 1
+            fi
+          done
+          echo "Cursor oracle preflight checks passed."
+      
       - name: Build and push API image
         run: |
           docker build -t ${{ env.ARTIFACT_REGISTRY }}/api:${{ github.sha }} -t ${{ env.ARTIFACT_REGISTRY }}/api:latest ./backend
@@ -129,9 +143,57 @@ jobs:
             --allow-unauthenticated \
             --project=${{ env.GCP_PROJECT_ID }}
       
+      - name: Build and push oracle image
+        run: |
+          docker build -t ${{ env.ARTIFACT_REGISTRY }}/oracle:${{ github.sha }} -t ${{ env.ARTIFACT_REGISTRY }}/oracle:latest ./oracles
+          docker push ${{ env.ARTIFACT_REGISTRY }}/oracle:${{ github.sha }}
+          docker push ${{ env.ARTIFACT_REGISTRY }}/oracle:latest
+      
+      - name: Deploy oracle Cloud Run Job
+        run: |
+          API_URL=${{ steps.api_url.outputs.url }}
+          gcloud run jobs deploy ${{ env.ORACLE_JOB_NAME }} \
+            --image=${{ env.ARTIFACT_REGISTRY }}/oracle:${{ github.sha }} \
+            --region=${{ env.GCP_REGION }} \
+            --task-timeout=30m \
+            --max-retries=0 \
+            --set-env-vars="OU_API_URL=${API_URL},OU_CURSOR_RUNTIME=cloud,OU_SCOUT_MAX_MARKETS=5" \
+            --set-secrets="CURSOR_API_KEY=OU_CURSOR_API_KEY:latest,CURSOR_SEARCH_MCP_URL=OU_CURSOR_SEARCH_MCP_URL:latest,JWT_SECRET=OU_JWT_SECRET:latest,OPERATOR_PRIVATE_KEY=OU_OPERATOR_PRIVATE_KEY:latest" \
+            --project=${{ env.GCP_PROJECT_ID }}
+      
+      - name: Schedule oracle job every 15 minutes
+        run: |
+          SCHEDULER_NAME=overunder-oracle-tick
+          URI="https://${{ env.GCP_REGION }}-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/${{ env.GCP_PROJECT_ID }}/jobs/${{ env.ORACLE_JOB_NAME }}:run"
+          SA=github-deploy@${{ env.GCP_PROJECT_ID }}.iam.gserviceaccount.com
+          gcloud services enable cloudscheduler.googleapis.com --project=${{ env.GCP_PROJECT_ID }} --quiet || true
+          if gcloud scheduler jobs describe "$SCHEDULER_NAME" --location=${{ env.GCP_REGION }} --project=${{ env.GCP_PROJECT_ID }} >/dev/null 2>&1; then
+            gcloud scheduler jobs update http "$SCHEDULER_NAME" \
+              --location=${{ env.GCP_REGION }} \
+              --schedule="*/15 * * * *" \
+              --uri="$URI" \
+              --http-method=POST \
+              --oauth-service-account-email="$SA" \
+              --attempt-deadline=180s \
+              --project=${{ env.GCP_PROJECT_ID }} \
+              --quiet
+          else
+            gcloud scheduler jobs create http "$SCHEDULER_NAME" \
+              --location=${{ env.GCP_REGION }} \
+              --schedule="*/15 * * * *" \
+              --uri="$URI" \
+              --http-method=POST \
+              --oauth-service-account-email="$SA" \
+              --attempt-deadline=180s \
+              --project=${{ env.GCP_PROJECT_ID }} \
+              --quiet
+          fi
+      
       - name: Output Service URLs
         run: |
           API_URL=$(gcloud run services describe ${{ env.API_SERVICE_NAME }} --platform=managed --region=${{ env.GCP_REGION }} --format='value(status.url)' --project=${{ env.GCP_PROJECT_ID }})
           WEB_URL=$(gcloud run services describe ${{ env.WEB_SERVICE_NAME }} --platform=managed --region=${{ env.GCP_REGION }} --format='value(status.url)' --project=${{ env.GCP_PROJECT_ID }})
           echo "API Service: $API_URL"
           echo "Web Service: $WEB_URL"
+          echo "Oracle Job: ${{ env.ORACLE_JOB_NAME }}"
+          echo "Oracle Scheduler: overunder-oracle-tick (*/15 * * * *)"

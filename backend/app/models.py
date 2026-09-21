@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, Integer, String, Text, func
+from sqlalchemy import JSON, Boolean, DateTime, Integer, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
@@ -112,6 +112,7 @@ class LiveScore(Base):
     away_score: Mapped[int | None] = mapped_column(Integer, nullable=True, default=None)
     status: Mapped[str] = mapped_column(String(16), default="scheduled")
     period_label: Mapped[str | None] = mapped_column(String(16), nullable=True, default=None)
+    facts: Mapped[dict | None] = mapped_column(JSON, nullable=True, default=None)
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
 
 

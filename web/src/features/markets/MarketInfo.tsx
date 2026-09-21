@@ -12,9 +12,17 @@ function formatTimestamp(unixSeconds: number): string {
   });
 }
 
-export function MarketInfo({ market }: { market: Market }) {
+function formatFacts(facts: Record<string, unknown>): string {
+  return Object.entries(facts)
+    .filter(([, value]) => value != null && value !== "")
+    .map(([key, value]) => `${key.replace(/_/g, " ")} ${String(value)}`)
+    .join(" · ");
+}
+
+export function MarketInfo({ market, facts }: { market: Market; facts?: Record<string, unknown> | null }) {
   const now = Math.floor(Date.now() / 1000);
   const hasClosed = market.closeTime < now;
+  const factsLine = facts ? formatFacts(facts) : "";
   
   return (
     <div className="card" style={{ marginTop: 16 }}>
@@ -44,6 +52,11 @@ export function MarketInfo({ market }: { market: Market }) {
             Binary yes/no market. Winners pay $1 per share. 1% fee on all trades. 
             Three AI oracles must agree to resolve; otherwise 24h vote.
           </div>
+          {factsLine ? (
+            <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>
+              {factsLine}
+            </div>
+          ) : null}
         </div>
       </div>
     </div>

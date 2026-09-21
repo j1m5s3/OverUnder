@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.aa.router import router as aa_router
 from app.amm.router import router as amm_router
 from app.auth.router import router as auth_router
-from app.db import Base, engine
+from app.db import Base, engine, ensure_live_score_facts
 from app.emissions.router import router as emissions_router
 from app.kyc.router import router as kyc_router
 from app.markets.router import router as markets_router
@@ -23,6 +23,7 @@ from app.config import get_settings
 async def lifespan(app: FastAPI):
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        await conn.run_sync(ensure_live_score_facts)
     
     settings = get_settings()
     interval = getattr(settings, 'indexer_interval_seconds', 5.0)
