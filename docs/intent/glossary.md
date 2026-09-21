@@ -28,6 +28,7 @@ pointers: []
 - [SHIPPED] **OU** — Fixed-supply revenue token (100M). Redeem burns OU for USDC.
 - [STUB] **Privy login** — API accepts a token without JWKS; web synthesizes a hex address from email.
 - [STUB] **Relayer** — Optional `relayer_private_key` that submits leftover `matchOrders`; fills may stay off-chain.
-- [PHASE2] **Paymaster** — ERC-4337 contract that sponsors UserOps (approvals, swaps) in USDC or protocol credits.
+- [SHIPPED] **Paymaster** — ERC-4337 contract that sponsors UserOps (approvals, swaps) and pulls a USDC fee; EntryPoint ETH is the gas tank.
+- [PHASE2] **Privy JWKS** — Verify Privy access tokens; email AA users are not shipped.
 - [SHIPPED] **Emissions** — Scheduled OU transfers from treasury; not FeeVault mint.
 - [SHIPPED] **MoonPay / KYC** — Fiat on-ramp plus identity checks before card buys; Coinbase URL stays fallback.

@@ -1,0 +1,36 @@
+[
+  {
+    "type": "function",
+    "name": "deposit",
+    "stateMutability": "payable",
+    "inputs": [],
+    "outputs": []
+  },
+  {
+    "type": "function",
+    "name": "getDepositInfo",
+    "stateMutability": "view",
+    "inputs": [],
+    "outputs": [
+      {"name": "deposit", "type": "uint256"},
+      {"name": "staked", "type": "bool"},
+      {"name": "stake", "type": "uint112"},
+      {"name": "unstakeDelay", "type": "uint48"},
+      {"name": "withdrawTime", "type": "uint48"}
+    ]
+  },
+  {
+    "type": "function",
+    "name": "weiPerUsdc",
+    "stateMutability": "view",
+    "inputs": [],
+    "outputs": [{"name": "", "type": "uint256"}]
+  },
+  {
+    "type": "function",
+    "name": "setWeiPerUsdc",
+    "stateMutability": "nonpayable",
+    "inputs": [{"name": "weiPerUsdc", "type": "uint256"}],
+    "outputs": []
+  }
+]

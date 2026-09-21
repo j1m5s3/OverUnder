@@ -3,7 +3,7 @@ title: Contracts
 status: SHIPPED
 area: contracts
 summary: Vyper contract graph for CTF, CLOB, AMM, oracle, OU NAV, emissions, and ERC-4337 paymaster.
-last_verified: 2026-09-20
+last_verified: 2026-09-21
 pointers:
   - "[contracts/src/ConditionalTokens.vy : L52-60]"
   - "[contracts/src/ConditionalTokens.vy : L63-72]"
@@ -25,13 +25,16 @@ pointers:
   - "[contracts/src/FeeVault.vy : L44-83]"
   - "[contracts/src/RevenueToken.vy : L13-32]"
   - "[contracts/src/EmissionsDistributor.vy : L22-50]"
-  - "[contracts/src/OverUnderPaymaster.vy : L235-268]"
-  - "[contracts/src/OverUnderPaymaster.vy : L206-229]"
+  - "[contracts/src/OverUnderPaymaster.vy : L322-355]"
+  - "[contracts/src/OverUnderPaymaster.vy : L358-368]"
+  - "[contracts/src/SimpleAccount.vy : L40-49]"
+  - "[contracts/src/SimpleAccountFactory.vy : L46-53]"
+  - "[contracts/src/MockEntryPoint.vy : L94-120]"
 ---
 
 # Contracts
 
-All production logic is Vyper 0.4.3 under `contracts/src/`. Tests live in `contracts/tests/`. Deploy script: [contracts/script/deploy.py : L29-40].
+All production logic is Vyper 0.4.3 under `contracts/src/`. Tests live in `contracts/tests/`. Deploy script: [contracts/script/deploy.py : L31-74].
 
 ## ConditionalTokens
 
@@ -100,25 +103,21 @@ Treasury-gated OU distribution. Never mints; only `transferFrom` treasury to rec
 
 ## OverUnderPaymaster
 
-ERC-4337 v0.7 paymaster for gasless AMM operations. Deny-by-default allowlist prevents arbitrary sponsorship.
+[SHIPPED] ERC-4337 v0.7 paymaster. Deny-by-default allowlist. `matchOrders` and `executeBatch` stay denied. Canonical EntryPoint `0x0000000071727De22E5E9d8BAf0edAc6f37da032` on 84532; Anvil uses MockEntryPoint.
 
-- Operator-gated: only operator can deposit ETH, add/remove senders/factories.
-- Sender allowlist: `validatePaymasterUserOp` checks `allowedSenders[userOp.sender]` before sponsoring. MVP: operator pre-registers AA accounts via `addSender()`. Production: parse `initCode` to extract factory, validate against `allowedFactories`.
-- Selector allowlist with argument decoding:
-  - USDC `approve`: decodes spender, requires spender ∈ {ctf, amm, vault}
-  - CTF `splitPosition`: allowed without argument validation
-  - CTF `setApprovalForAll`: **decodes operator argument**, requires operator ∈ {amm, exchange, vault} (prevents arbitrary approval grants)
-  - AMM buy/sell/addLiquidity: allowed
-  - Oracle `castVote`: allowed
-  - Exchange `cancelOrder`/`incrementNonce`: allowed (NOT `matchOrders`)
-  - FeeVault `requestRedeem`/`claim`: allowed
-- **Dynamic ABI offset parsing**: unwraps AA `execute(address,uint256,bytes)` by reading the ABI offset word (not hardcoded). Prevents crafted offsets from hiding malicious calls like `matchOrders`.
-- Blocked: `matchOrders` (relayer-only), `executeBatch` (too complex, denied wholesale for stricter security), unknown selectors, undecodable calldata, invalid ABI offsets.
-- Production path for `executeBatch`: decode dynamic arrays, validate each `(target, value, data)` tuple against allowlist. MVP denies entirely to simplify security surface.
+- Operator-gated deposit, factories, `weiPerUsdc`, `feeRecipient`, daily cap.
+- Sponsor iff `allowedSenders[sender]` or `initCode` from `allowedFactories`. Non-empty `initCode` must use an allowed factory even if the sender is already listed.
+- USDC `approve` spenders ∈ {ctf, exchange, amm, feeVault, paymaster}. `execute` with `value != 0` denied.
+- Fee: `usdcFee = ceil(maxCost * 1e6 / weiPerUsdc)` at validation; `postOp` charges actual gas capped at that fee. Fail closed on balance/allowance/cap before sponsorship. [contracts/src/OverUnderPaymaster.vy : L322-355] [contracts/src/OverUnderPaymaster.vy : L358-368]
+- Operator ECDSA over the UserOp fields (not the account sig) so only this bundler can drain the tank.
+
+## SimpleAccount
+
+[SHIPPED] EIP-1167 proxy. `initialize(entryPoint, owner)` once. `execute(address,uint256,bytes)` selector `0xb61d27f6` (EntryPoint or owner). `validateUserOp` recovers `toEthSignedMessageHash(userOpHash)`. Factory `createAccount` / `getAddress` with canonical salt 0. [contracts/src/SimpleAccount.vy : L40-49] [contracts/src/SimpleAccountFactory.vy : L46-53]
 
 ## MockEntryPoint
 
-Minimal EntryPoint v0.7 for local testing. Tracks paymaster deposits via `depositTo`, returns deposit info for validation. Production uses canonical EntryPoint deployment.
+Anvil EntryPoint v0.7 stand-in: `depositTo` / `getDepositInfo`, `getUserOpHash`, `handleOps` (initCode deploy, validate, call, `postOp`, subtract deposit). [contracts/src/MockEntryPoint.vy : L94-120]
 
 ## MockUSDC
 

@@ -2,13 +2,14 @@
 title: TODO registry
 status: PHASE2
 area: cross
-summary: Machine-parseable gaps for paymaster, JWKS, leftover CLOB relayer, uniform-LVR, and permissionless listing.
+summary: Machine-parseable gaps for JWKS, leftover CLOB relayer, uniform-LVR, and permissionless listing.
 last_verified: 2026-09-21
 pointers:
   - "[backend/app/auth/router.py : L90-102]"
   - "[backend/app/orderbook/matcher.py : L88-136]"
   - "[contracts/src/MarketAMM.vy : L40]"
   - "[contracts/src/MarketFactory.vy : L82-89]"
+  - "[contracts/src/OverUnderPaymaster.vy : L322-355]"
   - "[docs/adr/0007-amm-first-uniform-lvr.md : L29-36]"
   - "[docs/adr/0008-cursor-runtime-oracles.md : L18-32]"
   - "[docs/adr/0009-dual-gate-sports-resolve-and-week-listing.md : L18-32]"
@@ -20,7 +21,7 @@ pointers:
 
 Machine registry below. Human index:
 
-- [PHASE2] OU-T001 ERC-4337 paymaster
+- [SHIPPED] OU-T001 ERC-4337 paymaster
 - [PHASE2] OU-T002 Privy JWKS + SIWE ecrecover
 - [PHASE2] OU-T003 Centralized production relayer
 - [SHIPPED] OU-T004 OU emissions from treasury (no FeeVault mint)
@@ -40,13 +41,16 @@ YAML status values: `open` | `blocked` | `done`.
 todos:
   - id: OU-T001
     title: ERC-4337 paymaster for AA users
-    status: open
+    status: done
     area: contracts
     phase: 2
     summary: Sponsor approve/split/AMM/vote/cancel UserOps; keep matchOrders on the relayer.
     pointers:
-      - "[docs/roadmap/phase-2.md : L1-199]"
-      - "[web/src/app/providers.tsx : L10-17]"
+      - "[contracts/src/OverUnderPaymaster.vy : L322-355]"
+      - "[contracts/src/OverUnderPaymaster.vy : L358-368]"
+      - "[contracts/src/SimpleAccount.vy : L40-49]"
+      - "[backend/app/aa/router.py : L177-238]"
+      - "[web/src/features/aa/userOp.ts : L83-155]"
   - id: OU-T002
     title: Verify Privy JWKS instead of trusting body.address
     status: open

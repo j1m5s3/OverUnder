@@ -32,6 +32,8 @@ class Settings(BaseSettings):
     ou_token_address: str = ""
     entrypoint_address: str = ""
     paymaster_address: str = ""
+    account_factory_address: str = ""
+    bundler_url: str = ""
     emissions_distributor_address: str = ""
     fee_bps_taker: int = 75
     fee_bps_amm: int = 100

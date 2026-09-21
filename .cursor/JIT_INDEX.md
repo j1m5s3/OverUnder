@@ -1,4 +1,4 @@
-# OverUnder JIT index — living graph after dual-gate resolve
+# OverUnder JIT index — living graph after T001 paymaster
 
 last_verified: 2026-09-21
 
@@ -10,6 +10,13 @@ last_verified: 2026-09-21
 - [contracts/src/Exchange.vy] - leftover EIP-712 CLOB overlay, unused by happy path
 - [contracts/src/ConsensusOracle.vy] - 3-agent unanimity + 24h fallback
 - [contracts/src/FeeVault.vy] - OU NAV redeem + 24h cooldown
+- [contracts/src/OverUnderPaymaster.vy : L106-108] - operator addFactory (still callable)
+- [contracts/src/OverUnderPaymaster.vy : L322-355] - validatePaymasterUserOp bytes context; factory/initCode; fee fail-closed
+- [contracts/src/OverUnderPaymaster.vy : L358-368] - postOp entrypoint-only USDC fee
+- [contracts/src/SimpleAccount.vy : L40-59] - validateUserOp + execute
+- [contracts/src/SimpleAccountFactory.vy : L46-53] - createAccount / getAddress salt 0
+- [contracts/src/MockEntryPoint.vy : L94-120] - anvil handleOps + postOp
+- [contracts/script/deploy.py : L48-72] - 84532 canonical EP; 31337 MockEntryPoint; addFactory + deposit
 - [backend/app/main.py : L22-39] - FastAPI lifespan; LiveScore facts migrate after create_all
 - [backend/app/markets/router.py : L100-131] - EventCard list
 - [backend/app/markets/router.py : L134-197] - GET/POST NFL schedule
@@ -17,6 +24,8 @@ last_verified: 2026-09-21
 - [backend/app/markets/router.py : L277-419] - operator createPrimaryMarket
 - [backend/app/oracle/router.py : L51-73] - operator POST /oracle/resolved
 - [backend/app/models.py : L119-129] - NflScheduleGame unique week/home/away
+- [backend/app/aa/router.py : L177-238] - POST /aa/userop two-phase stamp then handleOps
+- [backend/app/aa/bundler.py : L82-165] - v0.7 paymasterAndData stamp + operator verify
 - [backend/app/amm/router.py] - quoteBuy / quoteSell proxy
 - [backend/app/orderbook/matcher.py] - leftover CLOB crossing + relayer
 - [oracles/agents/cursor_runtime.py : L26-77] - lazy cursor-sdk; local vs cloud; HTTP MCP
@@ -33,11 +42,14 @@ last_verified: 2026-09-21
 - [oracles/scores/publish.py : L15-52] - mint HS256 operator JWT matching _issue
 - [oracles/scores/job.py : L116-150] - score scout loop; cap OU_SCOUT_MAX_MARKETS
 - [oracles/wildcard/generator.py] - child market proposals
-- [web/src/features/trade/AmmSwap.tsx] - wallet buyWithUSDC / sellToUSDC
+- [web/src/features/aa/userOp.ts : L30-36] - gaslessConfigured from three NEXT_PUBLIC envs
+- [web/src/features/aa/userOp.ts : L83-155] - two-phase sponsored execute
+- [web/src/features/trade/AmmSwap.tsx : L181-268] - gasless UserOps else EOA writeContract
 - [web/src/features/markets/MarketInfo.tsx : L15-60] - event hub + one muted facts line
 - [shared/design-tokens/tokens.json] - Flutter theme contract
 - [shared/openapi.json] - Flutter API contract
 - [scripts/e2e_local.py] - AMM buy+sell happy path + fallback; MockSearch
+- [scripts/list_chiefs_primary.py : L76-119] - Chiefs vs Broncos winner primary + 31-10 final; idempotent
 - [oracles/Dockerfile] - python -m job
 - [docs/adr/0008-cursor-runtime-oracles.md : L18-32] - Cursor-runtime oracles; remote HTTP MCP
 - [docs/adr/0009-dual-gate-sports-resolve-and-week-listing.md : L18-32] - dual-gate resolve + week-roll listing
@@ -52,8 +64,9 @@ last_verified: 2026-09-21
 - ADR-0001 superseded (historical hybrid CLOB-primary / AMM-wildcard)
 - OU is fixed-supply NAV token, not a public savings vault
 - Trusted operator/relayer/oracle keys in MVP
-- Do not invent ERC-4337, Privy JWKS, or uniform-LVR as shipped; T004–T007 stay done
-- T005 retargeted to Cursor agents; T011–T013 done; T001–T003 and T008–T010 stay open
+- Do not invent Privy JWKS or uniform-LVR as shipped
+- T001 paymaster implemented; T002 JWKS stays open; T003 and T008–T010 stay open; T004–T007 and T011–T013 done
+- T005 retargeted to Cursor agents
 - Exchange remains deployed leftover overlay
 - 2026-09-20 Stage 4: mock pytest does not need cursor_sdk; live smoke skipif no key
 - 2026-09-21: resolve module submits; score scout still data-only; factory permissioned
@@ -73,8 +86,9 @@ last_verified: 2026-09-21
 - [docs/adr/0001-hybrid-clob-amm.md] … [docs/adr/0009-dual-gate-sports-resolve-and-week-listing.md]
 - [docs/explore/amm.md] [docs/explore/edge_opportunities.md] — literature, not spec
 - [docs/roadmap/phase-1-mvp.md] — seeded AMM checklist
-- [docs/roadmap/phase-2.md] — remaining PHASE2 + shipped T004–T007/T011–T013
+- [docs/roadmap/phase-2.md] — remaining PHASE2 + shipped T001/T004–T007/T011–T013
 - [docs/TODOS.md] — YAML registry OU-T001–T013
 - [docs/runbooks/local-dev.md] — run/test/stop + Cursor oracle secrets
 - [.cursor/rules/ai-docs.mdc] — always-on pointer hygiene
 - [.cursor/jit_history/2026-09-20-cursor-runtime-scouts.md] — archived Cursor-runtime scouts plan
+- [.cursor/jit_history/2026-09-21-ou-t001-paymaster.md] — archived T001 paymaster closeout

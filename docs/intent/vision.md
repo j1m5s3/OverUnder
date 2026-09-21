@@ -3,7 +3,7 @@ title: Product vision
 status: MIXED
 area: intent
 summary: AMM-first prediction markets on Base with AI oracles, seeded CPMM, and an OU revenue token.
-last_verified: 2026-09-20
+last_verified: 2026-09-21
 pointers: []
 ---
 
@@ -17,7 +17,8 @@ OverUnder is a prediction market where users trade YES/NO on real-world events, 
 - [STUB] Email users who get a demo address without a real smart wallet.
 - [SHIPPED] Flutter app mirroring web markets/trade/wallet/oracle. [mobile/README.md](../../mobile/README.md)
 - [SHIPPED] Card on-ramp after KYC (MoonPay; Coinbase URL fallback).
-- [PHASE2] Users who never touch a seed phrase (Privy AA + paymaster).
+- [SHIPPED] Injected-EOA SimpleAccount gasless swaps via paymaster (not email AA).
+- [PHASE2] Users who never touch a seed phrase (Privy AA + JWKS).
 
 ## What “done” means for the protocol
 
@@ -27,7 +28,8 @@ OverUnder is a prediction market where users trade YES/NO on real-world events, 
 - [SHIPPED] Protocol USDC fees accrue; OU redeems at NAV after cooldown.
 - [SHIPPED] Exchange CLOB remains deployed leftover overlay; it is not the product path.
 - [PHASE2] Uniform-LVR default pool (OU-T008/T009). Permissionless listing (OU-T010).
-- [PHASE2] Production AA wallets (Privy JWKS + paymaster). CLOB overlay is optional, not required.
+- [SHIPPED] ERC-4337 paymaster for injected-EOA SimpleAccounts (OU-T001).
+- [PHASE2] Production email AA (Privy JWKS). CLOB overlay is optional, not required.
 
 ## Non-goals (MVP)
 
@@ -38,4 +40,4 @@ OverUnder is a prediction market where users trade YES/NO on real-world events, 
 
 ## Equal-depth future
 
-Phase 2 remaining work is specified in [phase-2.md](../roadmap/phase-2.md): uniform-LVR, permissionless listing, ERC-4337 paymaster, Privy JWKS, leftover CLOB overlay. Agents must not describe those as implemented. Flutter, emissions, live LLM agents, and MoonPay/KYC are already shipped (OU-T004–T007).
+Phase 2 remaining work is specified in [phase-2.md](../roadmap/phase-2.md): uniform-LVR, permissionless listing, Privy JWKS, leftover CLOB overlay. Agents must not describe those as implemented. Flutter, emissions, live LLM agents, MoonPay/KYC, and the ERC-4337 paymaster are already shipped (OU-T001, OU-T004–T007).

@@ -2,8 +2,9 @@
 
 import { useState, useEffect, useRef } from "react";
 import { api } from "@/shared/api/client";
-import { useAccount, useConnect, useWriteContract, usePublicClient } from "wagmi";
-import { parseAbi } from "viem";
+import { useAccount, useConnect, useWriteContract, usePublicClient, useWalletClient } from "wagmi";
+import { encodeFunctionData, maxUint256, parseAbi } from "viem";
+import { accountAddress, gaslessConfigured, sendSponsoredExecute } from "@/features/aa/userOp";
 
 const AMM_ABI = parseAbi([
   "function buyWithUSDC(bytes32 conditionId, bool buyYes, uint256 usdcIn, uint256 minOut) external returns (uint256)",
@@ -62,6 +63,7 @@ export function AmmSwap({
   const { connect, connectors } = useConnect();
   const { writeContractAsync } = useWriteContract();
   const publicClient = usePublicClient();
+  const { data: walletClient } = useWalletClient();
 
   const ammAddress = process.env.NEXT_PUBLIC_AMM_ADDRESS as `0x${string}` | undefined;
   const usdcAddress = process.env.NEXT_PUBLIC_USDC_ADDRESS as `0x${string}` | undefined;
@@ -167,6 +169,75 @@ export function AmmSwap({
     }
     
     try {
+      const amountNum = parseFloat(amount);
+      const usdcAmount = BigInt(Math.round(amountNum * 1_000_000));
+      const slippagePercent = parseFloat(slippage);
+      const minOut = Math.floor((quote.tokensOut * (100 - slippagePercent)) / 100);
+      if (minOut <= 0) {
+        setStatus("quote too small or slippage too high");
+        return;
+      }
+
+      if (gaslessConfigured() && walletClient && publicClient && address) {
+        const paymaster = process.env.NEXT_PUBLIC_PAYMASTER_ADDRESS as `0x${string}`;
+        const smart = await accountAddress(publicClient, address);
+        setStatus("checking usdc approval...");
+        const pmAllowance = await publicClient.readContract({
+          address: usdcAddress,
+          abi: USDC_ABI,
+          functionName: "allowance",
+          args: [smart, paymaster],
+        });
+        if (!pmAllowance || pmAllowance === 0n) {
+          setStatus("approving paymaster...");
+          await sendSponsoredExecute({
+            publicClient,
+            walletClient,
+            owner: address,
+            target: usdcAddress,
+            data: encodeFunctionData({
+              abi: USDC_ABI,
+              functionName: "approve",
+              args: [paymaster, maxUint256],
+            }),
+          });
+        }
+        const allowance = await publicClient.readContract({
+          address: usdcAddress,
+          abi: USDC_ABI,
+          functionName: "allowance",
+          args: [smart, ammAddress],
+        });
+        if (!allowance || allowance < usdcAmount) {
+          setStatus("approving usdc...");
+          await sendSponsoredExecute({
+            publicClient,
+            walletClient,
+            owner: address,
+            target: usdcAddress,
+            data: encodeFunctionData({
+              abi: USDC_ABI,
+              functionName: "approve",
+              args: [ammAddress, usdcAmount],
+            }),
+          });
+        }
+        setStatus("buying...");
+        await sendSponsoredExecute({
+          publicClient,
+          walletClient,
+          owner: address,
+          target: ammAddress,
+          data: encodeFunctionData({
+            abi: AMM_ABI,
+            functionName: "buyWithUSDC",
+            args: [conditionId as `0x${string}`, outcome === "yes", usdcAmount, BigInt(minOut)],
+          }),
+        });
+        setStatus("success! tokens received");
+        return;
+      }
+
       setStatus("checking usdc approval...");
 
       const allowance = await publicClient?.readContract({
@@ -176,9 +247,6 @@ export function AmmSwap({
         args: [address!, ammAddress],
       });
 
-      const amountNum = parseFloat(amount);
-      const usdcAmount = BigInt(Math.round(amountNum * 1_000_000));
-      
       if (!allowance || allowance < usdcAmount) {
         setStatus("approving usdc...");
         const approveTx = await writeContractAsync({
@@ -192,14 +260,6 @@ export function AmmSwap({
       }
 
       setStatus("buying...");
-      const slippagePercent = parseFloat(slippage);
-      const minOut = Math.floor((quote.tokensOut * (100 - slippagePercent)) / 100);
-      
-      if (minOut <= 0) {
-        setStatus("quote too small or slippage too high");
-        return;
-      }
-      
       const swapTx = await writeContractAsync({
         address: ammAddress,
         abi: AMM_ABI,
@@ -223,6 +283,76 @@ export function AmmSwap({
     }
     
     try {
+      const slippagePercent = parseFloat(slippage);
+      const minUsdc = Math.floor((quote.usdcOut * (100 - slippagePercent)) / 100);
+      if (minUsdc <= 0) {
+        setStatus("quote too small or slippage too high");
+        return;
+      }
+      const amountNum = parseFloat(amount);
+      const tokenAmount = BigInt(Math.round(amountNum * 1_000_000));
+
+      if (gaslessConfigured() && walletClient && publicClient && address) {
+        const paymaster = process.env.NEXT_PUBLIC_PAYMASTER_ADDRESS as `0x${string}`;
+        const usdcAddress = process.env.NEXT_PUBLIC_USDC_ADDRESS as `0x${string}`;
+        const smart = await accountAddress(publicClient, address);
+        setStatus("checking token approval...");
+        const pmAllowance = await publicClient.readContract({
+          address: usdcAddress,
+          abi: USDC_ABI,
+          functionName: "allowance",
+          args: [smart, paymaster],
+        });
+        if (!pmAllowance || pmAllowance === 0n) {
+          setStatus("approving paymaster...");
+          await sendSponsoredExecute({
+            publicClient,
+            walletClient,
+            owner: address,
+            target: usdcAddress,
+            data: encodeFunctionData({
+              abi: USDC_ABI,
+              functionName: "approve",
+              args: [paymaster, maxUint256],
+            }),
+          });
+        }
+        const isApproved = await publicClient.readContract({
+          address: ctfAddress,
+          abi: CTF_ABI,
+          functionName: "isApprovedForAll",
+          args: [smart, ammAddress],
+        });
+        if (!isApproved) {
+          setStatus("approving outcome tokens...");
+          await sendSponsoredExecute({
+            publicClient,
+            walletClient,
+            owner: address,
+            target: ctfAddress,
+            data: encodeFunctionData({
+              abi: CTF_ABI,
+              functionName: "setApprovalForAll",
+              args: [ammAddress, true],
+            }),
+          });
+        }
+        setStatus("selling...");
+        await sendSponsoredExecute({
+          publicClient,
+          walletClient,
+          owner: address,
+          target: ammAddress,
+          data: encodeFunctionData({
+            abi: AMM_ABI,
+            functionName: "sellToUSDC",
+            args: [conditionId as `0x${string}`, outcome === "yes", tokenAmount, BigInt(minUsdc)],
+          }),
+        });
+        setStatus("success! usdc received");
+        return;
+      }
+
       setStatus("checking token approval...");
 
       const isApproved = await publicClient?.readContract({
@@ -245,17 +375,6 @@ export function AmmSwap({
       }
 
       setStatus("selling...");
-      const slippagePercent = parseFloat(slippage);
-      const minUsdc = Math.floor((quote.usdcOut * (100 - slippagePercent)) / 100);
-      
-      if (minUsdc <= 0) {
-        setStatus("quote too small or slippage too high");
-        return;
-      }
-
-      const amountNum = parseFloat(amount);
-      const tokenAmount = BigInt(Math.round(amountNum * 1_000_000));
-      
       const swapTx = await writeContractAsync({
         address: ammAddress,
         abi: AMM_ABI,

@@ -16,6 +16,7 @@ pointers:
   - "[docs/adr/0008-cursor-runtime-oracles.md : L18-32]"
   - "[docs/adr/0009-dual-gate-sports-resolve-and-week-listing.md : L18-32]"
   - "[web/src/app/providers.tsx : L10-17]"
+  - "[contracts/src/OverUnderPaymaster.vy : L322-355]"
 ---
 
 # Architecture overview
@@ -24,7 +25,7 @@ OverUnder is a Base-chain prediction market. Collateral is USDC (6 decimals). Ou
 
 ## Layers
 
-- [SHIPPED] Vyper contracts under `contracts/src/` deploy as one graph: MockUSDC, ConditionalTokens, MarketFactory, Exchange, MarketAMM, ConsensusOracle, FeeVault, RevenueToken.
+- [SHIPPED] Vyper contracts under `contracts/src/` deploy as one graph: MockUSDC, ConditionalTokens, MarketFactory, Exchange, MarketAMM, ConsensusOracle, FeeVault, RevenueToken, OverUnderPaymaster, SimpleAccount + factory.
 - [SHIPPED] FastAPI under `backend/app/` exposes `/api/v1` plus `/health`.
 - [SHIPPED] Python oracles under `oracles/` research questions with Cursor agents and collect 3/3 attestations. Score scout auto-POSTs LiveScore on 3/3. Dual-gate sports auto-resolve and week-roll listing: [ADR-0009](../adr/0009-dual-gate-sports-resolve-and-week-listing.md). [docs/adr/0008-cursor-runtime-oracles.md : L18-32]
 - [SHIPPED] Next.js web under `web/` lists markets, executes AMM swaps, shows oracle status.
@@ -43,7 +44,8 @@ OverUnder is a Base-chain prediction market. Collateral is USDC (6 decimals). Ou
 - [SHIPPED] Off-chain matcher may call leftover `matchOrders` with `relayer_private_key`. Anyone who holds both EIP-712 signatures can settle; the relayer is convenience, not a unique privilege on-chain. This is not the happy path. [backend/app/orderbook/matcher.py : L88-136]
 - [SHIPPED] Three agent EOAs are the only attestors. Unanimous `submitConsensus` resolves immediately. [contracts/src/ConsensusOracle.vy : L144-161]
 - [STUB] Auth treats Privy as an unverified token + address pair. [backend/app/auth/router.py : L90-102]
-- [PHASE2] ERC-4337 paymaster, Privy JWKS, production relayer with nonce/gas policy.
+- [SHIPPED] ERC-4337 paymaster + in-process bundler for SimpleAccount UserOps owned by the injected EOA. [contracts/src/OverUnderPaymaster.vy : L322-355]
+- [PHASE2] Privy JWKS, production relayer with nonce/gas policy.
 
 ## Settlement
 

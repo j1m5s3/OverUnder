@@ -1,11 +1,13 @@
 #pragma version 0.4.3
 
-# OverUnderPaymaster: ERC-4337 v0.7 paymaster for gasless AA user operations
-# Whitelists approve/split/AMM/vote/cancel UserOps; blocks matchOrders
-
 interface IEntryPoint:
     def depositTo(account: address): payable
     def getDepositInfo(account: address) -> (uint256, bool, uint112, uint48, uint48): view
+
+interface IERC20:
+    def balanceOf(account: address) -> uint256: view
+    def allowance(owner: address, spender: address) -> uint256: view
+    def transferFrom(owner: address, to: address, amount: uint256) -> bool: nonpayable
 
 struct PackedUserOperation:
     sender: address
@@ -18,48 +20,44 @@ struct PackedUserOperation:
     paymasterAndData: Bytes[8192]
     signature: Bytes[8192]
 
+struct DailySpend:
+    windowStart: uint256
+    spent: uint256
+
+ETH_MSG: constant(Bytes[28]) = b"\x19Ethereum Signed Message:\n32"
+WINDOW: constant(uint256) = 86400
+DEFAULT_WEI_PER_USDC: constant(uint256) = 10 ** 15
+DEFAULT_DAILY_CAP: constant(uint256) = 50 * 10 ** 6
+
+SELECTOR_APPROVE: constant(bytes4) = 0x095ea7b3
+SELECTOR_SPLIT: constant(bytes4) = 0xa3d7da1d
+SELECTOR_SET_APPROVAL: constant(bytes4) = 0xa22cb465
+SELECTOR_BUY_USDC: constant(bytes4) = 0xa9c98025
+SELECTOR_SELL_USDC: constant(bytes4) = 0xd4bd65f0
+SELECTOR_ADD_LIQ: constant(bytes4) = 0x3b57e2bc
+SELECTOR_CAST_VOTE: constant(bytes4) = 0xb4b0713e
+SELECTOR_CANCEL_ORDER: constant(bytes4) = 0xdd707492
+SELECTOR_INC_NONCE: constant(bytes4) = 0x627cdcb9
+SELECTOR_REQUEST_REDEEM: constant(bytes4) = 0xaa2f892d
+SELECTOR_CLAIM: constant(bytes4) = 0x4e71d92d
+SELECTOR_MATCH_ORDERS: constant(bytes4) = 0xe9f2cd3e
+SELECTOR_EXECUTE: constant(bytes4) = 0xb61d27f6
+SELECTOR_EXECUTE_BATCH: constant(bytes4) = 0x47e1da2a
+
 entryPoint: public(address)
 operator: public(address)
 allowedFactories: public(HashMap[address, bool])
 allowedSenders: public(HashMap[address, bool])
-
-# Protocol contract addresses for allowlist validation
 usdc: public(address)
 ctf: public(address)
 amm: public(address)
 exchange: public(address)
 oracle: public(address)
 feeVault: public(address)
-
-# Function selectors (first 4 bytes of keccak256)
-# USDC: approve(address,uint256)
-SELECTOR_APPROVE: constant(bytes4) = 0x095ea7b3
-# CTF: splitPosition(address,bytes32,uint256)
-SELECTOR_SPLIT: constant(bytes4) = 0x5c1bba38
-# CTF: setApprovalForAll(address,bool)
-SELECTOR_SET_APPROVAL: constant(bytes4) = 0xa22cb465
-# AMM: buyWithUSDC(bytes32,uint8,uint256,uint256)
-SELECTOR_BUY_USDC: constant(bytes4) = 0x8b7a7fb9
-# AMM: sellToUSDC(bytes32,uint8,uint256,uint256)
-SELECTOR_SELL_USDC: constant(bytes4) = 0x3d0d6e3f
-# AMM: addLiquidity(bytes32,uint256)
-SELECTOR_ADD_LIQ: constant(bytes4) = 0x2f4f5cc5
-# Oracle: castVote(bytes32,uint8)
-SELECTOR_CAST_VOTE: constant(bytes4) = 0x4d6a3158
-# Exchange: cancelOrder((address,bool,bytes32,uint8,uint256,uint256,uint256,uint256,uint256))
-SELECTOR_CANCEL_ORDER: constant(bytes4) = 0x514fcac7
-# Exchange: incrementNonce()
-SELECTOR_INC_NONCE: constant(bytes4) = 0x627cdcb9
-# FeeVault: requestRedeem(uint256)
-SELECTOR_REQUEST_REDEEM: constant(bytes4) = 0x7bde82f2
-# FeeVault: claim()
-SELECTOR_CLAIM: constant(bytes4) = 0x4e71d92d
-# Exchange: matchOrders - BLOCKED
-SELECTOR_MATCH_ORDERS: constant(bytes4) = 0x8a920150
-# AA execute(address,uint256,bytes)
-SELECTOR_EXECUTE: constant(bytes4) = 0xb61d27f6
-# AA executeBatch(address[],uint256[],bytes[])
-SELECTOR_EXECUTE_BATCH: constant(bytes4) = 0x47e1da2a
+weiPerUsdc: public(uint256)
+feeRecipient: public(address)
+dailyCapUsdc: public(uint256)
+dailySpend: public(HashMap[address, DailySpend])
 
 event PaymasterDeposited:
     amount: uint256
@@ -93,235 +91,283 @@ def __init__(
     self.exchange = exchange
     self.oracle = oracle
     self.feeVault = feeVault
+    self.feeRecipient = operator
+    self.weiPerUsdc = DEFAULT_WEI_PER_USDC
+    self.dailyCapUsdc = DEFAULT_DAILY_CAP
 
 @external
 @payable
 def deposit():
-    """Operator deposits ETH to sponsor UserOps"""
     assert msg.sender == self.operator, "operator only"
     extcall IEntryPoint(self.entryPoint).depositTo(self, value=msg.value)
     log PaymasterDeposited(amount=msg.value)
 
 @external
 def addFactory(factory: address):
-    """Add an allowed AA factory (Privy, SimpleAccountFactory, etc.)"""
     assert msg.sender == self.operator, "operator only"
     self.allowedFactories[factory] = True
 
 @external
 def removeFactory(factory: address):
-    """Remove an allowed AA factory"""
     assert msg.sender == self.operator, "operator only"
     self.allowedFactories[factory] = False
 
 @external
 def addSender(sender: address):
-    """
-    Add an allowed AA sender (smart account from allowed factory).
-    
-    MVP: operator pre-registers AA accounts from allowed factories.
-    Production: parse initCode to extract factory, validate against allowedFactories.
-    """
     assert msg.sender == self.operator, "operator only"
     self.allowedSenders[sender] = True
 
 @external
 def removeSender(sender: address):
-    """Remove an allowed AA sender"""
     assert msg.sender == self.operator, "operator only"
     self.allowedSenders[sender] = False
 
+@external
+def setWeiPerUsdc(weiPerUsdc: uint256):
+    assert msg.sender == self.operator, "operator only"
+    assert weiPerUsdc != 0, "weiPerUsdc"
+    self.weiPerUsdc = weiPerUsdc
+
+@external
+def setFeeRecipient(recipient: address):
+    assert msg.sender == self.operator, "operator only"
+    assert recipient != empty(address), "recipient required"
+    self.feeRecipient = recipient
+
+@external
+def setDailyCapUsdc(cap: uint256):
+    assert msg.sender == self.operator, "operator only"
+    self.dailyCapUsdc = cap
+
 @internal
-@view
+@pure
 def _extractSelector(callData: Bytes[8192]) -> bytes4:
-    """Extract function selector (first 4 bytes) from calldata"""
     assert len(callData) >= 4, "calldata too short"
     return convert(slice(callData, 0, 4), bytes4)
 
 @internal
-@view
+@pure
 def _extractAddress(callData: Bytes[8192], offset: uint256) -> address:
-    """Extract address from calldata at byte offset"""
     assert len(callData) >= offset + 32, "calldata too short for address"
-    # Address is right-padded in the 32-byte word
     word: bytes32 = convert(slice(callData, offset, 32), bytes32)
     return convert(convert(word, uint256) & convert(max_value(uint160), uint256), address)
 
 @internal
+@pure
+def _extractUint(callData: Bytes[8192], offset: uint256) -> uint256:
+    assert len(callData) >= offset + 32, "calldata too short for uint"
+    return convert(convert(slice(callData, offset, 32), bytes32), uint256)
+
+@internal
+@pure
+def _addr20(data: Bytes[8192], off: uint256) -> address:
+    return convert(convert(slice(data, off, 20), bytes20), address)
+
+@internal
+@pure
+def _u48(data: Bytes[8192], off: uint256) -> uint48:
+    return convert(convert(convert(slice(data, off, 6), bytes6), uint256), uint48)
+
+@internal
+@pure
+def _recover(digest: bytes32, sig: Bytes[65]) -> address:
+    r: bytes32 = convert(slice(sig, 0, 32), bytes32)
+    s: bytes32 = convert(slice(sig, 32, 32), bytes32)
+    v: uint256 = convert(slice(sig, 64, 1), uint256)
+    if v < 27:
+        v += 27
+    return ecrecover(digest, v, r, s)
+
+@internal
 @view
 def _validateCall(to: address, callData: Bytes[8192]) -> bool:
-    """
-    Validate a single call against allowlist.
-    Returns True if allowed, False otherwise.
-    """
     if len(callData) < 4:
         return False
-    
     selector: bytes4 = self._extractSelector(callData)
-    
-    # Block matchOrders explicitly
     if selector == SELECTOR_MATCH_ORDERS:
         return False
-    
-    # USDC approve: check spender is ctf/amm/feeVault
     if to == self.usdc and selector == SELECTOR_APPROVE:
         if len(callData) < 36:
             return False
         spender: address = self._extractAddress(callData, 4)
-        return spender in [self.ctf, self.amm, self.feeVault]
-    
-    # CTF splitPosition
+        return spender in [self.ctf, self.exchange, self.amm, self.feeVault, self]
     if to == self.ctf and selector == SELECTOR_SPLIT:
         return True
-    
-    # CTF setApprovalForAll: decode operator, require operator in allowed contracts
     if to == self.ctf and selector == SELECTOR_SET_APPROVAL:
-        if len(callData) < 68:  # selector + address + bool
+        if len(callData) < 68:
             return False
         operator: address = self._extractAddress(callData, 4)
-        # operator must be in allowed contracts to prevent arbitrary approval grants
         return operator in [self.amm, self.exchange, self.feeVault]
-    
-    # AMM buy/sell/addLiquidity
     if to == self.amm:
         if selector in [SELECTOR_BUY_USDC, SELECTOR_SELL_USDC, SELECTOR_ADD_LIQ]:
             return True
-    
-    # Oracle castVote
     if to == self.oracle and selector == SELECTOR_CAST_VOTE:
         return True
-    
-    # Exchange cancelOrder/incrementNonce (NOT matchOrders)
     if to == self.exchange:
         if selector in [SELECTOR_CANCEL_ORDER, SELECTOR_INC_NONCE]:
             return True
-    
-    # FeeVault requestRedeem/claim
     if to == self.feeVault:
         if selector in [SELECTOR_REQUEST_REDEEM, SELECTOR_CLAIM]:
             return True
-    
-    # Deny unknown
     return False
 
 @internal
 @view
-def _validateCallData(callData: Bytes[8192]) -> bool:
-    """
-    Validate UserOp callData. Handles:
-    - Direct calls to protocol contracts
-    - AA execute(address,uint256,bytes)
-    - AA executeBatch(address[],uint256[],bytes[])
-    
-    Returns True if all nested calls are allowed, False otherwise.
-    """
+def _innerCall(callData: Bytes[8192]) -> (address, uint256, Bytes[8192], bool):
     if len(callData) < 4:
-        return False
-    
+        return empty(address), 0, b"", False
     selector: bytes4 = self._extractSelector(callData)
-    
-    # Simple execute(address,uint256,bytes)
-    # ABI: execute(address target, uint256 value, bytes data)
-    # Encoding: selector(4) + target(32) + value(32) + dataOffset(32) + dataLength(32) + data
-    if selector == SELECTOR_EXECUTE:
-        if len(callData) < 100:  # 4 + 32 + 32 + 32 (selector + target + value + dataOffset)
-            return False
-        
-        # Extract target address (offset 4)
-        target: address = self._extractAddress(callData, 4)
-        
-        # CRITICAL: Read the ABI offset dynamically (offset 68 = 4 + 32 + 32)
-        # Do NOT hardcode inner data position - crafted offset can hide malicious calls
-        dataOffsetBytes: bytes32 = convert(slice(callData, 68, 32), bytes32)
-        dataOffset: uint256 = convert(dataOffsetBytes, uint256)
-        
-        # dataOffset is relative to start of parameters (after selector), so add 4
-        absoluteDataOffset: uint256 = 4 + dataOffset
-        
-        # Sanity check: offset must be reasonable (at least 96 for standard encoding)
-        if dataOffset < 96 or absoluteDataOffset + 32 > len(callData):
-            return False
-        
-        # Read length at the dynamic offset
-        dataLenBytes: bytes32 = convert(slice(callData, absoluteDataOffset, 32), bytes32)
-        dataLen: uint256 = convert(dataLenBytes, uint256)
-        
-        # Validate length and bounds
-        if dataLen < 4 or absoluteDataOffset + 32 + dataLen > len(callData):
-            return False
-        
-        # Extract inner calldata starting after the length word
-        innerDataStart: uint256 = absoluteDataOffset + 32
-        innerData: Bytes[8192] = slice(callData, innerDataStart, dataLen)
-        return self._validateCall(target, innerData)
-    
-    # executeBatch: DENIED wholesale for stricter deny-by-default security
-    # 
-    # Reasoning:
-    # - executeBatch allows batching multiple calls in one UserOp
-    # - Validating each call in the batch requires decoding dynamic arrays
-    # - Array decoding in Vyper is complex and gas-expensive
-    # - Risk: batch could mix allowed+disallowed calls, bypassing allowlist
-    # 
-    # Production path (if needed):
-    # - Decode calls[] array (address[], uint256[], bytes[])
-    # - Validate each (target, value, data) tuple against allowlist
-    # - Reject if any call is not allowed
-    # 
-    # MVP decision: deny executeBatch entirely, require single execute() per UserOp
-    # This forces explicit per-operation validation and simplifies security surface.
     if selector == SELECTOR_EXECUTE_BATCH:
+        return empty(address), 0, b"", False
+    if selector != SELECTOR_EXECUTE:
+        return empty(address), 0, b"", False
+    if len(callData) < 100:
+        return empty(address), 0, b"", False
+    target: address = self._extractAddress(callData, 4)
+    amount: uint256 = self._extractUint(callData, 36)
+    dataOffsetBytes: bytes32 = convert(slice(callData, 68, 32), bytes32)
+    dataOffset: uint256 = convert(dataOffsetBytes, uint256)
+    absoluteDataOffset: uint256 = 4 + dataOffset
+    if dataOffset < 96 or absoluteDataOffset + 32 > len(callData):
+        return empty(address), 0, b"", False
+    dataLenBytes: bytes32 = convert(slice(callData, absoluteDataOffset, 32), bytes32)
+    dataLen: uint256 = convert(dataLenBytes, uint256)
+    if dataLen < 4 or absoluteDataOffset + 32 + dataLen > len(callData):
+        return empty(address), 0, b"", False
+    innerDataStart: uint256 = absoluteDataOffset + 32
+    innerData: Bytes[8192] = slice(callData, innerDataStart, dataLen)
+    return target, amount, innerData, True
+
+@internal
+@view
+def _validateCallData(callData: Bytes[8192]) -> bool:
+    target: address = empty(address)
+    amount: uint256 = 0
+    inner: Bytes[8192] = b""
+    ok: bool = False
+    target, amount, inner, ok = self._innerCall(callData)
+    if not ok:
         return False
-    
-    # Direct protocol call: extract target from UserOp.sender context
-    # For direct calls, callData is sent to the AA account itself,
-    # which then forwards to protocol. This is unusual; typically
-    # AA wraps calls in execute(). Deny for safety.
-    return False
+    if amount != 0:
+        return False
+    return self._validateCall(target, inner)
+
+@internal
+@view
+def _isPaymasterApprove(callData: Bytes[8192], fee: uint256) -> bool:
+    target: address = empty(address)
+    amount: uint256 = 0
+    inner: Bytes[8192] = b""
+    ok: bool = False
+    target, amount, inner, ok = self._innerCall(callData)
+    if not ok:
+        return False
+    if target != self.usdc:
+        return False
+    if len(inner) < 68:
+        return False
+    if self._extractSelector(inner) != SELECTOR_APPROVE:
+        return False
+    spender: address = self._extractAddress(inner, 4)
+    approved: uint256 = self._extractUint(inner, 36)
+    return spender == self and approved >= fee
+
+@internal
+def _chargeCap(sender: address, fee: uint256):
+    rec: DailySpend = self.dailySpend[sender]
+    if rec.windowStart == 0 or block.timestamp >= rec.windowStart + WINDOW:
+        rec.windowStart = block.timestamp
+        rec.spent = 0
+    rec.spent += fee
+    assert rec.spent <= self.dailyCapUsdc, "paymaster: daily cap"
+    self.dailySpend[sender] = rec
+
+@internal
+@view
+def _operatorDigest(
+    userOp: PackedUserOperation,
+    validUntil: uint48,
+    validAfter: uint48
+) -> bytes32:
+    return keccak256(
+        abi_encode(
+            userOp.sender,
+            userOp.nonce,
+            keccak256(userOp.initCode),
+            keccak256(userOp.callData),
+            userOp.accountGasLimits,
+            userOp.preVerificationGas,
+            userOp.gasFees,
+            convert(validUntil, uint256),
+            convert(validAfter, uint256),
+            self,
+            chain.id,
+        )
+    )
+
+@internal
+@view
+def _checkOperatorSig(userOp: PackedUserOperation) -> (uint48, uint48):
+    assert len(userOp.paymasterAndData) >= 129, "paymaster: paymasterAndData"
+    pm: address = self._addr20(userOp.paymasterAndData, 0)
+    assert pm == self, "paymaster: prefix"
+    validUntil: uint48 = self._u48(userOp.paymasterAndData, 52)
+    validAfter: uint48 = self._u48(userOp.paymasterAndData, 58)
+    sig: Bytes[65] = slice(userOp.paymasterAndData, 64, 65)
+    digest: bytes32 = keccak256(concat(ETH_MSG, self._operatorDigest(userOp, validUntil, validAfter)))
+    assert self._recover(digest, sig) == self.operator, "paymaster: bad operator sig"
+    return validUntil, validAfter
 
 @external
 def validatePaymasterUserOp(
     userOp: PackedUserOperation,
     userOpHash: bytes32,
     maxCost: uint256
-) -> (bytes32, uint256):
-    """
-    EntryPoint v0.7 hook: validate UserOp before sponsoring.
-    Returns (context, validationData) where:
-    - context: opaque bytes for postOp (unused here)
-    - validationData: 0 = valid, 1 = invalid signature/time
-    
-    Reverts on deny (gas-efficient rejection).
-    
-    Security: sender must be from allowed factory to prevent arbitrary EOA sponsorship.
-    """
+) -> (Bytes[160], uint256):
     assert msg.sender == self.entryPoint, "entrypoint only"
-    
-    # REQUIRED: Check sender is from allowed factory
-    # MVP: operator pre-registers AA accounts via addSender()
-    # Production: parse initCode to extract factory, validate against allowedFactories
-    # Without this check, any EOA could get sponsorship
-    if not self.allowedSenders[userOp.sender]:
+    assert self.weiPerUsdc != 0, "paymaster: weiPerUsdc"
+    if len(userOp.initCode) > 0:
+        assert len(userOp.initCode) >= 20, "paymaster: initCode"
+        factory: address = self._addr20(userOp.initCode, 0)
+        if not self.allowedFactories[factory]:
+            log UserOpRejected(sender=userOp.sender, reason="factory not allowed")
+            raise "paymaster: factory not allowed"
+        self.allowedSenders[userOp.sender] = True
+    elif not self.allowedSenders[userOp.sender]:
         log UserOpRejected(sender=userOp.sender, reason="sender not allowed")
         raise "paymaster: sender not from allowed factory"
-    
-    # Validate callData allowlist
+    validUntil: uint48 = 0
+    validAfter: uint48 = 0
+    validUntil, validAfter = self._checkOperatorSig(userOp)
     if not self._validateCallData(userOp.callData):
         log UserOpRejected(sender=userOp.sender, reason="calldata denied")
         raise "paymaster: operation not allowed"
-    
-    # Check deposit is sufficient
-    # deposit: uint256, staked: bool, stake: uint112, unstakeDelay: uint48, withdrawTime: uint48
+    usdcFee: uint256 = (maxCost * 10 ** 6 + self.weiPerUsdc - 1) // self.weiPerUsdc
+    assert staticcall IERC20(self.usdc).balanceOf(userOp.sender) >= usdcFee, "paymaster: USDC balance"
+    if not self._isPaymasterApprove(userOp.callData, usdcFee):
+        assert staticcall IERC20(self.usdc).allowance(userOp.sender, self) >= usdcFee, "paymaster: USDC allowance"
+    self._chargeCap(userOp.sender, usdcFee)
     depositInfo: (uint256, bool, uint112, uint48, uint48) = staticcall IEntryPoint(self.entryPoint).getDepositInfo(self)
     assert depositInfo[0] >= maxCost, "paymaster: insufficient deposit"
-    
     log UserOpSponsored(sender=userOp.sender, userOpHash=userOpHash)
-    
-    # validationData = 0 (valid), context = empty
-    return (empty(bytes32), 0)
+    ctx: Bytes[160] = concat(convert(userOp.sender, bytes20), convert(usdcFee, bytes32))
+    validationData: uint256 = convert(validUntil, uint256) * (2 ** 160) + convert(validAfter, uint256) * (2 ** 208)
+    return ctx, validationData
+
+@external
+def postOp(mode: uint8, context: Bytes[160], actualGasCost: uint256, actualUserOpFeePerGas: uint256):
+    assert msg.sender == self.entryPoint, "entrypoint only"
+    assert self.weiPerUsdc != 0, "paymaster: weiPerUsdc"
+    assert len(context) >= 52, "paymaster: context"
+    sender: address = convert(convert(slice(context, 0, 20), bytes20), address)
+    capped: uint256 = convert(convert(slice(context, 20, 32), bytes32), uint256)
+    fee: uint256 = (actualGasCost * 10 ** 6 + self.weiPerUsdc - 1) // self.weiPerUsdc
+    if fee > capped:
+        fee = capped
+    if fee > 0:
+        assert extcall IERC20(self.usdc).transferFrom(sender, self.feeRecipient, fee), "paymaster: fee"
 
 @external
 @view
 def getDepositInfo() -> (uint256, bool, uint112, uint48, uint48):
-    """Query paymaster's deposit on EntryPoint"""
     return staticcall IEntryPoint(self.entryPoint).getDepositInfo(self)

@@ -11,6 +11,8 @@ pointers:
   - "[scripts/e2e_local.py : L1-24]"
   - "[infra/docker-compose.yml : L1-25]"
   - "[.github/workflows/deploy-gcp.yml : L83-96]"
+  - "[docs/runbooks/local-dev.md : L100-107]"
+  - "[scripts/list_chiefs_primary.py : L76-119]"
 ---
 
 # Local development
@@ -96,3 +98,13 @@ gcloud secrets versions add OU_CURSOR_SEARCH_MCP_URL --data-file=cursor-search-m
 ```
 
 Local/anvil: set `CURSOR_API_KEY` and `CURSOR_SEARCH_MCP_URL` in `.env`, leave `OU_CURSOR_RUNTIME` unset (local SDK). Pytest/CI/anvil keep `OU_ORACLE_MOCK=1`.
+
+## Paymaster gas tank
+
+EntryPoint ETH is the sponsorship tank. Operator deposits via `OverUnderPaymaster.deposit()`.
+
+- After Anvil deploy, `deploy.py` already deposits `PAYMASTER_DEPOSIT_WEI` or 1 ETH.
+- Watch `getDepositInfo` on the EntryPoint for the paymaster address. Refill when the deposit falls below about 0.02 ETH.
+- After a Base Sepolia deploy, call `setWeiPerUsdc` for the live wei-per-USDC rate (Anvil default is `10**15`). Do not rely on a price oracle.
+- Run `scripts/list_chiefs_primary.py` only after the API `.env` points at the **new** factory/AMM/paymaster addresses. The script skips create if the question `Chiefs vs Broncos: Chiefs win?` already exists and never scores a different condition id.
+
