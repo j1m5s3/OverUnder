@@ -235,4 +235,6 @@ async def sponsor_userop(
         signature=signature,
         settings=settings,
     )
+    if not tx_hash:
+        raise HTTPException(503, "Bundler did not broadcast")
     return UserOpResponse(paymasterAndData=body.paymasterAndData, txHash=tx_hash)

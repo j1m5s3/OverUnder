@@ -149,8 +149,9 @@ export async function sendSponsoredExecute(args: {
     paymasterAndData: stamped.paymasterAndData,
     signature,
   });
-  if (submitted.txHash) {
-    await args.publicClient.waitForTransactionReceipt({ hash: submitted.txHash });
+  if (!submitted.txHash) {
+    throw new Error("bundler did not broadcast");
   }
+  await args.publicClient.waitForTransactionReceipt({ hash: submitted.txHash });
   return submitted.txHash;
 }

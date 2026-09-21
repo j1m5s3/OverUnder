@@ -126,6 +126,30 @@ async def test_userop_stamps_execute_buy(client):
 
 
 @pytest.mark.asyncio
+async def test_signed_userop_503_when_bundler_silent(client):
+    acct, token = await _auth(client)
+    operator = Account.create()
+    call_data = _execute(AMM, _buy_calldata())
+    settings = _settings(operator.key.hex())
+    with patch("app.aa.router.get_settings", return_value=settings):
+        with patch("app.aa.router._owned_by_user", return_value=True):
+            stamped = await client.post(
+                "/api/v1/aa/userop",
+                headers={"Authorization": f"Bearer {token}"},
+                json=_userop(call_data),
+            )
+            assert stamped.status_code == 200
+            paymaster_and_data = stamped.json()["paymasterAndData"]
+            with patch("app.aa.router.submit_handle_ops", return_value=None):
+                res = await client.post(
+                    "/api/v1/aa/userop",
+                    headers={"Authorization": f"Bearer {token}"},
+                    json=_userop(call_data, signature="0x" + "11" * 65, paymaster_and_data=paymaster_and_data),
+                )
+    assert res.status_code == 503
+
+
+@pytest.mark.asyncio
 async def test_userop_denies_match_orders(client):
     acct, token = await _auth(client)
     operator = Account.create()
