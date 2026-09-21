@@ -4,7 +4,7 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
 
 from app.auth.router import _issue
-from app.db import Base, SessionLocal, engine
+from app.db import Base, SessionLocal, engine, ensure_live_score_facts
 from app.main import create_app
 from app.models import LiveScore, Market, User
 
@@ -44,6 +44,7 @@ async def _reset(session) -> None:
 async def client():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        await conn.run_sync(ensure_live_score_facts)
     async with SessionLocal() as session:
         await _reset(session)
         session.add_all(
@@ -174,6 +175,7 @@ def test_sports_gate_mirrors_web_heuristic():
     from app.markets.sports import is_sports_market
 
     assert is_sports_market("Chiefs vs Broncos: Chiefs win?")
+    assert is_sports_market("Bills vs Dolphins: Bills win?")
     assert is_sports_market("Lakers vs Celtics: over 220 points?")
     assert not is_sports_market("Will the bill pass the Senate?")
     assert not is_sports_market("")
@@ -214,3 +216,51 @@ async def test_score_404_for_unknown_market(client):
         json={"homeLabel": "A", "awayLabel": "B", "status": "scheduled"},
     )
     assert r.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_facts_upsert_on_primary_and_parent_on_wildcard(client):
+    payload = {
+        "homeLabel": "Chiefs",
+        "awayLabel": "Broncos",
+        "homeScore": 27,
+        "awayScore": 24,
+        "status": "final",
+        "facts": {"home_score": 27, "away_score": 24, "fumbles": 1},
+    }
+    r = await client.post(f"/api/v1/markets/{PRIMARY}/score", headers=_op_headers(), json=payload)
+    assert r.status_code == 200
+    assert r.json()["facts"]["fumbles"] == 1
+
+    primary = await client.get(f"/api/v1/markets/{PRIMARY}")
+    assert primary.status_code == 200
+    body = primary.json()
+    assert body["score"]["facts"]["fumbles"] == 1
+    assert body["facts"]["fumbles"] == 1
+
+    wildcard = await client.get(f"/api/v1/markets/{WILDCARD}")
+    assert wildcard.status_code == 200
+    child = wildcard.json()
+    assert child["score"] is None
+    assert child["facts"]["fumbles"] == 1
+
+    replaced = {**payload, "facts": {"total_points": 51}}
+    again = await client.post(f"/api/v1/markets/{PRIMARY}/score", headers=_op_headers(), json=replaced)
+    assert again.status_code == 200
+    assert again.json()["facts"] == {"total_points": 51}
+    assert "fumbles" not in again.json()["facts"]
+
+
+def test_ensure_live_score_facts_idempotent():
+    from sqlalchemy import create_engine, text
+
+    from app.db import ensure_live_score_facts
+
+    eng = create_engine("sqlite://")
+    with eng.begin() as conn:
+        conn.execute(text("CREATE TABLE live_scores (condition_id VARCHAR(66) PRIMARY KEY)"))
+        ensure_live_score_facts(conn)
+        ensure_live_score_facts(conn)
+        names = [row[1] for row in conn.execute(text("PRAGMA table_info(live_scores)"))]
+    assert "facts" in names
+

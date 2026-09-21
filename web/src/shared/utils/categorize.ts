@@ -11,6 +11,11 @@ export function categorizeMarket(input: string | { question: string }): Category
     "lakers", "celtics", "warriors", "knicks",
     "cowboys", "patriots", "packers", "seahawks", "chargers",
     "steelers",
+    "bills", "dolphins", "jets", "ravens", "browns", "bengals",
+    "texans", "colts", "jaguars", "titans", "raiders",
+    "eagles", "giants", "commanders", "lions", "bears", "vikings",
+    "saints", "buccaneers", "falcons", "panthers", "49ers", "rams",
+    "cardinals",
     "touchdown", "fumble", "home run", "strikeout", "grand slam",
     "three-pointer", "slam dunk", "hat trick"
   ];

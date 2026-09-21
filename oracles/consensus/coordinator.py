@@ -1,26 +1,17 @@
-"""Collect 3 attestations and submitConsensus when unanimous."""
+"""Collect 3 attestations. run() does not submitConsensus."""
 
 from __future__ import annotations
 
 import os
 import time
-from pathlib import Path
-
-from eth_account import Account
 
 from agents.alpha import AlphaAgent
 from agents.beta import BetaAgent
 from agents.gamma import GammaAgent
-
-ROOT = Path(__file__).resolve().parents[2]
+from consensus.eip712 import sign_attestation
 
 
 def _sign(private_key: str, oracle: str, chain_id: int, condition_id: bytes, outcome: int, evidence_hash: bytes, deadline: int) -> bytes:
-    import sys
-
-    sys.path.append(str(ROOT / "contracts" / "tests"))
-    from eip712 import sign_attestation
-
     return sign_attestation(private_key, oracle, chain_id, condition_id, outcome, evidence_hash, deadline)
 
 
@@ -51,7 +42,7 @@ class Coordinator:
             ],
         }
 
-    def sign_unanimous(self, oracle: str, chain_id: int, condition_id: bytes, evidence_hash: bytes, outcome: int) -> list[bytes]:
+    def sign_unanimous(self, oracle: str, chain_id: int, condition_id: bytes, evidence_hash: bytes, outcome: int) -> tuple[int, list[bytes]]:
         deadline = int(time.time()) + 3600
         sigs = []
         for name in ("alpha", "beta", "gamma"):
@@ -59,4 +50,4 @@ class Coordinator:
             if not key:
                 raise RuntimeError(f"missing key for {name}")
             sigs.append(_sign(key, oracle, chain_id, condition_id, outcome, evidence_hash, deadline))
-        return sigs
+        return deadline, sigs

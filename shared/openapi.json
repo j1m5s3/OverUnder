@@ -13,6 +13,10 @@
       },
       "post": { "responses": { "200": { "description": "created" } } }
     },
+    "/api/v1/markets/schedule": {
+      "get": { "responses": { "200": { "description": "NflScheduleGame[]" } } },
+      "post": { "responses": { "200": { "description": "upserted schedule" } } }
+    },
     "/api/v1/markets/{condition_id}": { "get": { "responses": { "200": { "description": "MarketDetail with children[]" } } } },
     "/api/v1/markets/{condition_id}/pause": { "post": { "responses": { "200": { "description": "paused" } } } },
     "/api/v1/orders": { "post": { "responses": { "200": { "description": "posted" } } } },
@@ -23,6 +27,7 @@
     "/api/v1/ramps/onramp-url": { "get": { "responses": { "200": { "description": "url" } } } },
     "/api/v1/ramps/offramp-url": { "get": { "responses": { "200": { "description": "url" } } } },
     "/api/v1/oracle/attest": { "post": { "responses": { "200": { "description": "ok" } } } },
+    "/api/v1/oracle/resolved": { "post": { "responses": { "200": { "description": "mirrored resolved" } } } },
     "/api/v1/oracle/{market_id}/status": { "get": { "responses": { "200": { "description": "status" } } } },
     "/api/v1/oracle/vote": { "post": { "responses": { "200": { "description": "ok" } } } },
     "/api/v1/portfolio/{address}": { "get": { "responses": { "200": { "description": "portfolio" } } } },

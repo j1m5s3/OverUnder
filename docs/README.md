@@ -3,7 +3,7 @@ title: Docs map
 status: SHIPPED
 area: cross
 summary: Index of AI-consumable OverUnder docs and the required reading order.
-last_verified: 2026-09-20
+last_verified: 2026-09-21
 pointers: []
 ---
 
@@ -18,7 +18,7 @@ Read [`AGENTS.md`](../AGENTS.md) first, then this file, then area docs.
 3. [architecture/overview.md](architecture/overview.md)
 4. Area architecture (contracts, backend, oracles, web, data-flow)
 5. [intent/vision.md](intent/vision.md) and [intent/glossary.md](intent/glossary.md)
-6. ADRs 0001–0007 (0001 superseded; 0007 is book of record)
+6. ADRs 0001–0009 (0001 superseded; 0007 is AMM book of record; 0008 is Cursor-runtime oracles; 0009 is dual-gate sports resolve and week-roll listing)
 7. [roadmap/phase-1-mvp.md](roadmap/phase-1-mvp.md) then [roadmap/phase-2.md](roadmap/phase-2.md)
 8. [TODOS.md](TODOS.md)
 9. [runbooks/local-dev.md](runbooks/local-dev.md)
@@ -40,6 +40,8 @@ Read [`AGENTS.md`](../AGENTS.md) first, then this file, then area docs.
 - [adr/0005-injected-wallet-not-full-privy-aa.md](adr/0005-injected-wallet-not-full-privy-aa.md) — wallets
 - [adr/0006-docs-system-conventions.md](adr/0006-docs-system-conventions.md) — this schema
 - [adr/0007-amm-first-uniform-lvr.md](adr/0007-amm-first-uniform-lvr.md) — AMM-first book of record
+- [adr/0008-cursor-runtime-oracles.md](adr/0008-cursor-runtime-oracles.md) — Cursor-runtime oracles and remote HTTP MCP
+- [adr/0009-dual-gate-sports-resolve-and-week-listing.md](adr/0009-dual-gate-sports-resolve-and-week-listing.md) — dual-gate auto-resolve and NFL week-roll listing
 - [explore/amm.md](explore/amm.md) — uniform-LVR literature (not spec)
 - [explore/edge_opportunities.md](explore/edge_opportunities.md) — niche stance (not spec)
 - [roadmap/phase-1-mvp.md](roadmap/phase-1-mvp.md) — shipped AMM checklist

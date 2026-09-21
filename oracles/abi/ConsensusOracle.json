@@ -1,0 +1,29 @@
+[
+  {
+    "name": "submitConsensus",
+    "type": "function",
+    "stateMutability": "nonpayable",
+    "inputs": [
+      {"name": "conditionId", "type": "bytes32"},
+      {"name": "outcome", "type": "uint8"},
+      {"name": "evidenceHash", "type": "bytes32"},
+      {"name": "deadline", "type": "uint256"},
+      {"name": "sigs", "type": "bytes[]"}
+    ],
+    "outputs": []
+  },
+  {
+    "name": "resolved",
+    "type": "function",
+    "stateMutability": "view",
+    "inputs": [{"name": "arg0", "type": "bytes32"}],
+    "outputs": [{"name": "", "type": "bool"}]
+  },
+  {
+    "name": "closeTime",
+    "type": "function",
+    "stateMutability": "view",
+    "inputs": [{"name": "arg0", "type": "bytes32"}],
+    "outputs": [{"name": "", "type": "uint256"}]
+  }
+]

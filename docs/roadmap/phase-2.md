@@ -2,8 +2,8 @@
 title: Phase 2 remaining vision
 status: MIXED
 area: roadmap
-summary: MIXED spec — Flutter/emissions/KYC/live agents shipped; remaining paymaster, JWKS, leftover CLOB relayer, uniform-LVR, permissionless listing.
-last_verified: 2026-09-20
+summary: MIXED spec — Flutter/emissions/KYC/Cursor-runtime agents/dual-gate resolve shipped; remaining paymaster, JWKS, leftover CLOB relayer, uniform-LVR, permissionless listing.
+last_verified: 2026-09-21
 pointers:
   - "[mobile/README.md : L1-25]"
   - "[web/src/app/providers.tsx : L10-17]"
@@ -17,7 +17,7 @@ pointers:
 
 # Phase 2
 
-This file is MIXED. [SHIPPED] Flutter (OU-T006), emissions (OU-T004), live LLM agents (OU-T005), MoonPay/KYC (OU-T007). Remaining open: paymaster (OU-T001), Privy JWKS (OU-T002), leftover CLOB production relayer (OU-T003), uniform-LVR (OU-T008/T009), permissionless listing (OU-T010). CLOB UX is an optional overlay, not a required depth-chart milestone. Do not invent ERC-4337, JWKS, or uniform-LVR as shipped.
+This file is MIXED. [SHIPPED] Flutter (OU-T006), emissions (OU-T004), Cursor-runtime agents (OU-T005), score scout (OU-T011), dual-gate resolve (OU-T012), week-roll listing (OU-T013), MoonPay/KYC (OU-T007). Remaining open: paymaster (OU-T001), Privy JWKS (OU-T002), leftover CLOB production relayer (OU-T003), uniform-LVR (OU-T008/T009), permissionless listing (OU-T010). CLOB UX is an optional overlay, not a required depth-chart milestone. Do not invent ERC-4337, JWKS, or uniform-LVR as shipped.
 
 ## 1. Flutter
 

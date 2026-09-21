@@ -3,8 +3,9 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.auth.router import require_operator
 from app.db import get_db
-from app.models import Attestation, Vote
+from app.models import Attestation, Market, User, Vote
 
 router = APIRouter(prefix="/oracle", tags=["oracle"])
 
@@ -26,6 +27,11 @@ class VoteIn(BaseModel):
     weight: int = 0
 
 
+class ResolvedIn(BaseModel):
+    conditionId: str
+    outcome: int
+
+
 @router.post("/attest")
 async def attest(body: AttestIn, db: AsyncSession = Depends(get_db)):
     row = Attestation(
@@ -40,6 +46,30 @@ async def attest(body: AttestIn, db: AsyncSession = Depends(get_db)):
     db.add(row)
     await db.commit()
     return {"ok": True, "id": row.id}
+
+
+@router.post("/resolved")
+async def mark_resolved(
+    body: ResolvedIn,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(require_operator),
+):
+    if body.outcome not in (0, 1):
+        raise HTTPException(400, "outcome must be 0 or 1")
+    market = await db.get(Market, body.conditionId)
+    if market is None:
+        raise HTTPException(404, "market not found")
+    market.resolved = True
+    market.payout_yes = 1 if body.outcome == 0 else 0
+    market.payout_no = 0 if body.outcome == 0 else 1
+    await db.commit()
+    return {
+        "ok": True,
+        "conditionId": market.condition_id,
+        "resolved": True,
+        "payoutYes": market.payout_yes,
+        "payoutNo": market.payout_no,
+    }
 
 
 @router.get("/{market_id}/status")

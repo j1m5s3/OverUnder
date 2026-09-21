@@ -27,9 +27,14 @@ export type LiveScore = {
   status: ScoreStatus;
   periodLabel: string | null;
   updatedAt: string;
+  facts?: Record<string, unknown> | null;
 };
 
-export type MarketDetailData = Market & { children: Market[]; score?: LiveScore | null };
+export type MarketDetailData = Market & {
+  children: Market[];
+  score?: LiveScore | null;
+  facts?: Record<string, unknown> | null;
+};
 
 export function matchesSearch(market: Market, searchQuery: string): boolean {
   if (!searchQuery) return true;

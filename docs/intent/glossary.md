@@ -3,7 +3,7 @@ title: Glossary
 status: MIXED
 area: intent
 summary: Domain terms for OverUnder markets, books, oracles, and OU.
-last_verified: 2026-09-20
+last_verified: 2026-09-21
 pointers: []
 ---
 
@@ -21,6 +21,8 @@ pointers: []
 - [SHIPPED] **Attestation** — Agent EIP-712 statement of outcome + evidenceHash after closeTime.
 - [SHIPPED] **Unanimous consensus** — Three distinct agents, same outcome, `submitConsensus`.
 - [SHIPPED] **Fallback window** — 86400 seconds after closeTime before `resolveFallback`.
+- [SHIPPED] **Dual-gate sports resolve** — LiveScore `final` plus unanimous research matching the score-derived winner, then `submitConsensus`.
+- [PHASE2] **Permissionless listing** — Anyone can list a seeded AMM primary (OU-T010). Factory stays operator-gated until then.
 - [SHIPPED] **Participant vote** — Token-weighted `castVote` using YES+NO balances.
 - [SHIPPED] **NAV** — USDC on FeeVault per 1e18 OU (`balance * 1e18 / supply`).
 - [SHIPPED] **OU** — Fixed-supply revenue token (100M). Redeem burns OU for USDC.

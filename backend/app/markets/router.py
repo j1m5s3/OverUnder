@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from typing import Literal
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.router import require_operator
 from app.db import get_db
 from app.markets.sports import is_sports_market
-from app.models import LiveScore, Market, User
+from app.models import LiveScore, Market, NflScheduleGame, User
 
 router = APIRouter(prefix="/markets", tags=["markets"])
 
@@ -46,6 +46,7 @@ class LiveScoreIn(BaseModel):
     awayScore: int | None = Field(default=None, ge=0)
     status: Literal["scheduled", "in_progress", "final", "postponed", "cancelled"] = "scheduled"
     periodLabel: str | None = Field(default=None, max_length=16)
+    facts: dict[str, Any] | None = None
 
 
 class LiveScorePublic(LiveScoreIn):
@@ -56,11 +57,26 @@ class LiveScorePublic(LiveScoreIn):
 class MarketDetail(MarketPublic):
     children: list[MarketPublic]
     score: LiveScorePublic | None = None
+    facts: dict[str, Any] | None = None
 
 
 class EventCard(BaseModel):
     primary: MarketPublic
     children: list[MarketPublic]
+
+
+class ScheduleGameIn(BaseModel):
+    away: str = Field(min_length=1, max_length=128)
+    home: str = Field(min_length=1, max_length=128)
+    kickoff_unix: int
+    week: int
+    season: int
+    status: Literal["scheduled", "in_progress", "final", "postponed", "cancelled"] = "scheduled"
+    listedConditionId: str = ""
+
+
+class ScheduleGamePublic(ScheduleGameIn):
+    id: int
 
 
 class PricePointPublic(BaseModel):
@@ -115,6 +131,72 @@ async def list_markets(
     return cards
 
 
+@router.get("/schedule")
+async def get_schedule(
+    season: int | None = Query(default=None),
+    week: int | None = Query(default=None),
+    db: AsyncSession = Depends(get_db),
+) -> list[ScheduleGamePublic]:
+    stmt = select(NflScheduleGame)
+    if season is not None:
+        stmt = stmt.where(NflScheduleGame.season == season)
+    if week is not None:
+        stmt = stmt.where(NflScheduleGame.week == week)
+    stmt = stmt.order_by(NflScheduleGame.season, NflScheduleGame.week, NflScheduleGame.kickoff_unix)
+    rows = (await db.execute(stmt)).scalars().all()
+    return [_to_schedule(row) for row in rows]
+
+
+@router.post("/schedule")
+async def upsert_schedule(
+    games: list[ScheduleGameIn],
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(require_operator),
+) -> list[ScheduleGamePublic]:
+    seasons_weeks: set[tuple[int, int]] = set()
+    for game in games:
+        seasons_weeks.add((game.season, game.week))
+        existing = (
+            await db.execute(
+                select(NflScheduleGame).where(
+                    NflScheduleGame.season == game.season,
+                    NflScheduleGame.week == game.week,
+                    NflScheduleGame.home == game.home,
+                    NflScheduleGame.away == game.away,
+                )
+            )
+        ).scalar_one_or_none()
+        if existing is None:
+            db.add(
+                NflScheduleGame(
+                    season=game.season,
+                    week=game.week,
+                    home=game.home,
+                    away=game.away,
+                    kickoff_unix=game.kickoff_unix,
+                    status=game.status,
+                    listed_condition_id=game.listedConditionId,
+                )
+            )
+        else:
+            existing.kickoff_unix = game.kickoff_unix
+            existing.status = game.status
+            if game.listedConditionId:
+                existing.listed_condition_id = game.listedConditionId
+    await db.commit()
+    out: list[ScheduleGamePublic] = []
+    for season, week in sorted(seasons_weeks):
+        rows = (
+            await db.execute(
+                select(NflScheduleGame)
+                .where(NflScheduleGame.season == season, NflScheduleGame.week == week)
+                .order_by(NflScheduleGame.kickoff_unix)
+            )
+        ).scalars().all()
+        out.extend(_to_schedule(row) for row in rows)
+    return out
+
+
 @router.get("/{condition_id}/history")
 async def get_market_history(condition_id: str, db: AsyncSession = Depends(get_db)) -> list[PricePointPublic]:
     from app.models import PricePoint
@@ -143,7 +225,8 @@ async def get_market(condition_id: str, db: AsyncSession = Depends(get_db)) -> M
     kids = (await db.execute(select(Market).where(_child_of(m.condition_id)).order_by(Market.condition_id))).scalars().all()
     public = _to_public(m)
     score = await _get_score(db, m)
-    return MarketDetail(**public.model_dump(), children=[_to_public(c) for c in kids], score=score)
+    facts = await _get_facts(db, m)
+    return MarketDetail(**public.model_dump(), children=[_to_public(c) for c in kids], score=score, facts=facts)
 
 
 @router.post("/{condition_id}/score")
@@ -162,7 +245,7 @@ async def upsert_score(
         raise HTTPException(400, "scores only on sports primaries")
     if body.status == "scheduled" and body.homeScore == 0 and body.awayScore == 0:
         raise HTTPException(400, "scheduled games have no score yet")
-    now = datetime.now(timezone.utc)
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
     row = await db.get(LiveScore, condition_id)
     if row is None:
         row = LiveScore(
@@ -173,6 +256,7 @@ async def upsert_score(
             away_score=body.awayScore,
             status=body.status,
             period_label=body.periodLabel,
+            facts=body.facts,
             updated_at=now,
         )
         db.add(row)
@@ -183,6 +267,7 @@ async def upsert_score(
         row.away_score = body.awayScore
         row.status = body.status
         row.period_label = body.periodLabel
+        row.facts = body.facts
         row.updated_at = now
     await db.commit()
     return _to_score(row)
@@ -402,6 +487,16 @@ def _to_public(m: Market) -> MarketPublic:
     return MarketPublic.model_validate(_public(m))
 
 
+async def _get_facts(db: AsyncSession, m: Market) -> dict | None:
+    cid = m.condition_id if m.market_type == 0 else (m.parent_condition_id or "")
+    if not cid:
+        return None
+    row = await db.get(LiveScore, cid)
+    if row is None:
+        return None
+    return row.facts
+
+
 async def _get_score(db: AsyncSession, m: Market) -> LiveScorePublic | None:
     if m.market_type != 0:
         return None
@@ -409,6 +504,19 @@ async def _get_score(db: AsyncSession, m: Market) -> LiveScorePublic | None:
     if row is None:
         return None
     return _to_score(row)
+
+
+def _to_schedule(row: NflScheduleGame) -> ScheduleGamePublic:
+    return ScheduleGamePublic(
+        id=row.id,
+        away=row.away,
+        home=row.home,
+        kickoff_unix=row.kickoff_unix,
+        week=row.week,
+        season=row.season,
+        status=row.status,  # type: ignore[arg-type]
+        listedConditionId=row.listed_condition_id,
+    )
 
 
 def _to_score(row: LiveScore) -> LiveScorePublic:
@@ -420,6 +528,7 @@ def _to_score(row: LiveScore) -> LiveScorePublic:
         awayScore=row.away_score,
         status=row.status,  # type: ignore[arg-type]
         periodLabel=row.period_label,
+        facts=row.facts,
         updatedAt=row.updated_at,
     )
 
