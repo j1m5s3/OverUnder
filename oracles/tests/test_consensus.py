@@ -26,6 +26,8 @@ def test_unanimous_mocked_search():
         result = coord.run("Who won Chiefs vs Broncos?")
         assert result["unanimous"] is True
         assert result["outcome"] == 0
+        assert "submitConsensus" not in result
+        assert not hasattr(coord, "submitConsensus")
 
         # Verify evidence URLs are from search hits
         for report in result["reports"]:

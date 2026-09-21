@@ -3,7 +3,7 @@ title: Cursor-runtime oracles
 status: MIXED
 area: oracles
 summary: Live oracles use Python cursor-sdk with explicit models and remote HTTP search MCP; Cloud Run Job uses cloud agents; MockSearch stays for pytest/CI/anvil.
-last_verified: 2026-09-20
+last_verified: 2026-09-21
 pointers:
   - "[oracles/agents/cursor_runtime.py : L26-77]"
   - "[oracles/agents/cursor_runtime.py : L145-156]"
@@ -34,4 +34,5 @@ Vendor LLM and search SDKs (Claude/Tavily, GPT/Brave, Gemini/Exa) coupled the or
 ## Consequences
 
 - One Cursor key plus a remote search MCP URL replace six vendor keys. Cloud scouts do not need a GCP MCP service.
+- Sports auto-submit lives in `oracles/resolve/` under [ADR-0009](0009-dual-gate-sports-resolve-and-week-listing.md); the score scout still never submits.
 - Negative: live research depends on Cursor cloud availability and a reachable MCP URL; Secret Manager must already hold `OU_CURSOR_API_KEY` and `OU_CURSOR_SEARCH_MCP_URL` or deploy fails closed.

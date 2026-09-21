@@ -3,7 +3,7 @@ title: Architecture overview
 status: MIXED
 area: cross
 summary: Layered map of contracts, FastAPI, oracles, and Next.js with MVP trust boundaries.
-last_verified: 2026-09-20
+last_verified: 2026-09-21
 pointers:
   - "[contracts/src/MarketFactory.vy : L82-89]"
   - "[contracts/src/MarketFactory.vy : L92-99]"
@@ -11,8 +11,10 @@ pointers:
   - "[contracts/src/MarketAMM.vy : L162-201]"
   - "[contracts/src/Exchange.vy : L128-159]"
   - "[backend/app/main.py : L22-39]"
-  - "[oracles/consensus/coordinator.py : L36-52]"
+  - "[oracles/consensus/coordinator.py : L27-43]"
+  - "[oracles/resolve/run.py : L33-106]"
   - "[docs/adr/0008-cursor-runtime-oracles.md : L18-32]"
+  - "[docs/adr/0009-dual-gate-sports-resolve-and-week-listing.md : L18-32]"
   - "[web/src/app/providers.tsx : L10-17]"
 ---
 
@@ -24,7 +26,7 @@ OverUnder is a Base-chain prediction market. Collateral is USDC (6 decimals). Ou
 
 - [SHIPPED] Vyper contracts under `contracts/src/` deploy as one graph: MockUSDC, ConditionalTokens, MarketFactory, Exchange, MarketAMM, ConsensusOracle, FeeVault, RevenueToken.
 - [SHIPPED] FastAPI under `backend/app/` exposes `/api/v1` plus `/health`.
-- [SHIPPED] Python oracles under `oracles/` research questions with Cursor agents and collect 3/3 attestations. Score scout auto-POSTs LiveScore on 3/3. [docs/adr/0008-cursor-runtime-oracles.md : L18-32]
+- [SHIPPED] Python oracles under `oracles/` research questions with Cursor agents and collect 3/3 attestations. Score scout auto-POSTs LiveScore on 3/3. Dual-gate sports auto-resolve and week-roll listing: [ADR-0009](../adr/0009-dual-gate-sports-resolve-and-week-listing.md). [docs/adr/0008-cursor-runtime-oracles.md : L18-32]
 - [SHIPPED] Next.js web under `web/` lists markets, executes AMM swaps, shows oracle status.
 - [SHIPPED] Flutter app under `mobile/` mirrors web feature modules. See [mobile/README.md](../../mobile/README.md).
 

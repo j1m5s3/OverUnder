@@ -3,7 +3,7 @@ title: TODO registry
 status: PHASE2
 area: cross
 summary: Machine-parseable gaps for paymaster, JWKS, leftover CLOB relayer, uniform-LVR, and permissionless listing.
-last_verified: 2026-09-20
+last_verified: 2026-09-21
 pointers:
   - "[backend/app/auth/router.py : L90-102]"
   - "[backend/app/orderbook/matcher.py : L88-136]"
@@ -11,6 +11,9 @@ pointers:
   - "[contracts/src/MarketFactory.vy : L82-89]"
   - "[docs/adr/0007-amm-first-uniform-lvr.md : L29-36]"
   - "[docs/adr/0008-cursor-runtime-oracles.md : L18-32]"
+  - "[docs/adr/0009-dual-gate-sports-resolve-and-week-listing.md : L18-32]"
+  - "[oracles/resolve/run.py : L33-106]"
+  - "[oracles/listing/run.py : L58-137]"
 ---
 
 # TODOs
@@ -28,6 +31,8 @@ Machine registry below. Human index:
 - [PHASE2] OU-T009 Migrate MarketAMM CPMM to uniform-LVR
 - [PHASE2] OU-T010 Permissionless or loosely gated listing
 - [SHIPPED] OU-T011 Agent score scout (search extract, auto-POST on 3/3)
+- [SHIPPED] OU-T012 Dual-gate sports auto-resolve
+- [SHIPPED] OU-T013 NFL week-roll winner listing
 
 YAML status values: `open` | `blocked` | `done`.
 
@@ -105,7 +110,7 @@ todos:
     pointers:
       - "[backend/app/ramps/router.py : L28-129]"
       - "[backend/app/kyc/router.py : L29-168]"
-      - "[backend/app/models.py : L119-135]"
+      - "[backend/app/models.py : L143-148]"
   - id: OU-T008
     title: Uniform-LVR AMM spike in Vyper
     status: open
@@ -145,6 +150,29 @@ todos:
       - "[oracles/scores/scout.py : L268-302]"
       - "[oracles/scores/publish.py : L15-52]"
       - "[oracles/scores/job.py : L116-150]"
-      - "[backend/app/markets/router.py : L152-193]"
+      - "[backend/app/markets/router.py : L232-273]"
       - "[web/src/features/markets/MatchupHero.tsx : L1-75]"
+  - id: OU-T012
+    title: Dual-gate sports auto-resolve
+    status: done
+    area: oracles
+    phase: 2
+    summary: After LiveScore final, submitConsensus only when score-derived winner matches unanimous Coordinator research. Coordinator.run still does not submit.
+    pointers:
+      - "[oracles/resolve/run.py : L33-106]"
+      - "[oracles/resolve/winner.py : L26-48]"
+      - "[oracles/consensus/coordinator.py : L27-53]"
+      - "[backend/app/oracle/router.py : L51-73]"
+      - "[docs/adr/0009-dual-gate-sports-resolve-and-week-listing.md : L18-32]"
+  - id: OU-T013
+    title: NFL week-roll winner listing
+    status: done
+    area: oracles
+    phase: 2
+    summary: Schedule scout 3/3 current and next NFL week; after every week-W game is final, operator-POST week W+1 winner primaries. Factory stays permissioned.
+    pointers:
+      - "[oracles/schedule/scout.py : L128-157]"
+      - "[oracles/listing/run.py : L58-137]"
+      - "[backend/app/markets/router.py : L134-197]"
+      - "[oracles/job.py : L14-50]"
 ```

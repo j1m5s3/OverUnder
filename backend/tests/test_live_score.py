@@ -175,6 +175,7 @@ def test_sports_gate_mirrors_web_heuristic():
     from app.markets.sports import is_sports_market
 
     assert is_sports_market("Chiefs vs Broncos: Chiefs win?")
+    assert is_sports_market("Bills vs Dolphins: Bills win?")
     assert is_sports_market("Lakers vs Celtics: over 220 points?")
     assert not is_sports_market("Will the bill pass the Senate?")
     assert not is_sports_market("")

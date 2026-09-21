@@ -3,7 +3,7 @@ title: Data flow
 status: MIXED
 area: cross
 summary: End-to-end traces for seeded AMM swaps, leftover CLOB overlay, and oracle resolution.
-last_verified: 2026-09-20
+last_verified: 2026-09-21
 pointers:
   - "[contracts/src/MarketFactory.vy : L82-89]"
   - "[contracts/src/MarketFactory.vy : L92-99]"
@@ -17,7 +17,9 @@ pointers:
   - "[web/src/features/trade/AmmSwap.tsx : L219-272]"
   - "[backend/app/orderbook/matcher.py : L37-86]"
   - "[contracts/src/Exchange.vy : L128-159]"
-  - "[oracles/consensus/coordinator.py : L36-52]"
+  - "[oracles/consensus/coordinator.py : L27-43]"
+  - "[oracles/resolve/run.py : L33-106]"
+  - "[oracles/listing/run.py : L58-137]"
   - "[contracts/src/ConsensusOracle.vy : L144-161]"
   - "[contracts/src/ConsensusOracle.vy : L197-226]"
   - "[contracts/src/ConditionalTokens.vy : L86-105]"
@@ -54,11 +56,18 @@ pointers:
 
 ## Resolve market
 
-1. [SHIPPED] After `closeTime`, coordinator `run(question)` gathers three attestations. [oracles/consensus/coordinator.py : L36-52]
-2. [SHIPPED] If unanimous, three EIP-712 sigs → `submitConsensus` → `reportPayouts`. [contracts/src/ConsensusOracle.vy : L144-161]
-3. [SHIPPED] Else wait `WINDOW` (86400). Agents may still `submitAttestation`. Holders `castVote`.
-4. [SHIPPED] `resolveFallback` uses 2/3 agents; ≥2/3 opposing vote weight reverts to operator `resolveArbitrated`. [contracts/src/ConsensusOracle.vy : L197-226]
-5. [SHIPPED] Winners `redeemPositions` for USDC. [contracts/src/ConditionalTokens.vy : L86-95]
+1. [SHIPPED] After `closeTime`, coordinator `run(question)` gathers three attestations. [oracles/consensus/coordinator.py : L27-43]
+2. [SHIPPED] Sports primaries with LiveScore `final`: dual-gate (score-derived winner plus unanimous research) then job `submitConsensus`. [oracles/resolve/run.py : L33-106]
+3. [SHIPPED] If unanimous, three EIP-712 sigs → `submitConsensus` → `reportPayouts`. [contracts/src/ConsensusOracle.vy : L144-161]
+4. [SHIPPED] Else wait `WINDOW` (86400). Agents may still `submitAttestation`. Holders `castVote`.
+5. [SHIPPED] `resolveFallback` uses 2/3 agents; ≥2/3 opposing vote weight reverts to operator `resolveArbitrated`. [contracts/src/ConsensusOracle.vy : L197-226]
+6. [PHASE2] Automatic `resolveFallback` daemon.
+7. [SHIPPED] Winners `redeemPositions` for USDC. [contracts/src/ConditionalTokens.vy : L86-95]
+
+## Week-roll listing
+
+1. [SHIPPED] Schedule scout 3/3 POSTs current NFL week and next week. [oracles/schedule/scout.py : L128-157]
+2. [SHIPPED] When every week-W game is `final`, operator `POST /markets` lists week W+1 winner primaries with `close_time = kickoff`. [oracles/listing/run.py : L58-137]
 
 ## OU redeem
 

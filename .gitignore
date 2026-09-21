@@ -46,3 +46,7 @@ Thumbs.db
 # Deploy artifacts (keep 31337 template tracked if present)
 contracts/deployments/*.json
 !contracts/deployments/.gitkeep
+
+# local deploy secrets — never commit
+.secrets/
+

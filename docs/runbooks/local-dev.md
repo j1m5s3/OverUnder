@@ -3,7 +3,7 @@ title: Local development runbook
 status: SHIPPED
 area: cross
 summary: Commands to install, run, test, and stop the Anvil + API + web stack on Windows.
-last_verified: 2026-09-20
+last_verified: 2026-09-21
 pointers:
   - "[scripts/run_stack.cmd : L1-56]"
   - "[scripts/stop_stack.cmd : L1-25]"
@@ -73,7 +73,7 @@ cd .. && .\contracts\.venv\Scripts\python.exe scripts\e2e_local.py
 
 ## Cursor oracle secrets (Cloud Run Job)
 
-The `overunder-oracle` job is Cursor cloud agents plus remote HTTP search MCP. GCP does not host MCP. Deploy preflight fails closed if either secret is missing; the workflow does not invent keys.
+The `overunder-oracle` job is Cursor cloud agents plus remote HTTP search MCP. GCP does not host MCP. Deploy preflight fails closed if Cursor or agent-key secrets are missing; the workflow does not invent keys.
 
 | Env in job | Secret Manager name |
 | --- | --- |
@@ -81,6 +81,10 @@ The `overunder-oracle` job is Cursor cloud agents plus remote HTTP search MCP. G
 | `CURSOR_SEARCH_MCP_URL` | `OU_CURSOR_SEARCH_MCP_URL` |
 | `JWT_SECRET` | `OU_JWT_SECRET` |
 | `OPERATOR_PRIVATE_KEY` | `OU_OPERATOR_PRIVATE_KEY` |
+| `AGENT_ALPHA_KEY` | `OU_AGENT_ALPHA_KEY` |
+| `AGENT_BETA_KEY` | `OU_AGENT_BETA_KEY` |
+| `AGENT_GAMMA_KEY` | `OU_AGENT_GAMMA_KEY` |
+| `ANVIL_RPC_URL` | `OU_ANVIL_RPC_URL` |
 
 Create empty secrets if needed, then add versions from a local file (never commit the values):
 

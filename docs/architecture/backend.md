@@ -3,7 +3,7 @@ title: Backend
 status: MIXED
 area: backend
 summary: FastAPI routers for auth, markets, CLOB, AMM quotes, oracle records, ramps, KYC, emissions, and portfolio.
-last_verified: 2026-09-20
+last_verified: 2026-09-21
 pointers:
   - "[backend/app/main.py : L22-39]"
   - "[backend/app/db.py : L17-24]"
@@ -11,14 +11,16 @@ pointers:
   - "[backend/app/orderbook/matcher.py : L37-86]"
   - "[backend/app/orderbook/matcher.py : L88-136]"
   - "[backend/app/orderbook/router.py : L28-58]"
-  - "[backend/app/markets/router.py : L87-118]"
-  - "[backend/app/markets/router.py : L57-61]"
-  - "[backend/app/markets/router.py : L141-149]"
-  - "[backend/app/markets/router.py : L152-193]"
-  - "[backend/app/markets/sports.py : L61-65]"
-  - "[backend/app/markets/router.py : L196-338]"
+  - "[backend/app/markets/router.py : L100-131]"
+  - "[backend/app/markets/router.py : L63-65]"
+  - "[backend/app/markets/router.py : L134-197]"
+  - "[backend/app/markets/router.py : L221-229]"
+  - "[backend/app/markets/router.py : L232-273]"
+  - "[backend/app/markets/sports.py : L85-89]"
+  - "[backend/app/markets/router.py : L277-419]"
   - "[backend/app/amm/router.py : L9-28]"
-  - "[backend/app/oracle/router.py : L29-66]"
+  - "[backend/app/oracle/router.py : L35-96]"
+  - "[backend/app/oracle/router.py : L51-73]"
   - "[backend/app/ramps/router.py : L28-129]"
   - "[backend/app/kyc/router.py : L29-168]"
   - "[backend/app/emissions/router.py : L16-79]"
@@ -26,8 +28,8 @@ pointers:
   - "[backend/app/config.py : L9-40]"
   - "[backend/app/models.py : L96-103]"
   - "[backend/app/models.py : L106-116]"
-  - "[backend/app/models.py : L119-135]"
-  - "[backend/app/markets/router.py : L121-138]"
+  - "[backend/app/models.py : L119-129]"
+  - "[backend/app/models.py : L143-148]"
   - "[backend/app/indexer/listener.py : L20-49]"
   - "[backend/app/indexer/listener.py : L175-237]"
 ---
@@ -48,10 +50,11 @@ pointers:
 
 ## Markets
 
-- [SHIPPED] `GET /markets` returns EventCard[] of unpaused primaries with nested unpaused wildcard children. Wildcards whose parent is missing or paused list alone. `?parentId=` stays a flat MarketPublic[] filter. [backend/app/markets/router.py : L87-118]
-- [SHIPPED] `GET /markets/{id}` returns MarketDetail with the same child filter; `children` is always present and may be `[]`. [backend/app/markets/router.py : L141-149]
-- [SHIPPED] Operator-fed LiveScore on sports primaries only: `POST /markets/{id}/score` (`require_operator`) rejects wildcards and non-sports questions, rejects invented `scheduled` 0–0, and upserts labels, nullable scores, status, period, and `facts` JSON (replace). `MarketDetail.score` is null on wildcards; `MarketDetail.facts` is the primary (or parent) facts blob. Null scores are never coerced to 0. [backend/app/markets/router.py : L152-193] [backend/app/models.py : L106-116]
-- [SHIPPED] Operator `POST /markets` submits factory `createPrimaryMarket` / `createWildcardMarket` (fail-closed on missing key, RPC, or `seed_usdc <= 0`), then upserts SQLite from `MarketCreated`. [backend/app/markets/router.py : L196-338]
+- [SHIPPED] `GET /markets` returns EventCard[] of unpaused primaries with nested unpaused wildcard children. Wildcards whose parent is missing or paused list alone. `?parentId=` stays a flat MarketPublic[] filter. [backend/app/markets/router.py : L100-131]
+- [SHIPPED] `GET /markets/schedule` is public; operator `POST /markets/schedule` upserts NFL week rows. Routes are registered before `/{condition_id}`. [backend/app/markets/router.py : L134-197] [backend/app/models.py : L119-129]
+- [SHIPPED] `GET /markets/{id}` returns MarketDetail with the same child filter; `children` is always present and may be `[]`. [backend/app/markets/router.py : L221-229]
+- [SHIPPED] Operator-fed LiveScore on sports primaries only: `POST /markets/{id}/score` (`require_operator`) rejects wildcards and non-sports questions, rejects invented `scheduled` 0–0, and upserts labels, nullable scores, status, period, and `facts` JSON (replace). `MarketDetail.score` is null on wildcards; `MarketDetail.facts` is the primary (or parent) facts blob. Null scores are never coerced to 0. [backend/app/markets/router.py : L232-273] [backend/app/models.py : L106-116]
+- [SHIPPED] Operator `POST /markets` submits factory `createPrimaryMarket` / `createWildcardMarket` (fail-closed on missing key, RPC, or `seed_usdc <= 0`), then upserts SQLite from `MarketCreated`. [backend/app/markets/router.py : L277-419]
 - [PHASE2] Permissionless listing so AMM seed—not the operator—bootstraps a market (OU-T010).
 
 ## Orderbook
@@ -70,9 +73,11 @@ pointers:
 
 ## Oracle records
 
-- [SHIPPED] Persist attestations and votes; status computes `unanimous` when ≥3 identical outcomes. [backend/app/oracle/router.py : L29-66]
+- [SHIPPED] Persist attestations and votes; status computes `unanimous` when ≥3 identical outcomes. [backend/app/oracle/router.py : L35-96]
+- [SHIPPED] Operator `POST /oracle/resolved` mirrors `Market.resolved` and payouts after the job submits on-chain. [backend/app/oracle/router.py : L51-73]
 - [STUB] Attest/vote endpoints do not submit `submitAttestation` / `castVote` on-chain.
-- [PHASE2] Coordinator worker watches closeTime, posts `submitConsensus` or `resolveFallback`, and mirrors logs into SQLite.
+- [SHIPPED] Job-side `submitConsensus` for sports primaries is `oracles/resolve/` (ADR-0009).
+- [PHASE2] `resolveFallback` worker after WINDOW.
 
 ## Ramps
 

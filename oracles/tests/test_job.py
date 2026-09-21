@@ -63,3 +63,64 @@ def test_run_job_fake_http_no_cursor(monkeypatch):
     summary = run_job(http_get=http_get, coordinator_factory=FakeCoord, now=datetime(2026, 9, 20, tzinfo=timezone.utc))
     assert summary["attempted"] == 1
     assert seen == [("Chiefs vs Broncos: win?", "0xa")]
+
+
+def test_orchestrator_runs_later_stages_after_score_error():
+    from job import run_tick
+
+    order = []
+
+    def boom(**kwargs):
+        order.append("scores")
+        raise RuntimeError("score fail")
+
+    def ok(name):
+        def inner(**kwargs):
+            order.append(name)
+            return {name: True}
+
+        return inner
+
+    class Sched:
+        def run(self):
+            order.append("schedule")
+            return {"unanimous": True}
+
+    summary = run_tick(score_job=boom, resolve_job=ok("resolve"), schedule_factory=Sched, listing_job=ok("listing"))
+    assert order == ["scores", "resolve", "schedule", "listing"]
+    assert summary["scores"]["ok"] is False
+    assert summary["resolve"]["resolve"] is True
+
+
+def test_orchestrator_resolve_sees_listed_chiefs(monkeypatch):
+    from job import run_tick
+
+    seen = []
+    monkeypatch.setenv("OU_API_URL", "http://api.test")
+    payloads = {
+        "http://api.test/api/v1/markets": [
+            {"primary": {"conditionId": "0xa", "question": "Chiefs vs Broncos: win?", "marketType": 0}, "children": []},
+        ]
+    }
+
+    def http_get(url: str):
+        return payloads[url]
+
+    def scores(**kwargs):
+        return {"attempted": 0}
+
+    def resolve(*, http_get=None, **kwargs):
+        cards = http_get("http://api.test/api/v1/markets")
+        seen.extend(sports_primaries(cards))
+        return {"attempted": len(seen)}
+
+    class Sched:
+        def run(self):
+            return {"unanimous": False}
+
+    def listing(**kwargs):
+        return {"created": []}
+
+    summary = run_tick(http_get=http_get, score_job=scores, resolve_job=resolve, schedule_factory=Sched, listing_job=listing)
+    assert seen[0]["question"] == "Chiefs vs Broncos: win?"
+    assert summary["resolve"]["attempted"] == 1

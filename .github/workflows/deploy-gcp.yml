@@ -85,7 +85,7 @@ jobs:
       - name: Preflight Cursor oracle secrets
         run: |
           echo "Checking Cursor oracle Secret Manager secrets..."
-          for SECRET in OU_CURSOR_API_KEY OU_CURSOR_SEARCH_MCP_URL; do
+          for SECRET in OU_CURSOR_API_KEY OU_CURSOR_SEARCH_MCP_URL OU_AGENT_ALPHA_KEY OU_AGENT_BETA_KEY OU_AGENT_GAMMA_KEY; do
             if ! gcloud secrets versions list "$SECRET" --project=${{ env.GCP_PROJECT_ID }} --limit=1 --format="value(name)" 2>/dev/null | grep -q .; then
               echo "ERROR: Secret $SECRET has no versions. Create it before deploying the oracle job."
               echo "gcloud secrets create $SECRET --project=${{ env.GCP_PROJECT_ID }}"
@@ -157,8 +157,8 @@ jobs:
             --region=${{ env.GCP_REGION }} \
             --task-timeout=30m \
             --max-retries=0 \
-            --set-env-vars="OU_API_URL=${API_URL},OU_CURSOR_RUNTIME=cloud,OU_SCOUT_MAX_MARKETS=5" \
-            --set-secrets="CURSOR_API_KEY=OU_CURSOR_API_KEY:latest,CURSOR_SEARCH_MCP_URL=OU_CURSOR_SEARCH_MCP_URL:latest,JWT_SECRET=OU_JWT_SECRET:latest,OPERATOR_PRIVATE_KEY=OU_OPERATOR_PRIVATE_KEY:latest" \
+            --set-env-vars="OU_API_URL=${API_URL},OU_CURSOR_RUNTIME=cloud,OU_SCOUT_MAX_MARKETS=5,CHAIN_ID=84532,ORACLE_ADDRESS=${{ vars.ORACLE_ADDRESS || '' }},OU_SEED_USDC=${{ vars.OU_SEED_USDC || '200000000' }},OU_RESOLVE_MAX_MARKETS=3" \
+            --set-secrets="CURSOR_API_KEY=OU_CURSOR_API_KEY:latest,CURSOR_SEARCH_MCP_URL=OU_CURSOR_SEARCH_MCP_URL:latest,JWT_SECRET=OU_JWT_SECRET:latest,OPERATOR_PRIVATE_KEY=OU_OPERATOR_PRIVATE_KEY:latest,AGENT_ALPHA_KEY=OU_AGENT_ALPHA_KEY:latest,AGENT_BETA_KEY=OU_AGENT_BETA_KEY:latest,AGENT_GAMMA_KEY=OU_AGENT_GAMMA_KEY:latest,ANVIL_RPC_URL=OU_ANVIL_RPC_URL:latest" \
             --project=${{ env.GCP_PROJECT_ID }}
       
       - name: Schedule oracle job every 15 minutes

@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import JSON, Boolean, DateTime, Integer, String, Text, func
+from sqlalchemy import JSON, Boolean, DateTime, Integer, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
@@ -114,6 +114,19 @@ class LiveScore(Base):
     period_label: Mapped[str | None] = mapped_column(String(16), nullable=True, default=None)
     facts: Mapped[dict | None] = mapped_column(JSON, nullable=True, default=None)
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
+
+
+class NflScheduleGame(Base):
+    __tablename__ = "nfl_schedule_games"
+    __table_args__ = (UniqueConstraint("season", "week", "home", "away", name="uq_nfl_schedule_game"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    season: Mapped[int] = mapped_column(Integer)
+    week: Mapped[int] = mapped_column(Integer)
+    home: Mapped[str] = mapped_column(String(128))
+    away: Mapped[str] = mapped_column(String(128))
+    kickoff_unix: Mapped[int] = mapped_column(Integer)
+    status: Mapped[str] = mapped_column(String(16), default="scheduled")
+    listed_condition_id: Mapped[str] = mapped_column(String(66), default="")
 
 
 class RampTx(Base):

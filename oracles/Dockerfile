@@ -11,4 +11,4 @@ ENV PYTHONPATH=/app
 ENV OU_CURSOR_RUNTIME=cloud
 ENV OU_SCOUT_MAX_MARKETS=5
 
-CMD ["python", "-m", "scores.job"]
+CMD ["python", "-m", "job"]
