@@ -152,3 +152,38 @@ def test_unanimous_matching_score_submits(monkeypatch):
     assert summary["results"][0]["submitted"] is True
     assert pub.atts and pub.resolved
     os.environ.pop("OU_ORACLE_MOCK", None)
+
+
+def test_cap_skips_not_final_still_resolves_later(monkeypatch):
+    monkeypatch.setenv("OU_API_URL", "http://api.test")
+    monkeypatch.setenv("OU_RESOLVE_MAX_MARKETS", "1")
+    live = "0x" + "11" * 32
+    done = CID
+    payloads = {
+        "http://api.test/api/v1/markets": [
+            {"primary": {"conditionId": live, "question": QUESTION, "marketType": 0}, "children": []},
+            {"primary": {"conditionId": done, "question": QUESTION, "marketType": 0}, "children": []},
+        ],
+        f"http://api.test/api/v1/markets/{live}": _detail(status="in_progress"),
+        f"http://api.test/api/v1/markets/{done}": _detail(),
+    }
+
+    def http_get(url: str):
+        return payloads[url]
+
+    coord = FakeCoord()
+    chain = FakeChain()
+    summary = resolve_run.run(http_get=http_get, coordinator_factory=lambda: coord, chain=chain, publisher=FakePub(), now=100)
+    assert len(chain.submits) == 1
+    assert summary["attempted"] == 1
+
+
+def test_onchain_resolved_mirrors_sqlite(monkeypatch):
+    monkeypatch.setenv("OU_API_URL", "http://api.test")
+    coord = FakeCoord()
+    chain = FakeChain(resolved=True)
+    pub = FakePub()
+    summary = _run(_detail(resolved=False), coord, chain=chain, publisher=pub, now=100)
+    assert chain.submits == []
+    assert pub.resolved == [(CID, 0)]
+    assert summary["results"][0]["reason"] == "already resolved"

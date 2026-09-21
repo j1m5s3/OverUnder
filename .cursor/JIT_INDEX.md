@@ -24,7 +24,7 @@ last_verified: 2026-09-21
 - [oracles/agents/alpha.py : L9-27] - Cursor alpha (composer-2.5); mock heuristic for tests
 - [oracles/consensus/coordinator.py : L27-43] - collect attestations; no submitConsensus
 - [oracles/consensus/coordinator.py : L45-53] - sign_unanimous returns deadline plus sigs
-- [oracles/resolve/run.py : L33-106] - dual-gate submitConsensus
+- [oracles/resolve/run.py : L33-119] - dual-gate submitConsensus
 - [oracles/resolve/winner.py : L26-48] - score-derived YES/NO
 - [oracles/schedule/scout.py : L128-157] - 3/3 NFL week extract
 - [oracles/listing/run.py : L58-137] - week-complete then POST W+1 winners

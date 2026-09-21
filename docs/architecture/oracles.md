@@ -12,7 +12,7 @@ pointers:
   - "[oracles/agents/gamma.py : L9-27]"
   - "[oracles/consensus/coordinator.py : L27-53]"
   - "[oracles/consensus/fallback.py : L6-28]"
-  - "[oracles/resolve/run.py : L33-106]"
+  - "[oracles/resolve/run.py : L33-119]"
   - "[oracles/schedule/scout.py : L128-157]"
   - "[oracles/listing/run.py : L58-137]"
   - "[oracles/job.py : L14-50]"
@@ -46,7 +46,7 @@ Resolution is off-chain research plus on-chain ConsensusOracle. Agents never hol
 - [SHIPPED] `Coordinator.run` researches with all three agents, sets `unanimous` if outcomes match, else `outcome: null`. [oracles/consensus/coordinator.py : L27-43]
 - [SHIPPED] `sign_unanimous` EIP-712-signs the same digest with `AGENT_*_KEY` and returns `(deadline, sigs)`. [oracles/consensus/coordinator.py : L45-53]
 - [STUB] `run` does not broadcast `submitConsensus`; tests and e2e wire that separately.
-- [SHIPPED] Dual-gate sports auto-submit lives in `oracles/resolve/` (ADR-0009). [oracles/resolve/run.py : L33-106]
+- [SHIPPED] Dual-gate sports auto-submit lives in `oracles/resolve/` (ADR-0009). [oracles/resolve/run.py : L33-119]
 - [PHASE2] Fallback daemon: after WINDOW, `resolveFallback`, retry hung agents, persist evidence blobs.
 
 ## Fallback math
@@ -78,7 +78,7 @@ Resolution is off-chain research plus on-chain ConsensusOracle. Agents never hol
 
 ## Dual-gate resolve
 
-- [SHIPPED] After LiveScore `final`, require score-derived winner and unanimous research to match, then `submitConsensus`. Cap `OU_RESOLVE_MAX_MARKETS`. [oracles/resolve/run.py : L33-106]
+- [SHIPPED] After LiveScore `final`, require score-derived winner and unanimous research to match, then `submitConsensus`. Cap `OU_RESOLVE_MAX_MARKETS`. [oracles/resolve/run.py : L33-119]
 - [SHIPPED] Job persists attestations and operator `POST /oracle/resolved` after a successful receipt.
 
 ## Schedule scout and week-roll listing

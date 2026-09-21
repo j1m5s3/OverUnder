@@ -55,6 +55,24 @@ def test_coordinator_unanimous_publishes():
         os.environ.pop("OU_ORACLE_MOCK", None)
 
 
+def test_coordinator_order_independent():
+    os.environ["OU_ORACLE_MOCK"] = "1"
+    try:
+        posted = []
+        a = MockSearch([SNIP])
+        b = MockSearch(
+            [
+                "2026 W4 Chiefs vs Broncos kickoff 1800864000 scheduled 2026 W3 Bills vs Dolphins kickoff 1800000000 final"
+            ]
+        )
+        coord = ScheduleCoordinator(searches=[a, b, a], publisher=lambda games: posted.append(games))
+        result = coord.run()
+        assert result["unanimous"] is True
+        assert len(posted) == 1
+    finally:
+        os.environ.pop("OU_ORACLE_MOCK", None)
+
+
 def test_coordinator_disagree_does_not_publish():
     os.environ["OU_ORACLE_MOCK"] = "1"
     try:

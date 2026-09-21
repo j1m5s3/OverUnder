@@ -12,7 +12,7 @@ pointers:
   - "[contracts/src/Exchange.vy : L128-159]"
   - "[backend/app/main.py : L22-39]"
   - "[oracles/consensus/coordinator.py : L27-43]"
-  - "[oracles/resolve/run.py : L33-106]"
+  - "[oracles/resolve/run.py : L33-119]"
   - "[docs/adr/0008-cursor-runtime-oracles.md : L18-32]"
   - "[docs/adr/0009-dual-gate-sports-resolve-and-week-listing.md : L18-32]"
   - "[web/src/app/providers.tsx : L10-17]"

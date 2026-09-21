@@ -5,7 +5,7 @@ area: oracles
 summary: Auto-submit sports primaries only when LiveScore final matches unanimous research; list next-week winner primaries after every week-N game is final.
 last_verified: 2026-09-21
 pointers:
-  - "[oracles/resolve/run.py : L33-106]"
+  - "[oracles/resolve/run.py : L33-119]"
   - "[oracles/resolve/winner.py : L26-48]"
   - "[oracles/listing/run.py : L29-39]"
   - "[oracles/listing/run.py : L58-137]"
@@ -25,7 +25,7 @@ Score scouts can post a final box score without settling the market. `Coordinato
 
 ## Decision
 
-- [SHIPPED] Dual-gate auto-resolve in `oracles/resolve/`: LiveScore `status == final`, closeTime passed, score-derived winner equals unanimous `Coordinator.run`, then `sign_unanimous` + `submitConsensus`. Fail closed on ties, missing scores, research mismatch, missing `AGENT_*_KEY`, or already resolved. [oracles/resolve/run.py : L33-106]
+- [SHIPPED] Dual-gate auto-resolve in `oracles/resolve/`: LiveScore `status == final`, closeTime passed, score-derived winner equals unanimous `Coordinator.run`, then `sign_unanimous` + `submitConsensus`. Fail closed on ties, missing scores, research mismatch, missing `AGENT_*_KEY`, or already resolved. [oracles/resolve/run.py : L33-119]
 - [SHIPPED] User “done” maps to existing LiveScore `final`. No `done` status.
 - [SHIPPED] Score scout still never submits consensus. `Coordinator.run` still never submits. [oracles/consensus/coordinator.py : L27-43]
 - [SHIPPED] Schedule scout extracts current NFL week and next week; operator `POST /markets/schedule` persists it. Listing waits until every week-W game is `final`, then operator `POST /markets` for week W+1 winner primaries with `close_time = kickoff`. [oracles/listing/run.py : L58-137]

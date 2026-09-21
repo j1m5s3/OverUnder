@@ -140,7 +140,7 @@ class ScheduleCoordinator:
             reports = [scout(search=s) for s in self.searches]
         else:
             reports = [scout(slot=slot) for slot in self.slots]
-        keys = {tuple(g.key() for g in games) for games in reports}
+        keys = {frozenset(g.key() for g in games) for games in reports}
         unanimous = len(keys) == 1
         chosen = reports[0] if unanimous else None
         if unanimous and chosen is not None:

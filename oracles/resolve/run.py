@@ -47,27 +47,38 @@ def run(
         raise RuntimeError("markets list must be an array")
     primaries = sports_primaries(cards)
     chain_api = chain or chain_mod
-    persist = publisher or publish_mod
+    persister = publisher or publish_mod
     factory = coordinator_factory or Coordinator
-    attempted = 0
+    researched = 0
     results = []
     for primary in primaries:
-        if attempted >= cap:
-            break
         cid = primary.get("conditionId") or ""
         question = primary.get("question") or ""
         if not cid:
             continue
-        attempted += 1
         try:
             detail = getter(f"{base}/api/v1/markets/{cid}")
             if not isinstance(detail, dict):
                 raise RuntimeError("market detail must be an object")
             score = detail.get("score") if isinstance(detail.get("score"), dict) else {}
+            sqlite_resolved = bool(detail.get("resolved"))
+            onchain_resolved = bool(chain_api.is_resolved(cid))
+            if sqlite_resolved and onchain_resolved:
+                results.append({"conditionId": cid, "ok": True, "submitted": False, "reason": "already resolved"})
+                continue
             if (score.get("status") or "") != "final":
                 results.append({"conditionId": cid, "ok": True, "submitted": False, "reason": "not final"})
                 continue
-            if detail.get("resolved") or chain_api.is_resolved(cid):
+            derived = score_outcome(
+                question,
+                score.get("homeLabel") or "",
+                score.get("awayLabel") or "",
+                score.get("homeScore"),
+                score.get("awayScore"),
+            )
+            if onchain_resolved:
+                if derived is not None and not sqlite_resolved:
+                    persister.mark_resolved(cid, derived)
                 results.append({"conditionId": cid, "ok": True, "submitted": False, "reason": "already resolved"})
                 continue
             close_time = int(detail.get("closeTime") or 0)
@@ -77,16 +88,13 @@ def run(
             if clock < close_time:
                 results.append({"conditionId": cid, "ok": True, "submitted": False, "reason": "not closed"})
                 continue
-            derived = score_outcome(
-                question,
-                score.get("homeLabel") or "",
-                score.get("awayLabel") or "",
-                score.get("homeScore"),
-                score.get("awayScore"),
-            )
             if derived is None:
                 results.append({"conditionId": cid, "ok": True, "submitted": False, "reason": "no score outcome"})
                 continue
+            if researched >= cap:
+                results.append({"conditionId": cid, "ok": True, "submitted": False, "reason": "capped"})
+                continue
+            researched += 1
             coord = factory()
             research = coord.run(question)
             if not research.get("unanimous") or research.get("outcome") != derived:
@@ -97,10 +105,15 @@ def run(
             chain_id = int(os.getenv("CHAIN_ID") or "0")
             deadline, sigs = coord.sign_unanimous(oracle, chain_id, _hex_bytes(cid), evidence, derived)
             chain_api.submit_consensus(cid, derived, evidence, deadline, sigs)
-            persist.persist_attestations(cid, research.get("reports") or [])
-            persist.mark_resolved(cid, derived)
+            try:
+                persister.persist_attestations(cid, research.get("reports") or [])
+                persister.mark_resolved(cid, derived)
+            except Exception as persist_exc:
+                print(f"resolve persist failed {cid}: {persist_exc}", file=sys.stderr)
+                results.append({"conditionId": cid, "ok": True, "submitted": True, "outcome": derived, "persistError": str(persist_exc)})
+                continue
             results.append({"conditionId": cid, "ok": True, "submitted": True, "outcome": derived})
         except Exception as exc:
             print(f"resolve failed {cid}: {exc}", file=sys.stderr)
             results.append({"conditionId": cid, "ok": False, "submitted": False, "error": str(exc)})
-    return {"attempted": attempted, "results": results}
+    return {"attempted": researched, "results": results}

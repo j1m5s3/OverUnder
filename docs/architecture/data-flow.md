@@ -18,7 +18,7 @@ pointers:
   - "[backend/app/orderbook/matcher.py : L37-86]"
   - "[contracts/src/Exchange.vy : L128-159]"
   - "[oracles/consensus/coordinator.py : L27-43]"
-  - "[oracles/resolve/run.py : L33-106]"
+  - "[oracles/resolve/run.py : L33-119]"
   - "[oracles/listing/run.py : L58-137]"
   - "[contracts/src/ConsensusOracle.vy : L144-161]"
   - "[contracts/src/ConsensusOracle.vy : L197-226]"
@@ -57,7 +57,7 @@ pointers:
 ## Resolve market
 
 1. [SHIPPED] After `closeTime`, coordinator `run(question)` gathers three attestations. [oracles/consensus/coordinator.py : L27-43]
-2. [SHIPPED] Sports primaries with LiveScore `final`: dual-gate (score-derived winner plus unanimous research) then job `submitConsensus`. [oracles/resolve/run.py : L33-106]
+2. [SHIPPED] Sports primaries with LiveScore `final`: dual-gate (score-derived winner plus unanimous research) then job `submitConsensus`. [oracles/resolve/run.py : L33-119]
 3. [SHIPPED] If unanimous, three EIP-712 sigs → `submitConsensus` → `reportPayouts`. [contracts/src/ConsensusOracle.vy : L144-161]
 4. [SHIPPED] Else wait `WINDOW` (86400). Agents may still `submitAttestation`. Holders `castVote`.
 5. [SHIPPED] `resolveFallback` uses 2/3 agents; ≥2/3 opposing vote weight reverts to operator `resolveArbitrated`. [contracts/src/ConsensusOracle.vy : L197-226]

@@ -12,7 +12,7 @@ pointers:
   - "[docs/adr/0007-amm-first-uniform-lvr.md : L29-36]"
   - "[docs/adr/0008-cursor-runtime-oracles.md : L18-32]"
   - "[docs/adr/0009-dual-gate-sports-resolve-and-week-listing.md : L18-32]"
-  - "[oracles/resolve/run.py : L33-106]"
+  - "[oracles/resolve/run.py : L33-119]"
   - "[oracles/listing/run.py : L58-137]"
 ---
 
@@ -159,7 +159,7 @@ todos:
     phase: 2
     summary: After LiveScore final, submitConsensus only when score-derived winner matches unanimous Coordinator research. Coordinator.run still does not submit.
     pointers:
-      - "[oracles/resolve/run.py : L33-106]"
+      - "[oracles/resolve/run.py : L33-119]"
       - "[oracles/resolve/winner.py : L26-48]"
       - "[oracles/consensus/coordinator.py : L27-53]"
       - "[backend/app/oracle/router.py : L51-73]"
