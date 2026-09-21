@@ -17,7 +17,7 @@ Prediction markets on Base. Primaries and wildcards trade on a seeded CPMM settl
 2. [docs/architecture/overview.md](docs/architecture/overview.md) — layers
 3. Area file for the subsystem you will edit
 4. [docs/TODOS.md](docs/TODOS.md) — open gaps
-5. [docs/adr/](docs/adr/) — why, not how (book of record: [docs/adr/0007-amm-first-uniform-lvr.md](docs/adr/0007-amm-first-uniform-lvr.md))
+5. [docs/adr/](docs/adr/) — why, not how (book of record: [docs/adr/0007-amm-first-uniform-lvr.md](docs/adr/0007-amm-first-uniform-lvr.md); oracles: [docs/adr/0008-cursor-runtime-oracles.md](docs/adr/0008-cursor-runtime-oracles.md))
 
 ## Conventions
 

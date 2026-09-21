@@ -1,4 +1,4 @@
-"""Collect 3 attestations and submitConsensus when unanimous."""
+"""Collect 3 attestations. run() does not submitConsensus."""
 
 from __future__ import annotations
 

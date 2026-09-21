@@ -15,8 +15,11 @@ pointers:
   - "[web/src/features/wallet/RampCard.tsx : L70-99]"
   - "[web/src/shared/api/client.ts : L1-11]"
   - "[web/src/features/markets/MarketList.tsx : L36-160]"
-  - "[web/src/features/markets/eventHub.ts : L39-82]"
+  - "[web/src/features/markets/eventHub.ts : L39-87]"
+  - "[web/src/features/markets/eventHub.ts : L21-37]"
   - "[web/src/features/markets/MarketDetail.tsx : L83-140]"
+  - "[web/src/features/markets/MarketInfo.tsx : L15-60]"
+  - "[web/src/features/markets/MatchupHero.tsx : L1-75]"
   - "[web/src/features/markets/PriceChart.tsx : L16-90]"
   - "[web/src/features/oracle/OraclePanel.tsx : L6-17]"
   - "[mobile/README.md : L1-25]"
@@ -29,8 +32,8 @@ Next.js App Router under `web/`. Feature folders are the Flutter carryover map.
 ## Shell
 
 - [SHIPPED] Markets home, market detail, portfolio, wallet routes.
-- [SHIPPED] Market list consumes EventCard[]; `childCount` is `children.length`. Tabs categorize the primary only. Missing or paused parents stay as standalone EventCards from the API. List child links stay on the primary route with `?m=`. [web/src/features/markets/eventHub.ts : L39-58]
-- [SHIPPED] `LiveScore` read-model type lives on `MarketDetailData.score` (optional, `null` when absent); no score chrome renders yet — slice 1 is store + API only. [web/src/features/markets/eventHub.ts : L19-32]
+- [SHIPPED] Market list consumes EventCard[]; `childCount` is `children.length`. Tabs categorize the primary only. Missing or paused parents stay as standalone EventCards from the API. List child links stay on the primary route with `?m=`. [web/src/features/markets/eventHub.ts : L44-63]
+- [SHIPPED] `LiveScore` on `MarketDetailData.score` (optional, `null` when absent). MatchupHero is box-score only. MarketInfo renders one muted facts line from `MarketDetail.facts`. List cards still have no score. Scout auto-POSTs on 3/3 (OU-T011). [web/src/features/markets/eventHub.ts : L21-37] [web/src/features/markets/MatchupHero.tsx : L1-75] [web/src/features/markets/MarketInfo.tsx : L15-60]
 - [SHIPPED] Primary detail is the event hub. When `children.length > 0`, a board lists `hubRoster` (primary then children) and the label uses that count. Row click sets `activeConditionId` and writes or clears `?m=` on the primary path. AmmSwap remounts on `activeConditionId` plus `initialSide` and shows the active question. MatchupHero, MarketInfo, and OraclePanel stay on the primary. [web/src/features/markets/MarketDetail.tsx : L83-140]
 - [SHIPPED] PriceChart reads `GET /markets/{id}/history` only and follows `activeConditionId`; empty history renders a clean empty state, a live quote appears as a text marker, never a polyline. [web/src/features/markets/PriceChart.tsx : L16-90]
 - [SHIPPED] `api()` prefixes `NEXT_PUBLIC_API_URL` and attaches `ou_token` bearer. [web/src/shared/api/client.ts : L1-11]

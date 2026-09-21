@@ -94,7 +94,7 @@ export function MarketDetail({ conditionId }: { conditionId: string }) {
       <div className="market-header">
         {showMatchup ? (
           <>
-            <MatchupHero question={market.question} />
+            <MatchupHero question={market.question} score={market.score} />
             <h2 style={{ fontSize: "20px", fontWeight: 600, marginBottom: "16px" }}>{market.question}</h2>
           </>
         ) : (
@@ -134,7 +134,7 @@ export function MarketDetail({ conditionId }: { conditionId: string }) {
           </div>
         )}
         <PriceChart key={`chart-${activeConditionId}`} conditionId={activeConditionId} />
-        <MarketInfo market={market} />
+        <MarketInfo market={market} facts={market.facts} />
         <OraclePanel conditionId={market.conditionId} />
       </div>
     </div>

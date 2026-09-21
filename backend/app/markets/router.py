@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from typing import Literal
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -46,6 +46,7 @@ class LiveScoreIn(BaseModel):
     awayScore: int | None = Field(default=None, ge=0)
     status: Literal["scheduled", "in_progress", "final", "postponed", "cancelled"] = "scheduled"
     periodLabel: str | None = Field(default=None, max_length=16)
+    facts: dict[str, Any] | None = None
 
 
 class LiveScorePublic(LiveScoreIn):
@@ -56,6 +57,7 @@ class LiveScorePublic(LiveScoreIn):
 class MarketDetail(MarketPublic):
     children: list[MarketPublic]
     score: LiveScorePublic | None = None
+    facts: dict[str, Any] | None = None
 
 
 class EventCard(BaseModel):
@@ -143,7 +145,8 @@ async def get_market(condition_id: str, db: AsyncSession = Depends(get_db)) -> M
     kids = (await db.execute(select(Market).where(_child_of(m.condition_id)).order_by(Market.condition_id))).scalars().all()
     public = _to_public(m)
     score = await _get_score(db, m)
-    return MarketDetail(**public.model_dump(), children=[_to_public(c) for c in kids], score=score)
+    facts = await _get_facts(db, m)
+    return MarketDetail(**public.model_dump(), children=[_to_public(c) for c in kids], score=score, facts=facts)
 
 
 @router.post("/{condition_id}/score")
@@ -173,6 +176,7 @@ async def upsert_score(
             away_score=body.awayScore,
             status=body.status,
             period_label=body.periodLabel,
+            facts=body.facts,
             updated_at=now,
         )
         db.add(row)
@@ -183,6 +187,7 @@ async def upsert_score(
         row.away_score = body.awayScore
         row.status = body.status
         row.period_label = body.periodLabel
+        row.facts = body.facts
         row.updated_at = now
     await db.commit()
     return _to_score(row)
@@ -402,6 +407,16 @@ def _to_public(m: Market) -> MarketPublic:
     return MarketPublic.model_validate(_public(m))
 
 
+async def _get_facts(db: AsyncSession, m: Market) -> dict | None:
+    cid = m.condition_id if m.market_type == 0 else (m.parent_condition_id or "")
+    if not cid:
+        return None
+    row = await db.get(LiveScore, cid)
+    if row is None:
+        return None
+    return row.facts
+
+
 async def _get_score(db: AsyncSession, m: Market) -> LiveScorePublic | None:
     if m.market_type != 0:
         return None
@@ -420,6 +435,7 @@ def _to_score(row: LiveScore) -> LiveScorePublic:
         awayScore=row.away_score,
         status=row.status,  # type: ignore[arg-type]
         periodLabel=row.period_label,
+        facts=row.facts,
         updatedAt=row.updated_at,
     )
 

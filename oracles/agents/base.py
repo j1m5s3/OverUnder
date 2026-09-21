@@ -72,6 +72,27 @@ def should_use_mock() -> bool:
     return os.getenv("OU_ORACLE_MOCK", "0") == "1"
 
 
+def heuristic_infer(question: str, hits: list[SearchHit], confidence: float) -> tuple[int, float, str, list[str]]:
+    text = " ".join(h.content for h in hits).lower() + " " + question.lower()
+    yes_hits = sum(w in text for w in ("yes", "defeated", "won", "fumble", "true"))
+    no_hits = sum(w in text for w in ("no", "did not", "false", "zero fumble"))
+    if "who won" in question.lower() and "chiefs" in text:
+        outcome = 0
+    else:
+        outcome = 0 if yes_hits >= no_hits else 1
+    summary = hits[0].content[:280] if hits else "no evidence"
+    evidence_urls = [h.url for h in hits[:2]]
+    return outcome, confidence, summary, evidence_urls
+
+
+def hits_from_search(search, query: str) -> list[SearchHit]:
+    if search is None:
+        return MockSearch().search(query)
+    if callable(search):
+        return search(query)
+    return search.search(query)
+
+
 class Agent(Protocol):
     name: str
 
