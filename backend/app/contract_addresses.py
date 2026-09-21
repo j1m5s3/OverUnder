@@ -46,6 +46,13 @@ def get_contract_addresses(chain_id: int | None = None) -> dict[str, str]:
         addresses["FeeVault"] = settings.fee_vault_address
     if settings.ou_token_address:
         addresses["RevenueToken"] = settings.ou_token_address
+    if settings.paymaster_address:
+        addresses["OverUnderPaymaster"] = settings.paymaster_address
+    if settings.entrypoint_address:
+        addresses["EntryPoint"] = settings.entrypoint_address
+        addresses["MockEntryPoint"] = settings.entrypoint_address
+    if settings.account_factory_address:
+        addresses["SimpleAccountFactory"] = settings.account_factory_address
     
     return addresses
 

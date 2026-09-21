@@ -3,15 +3,16 @@ title: Web
 status: MIXED
 area: web
 summary: Next.js feature modules for markets, AMM swaps, wallet stubs, and oracle status.
-last_verified: 2026-09-20
+last_verified: 2026-09-21
 pointers:
   - "[web/src/app/providers.tsx : L10-17]"
   - "[web/src/features/wallet/ConnectBar.tsx : L13-46]"
   - "[web/src/features/trade/OrderTicket.tsx : L18-39]"
-  - "[web/src/features/trade/AmmSwap.tsx : L8-24]"
-  - "[web/src/features/trade/AmmSwap.tsx : L86-131]"
-  - "[web/src/features/trade/AmmSwap.tsx : L163-216]"
-  - "[web/src/features/trade/AmmSwap.tsx : L219-272]"
+  - "[web/src/features/trade/AmmSwap.tsx : L9-19]"
+  - "[web/src/features/trade/AmmSwap.tsx : L181-238]"
+  - "[web/src/features/trade/AmmSwap.tsx : L243-268]"
+  - "[web/src/features/aa/userOp.ts : L30-36]"
+  - "[web/src/features/aa/userOp.ts : L83-155]"
   - "[web/src/features/wallet/RampCard.tsx : L70-99]"
   - "[web/src/shared/api/client.ts : L1-11]"
   - "[web/src/features/markets/MarketList.tsx : L36-160]"
@@ -44,11 +45,12 @@ Next.js App Router under `web/`. Feature folders are the Flutter carryover map.
 - [STUB] Injected connect triggers SIWE with `signature: "0x"` and a constructed nonce message. [web/src/features/wallet/ConnectBar.tsx : L13-30]
 - [STUB] Email path hashes the email string into a 20-byte demo address and `POST /auth/privy` with token `privy-demo`. [web/src/features/wallet/ConnectBar.tsx : L32-46]
 - [SHIPPED] RampCard checks KYC then opens MoonPay; Coinbase URL is fallback. [web/src/features/wallet/RampCard.tsx : L70-99]
-- [PHASE2] Privy embedded wallet + email OTP, EIP-1193 provider, SIWE with `personal_sign`, Coinbase Smart Wallet, and ERC-4337 session keys.
+- [PHASE2] Privy embedded wallet + email OTP, EIP-1193 provider, SIWE with `personal_sign`, Coinbase Smart Wallet. ERC-4337 paymaster for injected EOA SimpleAccounts is shipped; email AA users are not.
 
 ## Trade
 
-- [SHIPPED] AmmSwap quotes then executes wallet swaps: `quoteBuy`/`quoteSell`, approve USDC or CTF, `buyWithUSDC` / `sellToUSDC` with slippage. [web/src/features/trade/AmmSwap.tsx : L86-131] [web/src/features/trade/AmmSwap.tsx : L163-216] [web/src/features/trade/AmmSwap.tsx : L219-272]
+- [SHIPPED] AmmSwap quotes then executes wallet swaps: `quoteBuy`/`quoteSell`, approve USDC or CTF, `buyWithUSDC` / `sellToUSDC` with slippage. [web/src/features/trade/AmmSwap.tsx : L243-268]
+- [SHIPPED] When `NEXT_PUBLIC_PAYMASTER_ADDRESS`, `NEXT_PUBLIC_ACCOUNT_FACTORY`, and `NEXT_PUBLIC_ENTRYPOINT` are set, AmmSwap uses separate sponsored UserOps (approve-paymaster, approve-amm, swap). EOA `writeContract` remains when those envs are unset. [web/src/features/aa/userOp.ts : L83-155] [web/src/features/trade/AmmSwap.tsx : L181-238]
 - [SHIPPED] AmmSwap is the only ticket; used for all markets (primaries and wildcards). The hub passes the active question into the ticket. [web/src/features/markets/MarketDetail.tsx : L106-111]
 - [PHASE2] OrderTicket remains on disk, unrendered leftover overlay. [web/src/features/trade/OrderTicket.tsx : L18-39]
 - [PHASE2] EIP-712 typed-data sign for leftover Exchange orders. Not a required Phase 2 destination.

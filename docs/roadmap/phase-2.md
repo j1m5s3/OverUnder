@@ -2,7 +2,7 @@
 title: Phase 2 remaining vision
 status: MIXED
 area: roadmap
-summary: MIXED spec — Flutter/emissions/KYC/Cursor-runtime agents/dual-gate resolve shipped; remaining paymaster, JWKS, leftover CLOB relayer, uniform-LVR, permissionless listing.
+summary: MIXED spec — Flutter/emissions/KYC/Cursor-runtime agents/dual-gate resolve/paymaster shipped; remaining JWKS, leftover CLOB relayer, uniform-LVR, permissionless listing.
 last_verified: 2026-09-21
 pointers:
   - "[mobile/README.md : L1-25]"
@@ -11,13 +11,14 @@ pointers:
   - "[backend/app/ramps/router.py : L9-32]"
   - "[contracts/src/RevenueToken.vy : L13-32]"
   - "[contracts/src/FeeVault.vy : L44-50]"
+  - "[contracts/src/OverUnderPaymaster.vy : L322-355]"
   - "[docs/adr/0007-amm-first-uniform-lvr.md : L29-36]"
   - "[contracts/src/MarketAMM.vy : L40]"
 ---
 
 # Phase 2
 
-This file is MIXED. [SHIPPED] Flutter (OU-T006), emissions (OU-T004), Cursor-runtime agents (OU-T005), score scout (OU-T011), dual-gate resolve (OU-T012), week-roll listing (OU-T013), MoonPay/KYC (OU-T007). Remaining open: paymaster (OU-T001), Privy JWKS (OU-T002), leftover CLOB production relayer (OU-T003), uniform-LVR (OU-T008/T009), permissionless listing (OU-T010). CLOB UX is an optional overlay, not a required depth-chart milestone. Do not invent ERC-4337, JWKS, or uniform-LVR as shipped.
+This file is MIXED. [SHIPPED] Flutter (OU-T006), emissions (OU-T004), Cursor-runtime agents (OU-T005), score scout (OU-T011), dual-gate resolve (OU-T012), week-roll listing (OU-T013), MoonPay/KYC (OU-T007), ERC-4337 paymaster (OU-T001). Remaining open: Privy JWKS (OU-T002), leftover CLOB production relayer (OU-T003), uniform-LVR (OU-T008/T009), permissionless listing (OU-T010). CLOB UX is an optional overlay, not a required depth-chart milestone. Do not invent JWKS or uniform-LVR as shipped. Paymaster does not create email AA users.
 
 ## 1. Flutter
 
@@ -104,37 +105,31 @@ The MVP proves AMM settlement. A CLOB overlay may be scheduled later; it is **no
 
 ## 5. Paymaster (ERC-4337)
 
-Gasless flow is required for email AA users who have USDC but no ETH.
+[SHIPPED] Gasless `execute` UserOps for injected-EOA owners of `SimpleAccount`. `matchOrders` stays relayer-only. `executeBatch` is denied. Email/Privy AA users are not shipped.
 
 ### Contracts
 
-- Deploy a `OverUnderPaymaster` compatible with canonical EntryPoint (v0.7 unless Base infra is pinned otherwise).
-- `validatePaymasterUserOp` allows a whitelist of selectors:
-  - `IERC20.approve` on USDC toward CTF, Exchange, MarketAMM, FeeVault.
-  - `ConditionalTokens.splitPosition` / `setApprovalForAll`.
-  - `Exchange.matchOrders` is **not** user-submitted; keep matching on the relayer. Instead sponsor `cancelOrder` and `incrementNonce`.
-  - `MarketAMM.buyWithUSDC` / `sellToUSDC` / `addLiquidity`.
-  - `FeeVault.requestRedeem` / `claim`.
-  - `ConsensusOracle.castVote`.
-- Reject UserOps whose `sender` is not a Privy smart account factory product (allowlist the factory).
-- Fee policy: debit USDC from the account (or a protocol gas tank) at a configurable wei-per-usdc TWAP; cap per-day per-sender.
+- [SHIPPED] `OverUnderPaymaster` on EntryPoint v0.7 (`validatePaymasterUserOp` returns `(Bytes, uint256)` plus `postOp`). [contracts/src/OverUnderPaymaster.vy : L322-355] [contracts/src/OverUnderPaymaster.vy : L358-368]
+- [SHIPPED] Selector allowlist: USDC `approve` toward CTF, Exchange, AMM, FeeVault, paymaster; CTF split / `setApprovalForAll`; AMM buy/sell/addLiquidity; FeeVault redeem/claim; `castVote`; Exchange cancel/incrementNonce. Not `matchOrders`.
+- [SHIPPED] Sender must be allowlisted or `initCode` from an operator-allowed factory. Canonical EntryPoint on 84532; Anvil keeps `MockEntryPoint`. [contracts/src/MockEntryPoint.vy : L94-120]
+- [SHIPPED] Fee is operator `weiPerUsdc` (no price oracle), rolling 24h USDC cap, `transferFrom` sender to `feeRecipient`. Gas tank is the EntryPoint deposit via `paymaster.deposit()`.
+- [SHIPPED] `SimpleAccount` + `SimpleAccountFactory` (EIP-1167, salt 0). [contracts/src/SimpleAccount.vy : L40-49] [contracts/src/SimpleAccountFactory.vy : L46-53]
 
 ### Bundler
 
-- Run a self-hosted bundler against Base/Anvil.
-- Backend `POST /aa/userop` is a thin proxy that stamps paymaster data after policy checks (same JWT as today).
-- Never sponsor `POST /auth/*`.
+- [SHIPPED] In-process `POST /aa/userop`: empty signature stamps `paymasterAndData`; signature present submits `handleOps`. [backend/app/aa/router.py : L177-238]
+- Never sponsor `POST /auth/*`. JWT `sub` is the injected EOA; sender must be that owner's SimpleAccount.
 
 ### Relayer vs paymaster
 
-- Leftover CLOB **fills** stay relayer-submitted `matchOrders` (two signatures already exist) if an overlay is used.
+- Leftover CLOB **fills** stay relayer-submitted `matchOrders`.
 - Paymaster covers the **user** half: approvals, splits, AMM, votes, cancels.
-- Document gas tank refill runbook (operator EOA tops the paymaster deposit on EntryPoint).
+- Gas tank refill: [docs/runbooks/local-dev.md : L100-107]
 
 ### Tests
 
-- boa/fork test: smart account with 0 ETH, USDC > 0, buy AMM YES, assert paymaster deposit decreases and trader receives tokens.
-- Negative: random `to` / selector rejected.
+- [SHIPPED] boa: 0 ETH SimpleAccount, USDC > 0, `handleOps` buy YES, deposit decreases, fee at recipient.
+- [SHIPPED] Negative: `matchOrders`, unknown selector, crafted execute offset, unknown factory.
 
 ## 6. Privy JWKS
 

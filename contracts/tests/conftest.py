@@ -65,6 +65,12 @@ def deploy_protocol():
         generator,
     )
     entrypoint = boa.load("src/MockEntryPoint.vy")
+    account_impl = boa.load("src/SimpleAccount.vy")
+    account_factory = boa.load(
+        "src/SimpleAccountFactory.vy",
+        account_impl.address,
+        entrypoint.address,
+    )
     paymaster = boa.load(
         "src/OverUnderPaymaster.vy",
         entrypoint.address,
@@ -79,13 +85,12 @@ def deploy_protocol():
     with boa.env.prank(operator):
         oracle.setFactory(factory.address)
         amm.setFactory(factory.address)
-        # Fund paymaster with 1 ETH for testing
-        entrypoint.depositTo(paymaster.address, value=10**18)
-        # Add test accounts to paymaster's allowed senders
-        # In production, would use factory-deployed AA accounts
+        paymaster.deposit(value=10**18)
+        paymaster.addFactory(account_factory.address)
+        paymaster.setWeiPerUsdc(10**15)
         for acct in [trader_a, trader_b]:
             paymaster.addSender(acct.address)
-    
+
     return {
         "usdc": usdc,
         "ou": ou,
@@ -97,6 +102,8 @@ def deploy_protocol():
         "factory": factory,
         "entrypoint": entrypoint,
         "paymaster": paymaster,
+        "account_impl": account_impl,
+        "account_factory": account_factory,
         "accounts": accounts,
         "chain_id": chain_id(),
     }

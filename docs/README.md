@@ -45,7 +45,7 @@ Read [`AGENTS.md`](../AGENTS.md) first, then this file, then area docs.
 - [explore/amm.md](explore/amm.md) — uniform-LVR literature (not spec)
 - [explore/edge_opportunities.md](explore/edge_opportunities.md) — niche stance (not spec)
 - [roadmap/phase-1-mvp.md](roadmap/phase-1-mvp.md) — shipped AMM checklist
-- [roadmap/phase-2.md](roadmap/phase-2.md) — uniform-LVR, listing, paymaster, JWKS; leftover CLOB overlay
+- [roadmap/phase-2.md](roadmap/phase-2.md) — uniform-LVR, listing, JWKS; leftover CLOB overlay; paymaster shipped
 - [TODOS.md](TODOS.md) — machine-parseable gaps
 - [runbooks/local-dev.md](runbooks/local-dev.md) — run/test/stop commands
 

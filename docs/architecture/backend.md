@@ -25,19 +25,21 @@ pointers:
   - "[backend/app/kyc/router.py : L29-168]"
   - "[backend/app/emissions/router.py : L16-79]"
   - "[backend/app/portfolio/router.py : L13-61]"
-  - "[backend/app/config.py : L9-40]"
+  - "[backend/app/config.py : L9-43]"
   - "[backend/app/models.py : L96-103]"
   - "[backend/app/models.py : L106-116]"
   - "[backend/app/models.py : L119-129]"
   - "[backend/app/models.py : L143-148]"
   - "[backend/app/indexer/listener.py : L20-49]"
   - "[backend/app/indexer/listener.py : L175-237]"
+  - "[backend/app/aa/router.py : L177-238]"
+  - "[backend/app/aa/bundler.py : L82-124]"
 ---
 
 # Backend
 
-- [SHIPPED] FastAPI app `create_app` mounts auth, markets, orderbook, amm, ramps, oracle, portfolio under `/api/v1`, plus `/health`. [backend/app/main.py : L42-71]
-- [SHIPPED] Settings from `.env` via pydantic: RPC, chain id, JWT, fee bps, optional Privy/Coinbase/relayer keys. [backend/app/config.py : L9-33]
+- [SHIPPED] FastAPI app `create_app` mounts auth, markets, orderbook, amm, ramps, oracle, portfolio, aa under `/api/v1`, plus `/health`. [backend/app/main.py : L42-71]
+- [SHIPPED] Settings from `.env` via pydantic: RPC, chain id, JWT, fee bps, paymaster/entrypoint/account factory, optional Privy/Coinbase/relayer keys. [backend/app/config.py : L9-43]
 - [SHIPPED] SQLite aiosqlite (`overunder.db`) created on lifespan; `ensure_live_score_facts` idempotently `ADD COLUMN facts` after `create_all`. [backend/app/main.py : L22-26] [backend/app/db.py : L17-24]
 
 ## Auth
@@ -47,6 +49,12 @@ pointers:
 - [STUB] `POST /auth/privy` accepts any non-empty token and issues HS256 JWT. Comment marks JWKS as a later seam. [backend/app/auth/router.py : L90-102]
 - [SHIPPED] Bearer JWT identifies `User`; `require_operator` gates market create/pause.
 - [PHASE2] Verify Privy access tokens against Privy JWKS (`PRIVY_APP_ID` / `PRIVY_APP_SECRET`), SIWE EIP-4361 + `ecrecover`, session rotation, and device binding.
+
+## Account abstraction
+
+- [SHIPPED] `POST /aa/userop` two-phase: empty signature stamps operator-signed `paymasterAndData`; signature present re-checks policy, verifies prefix + operator sig, `handleOps` when RPC+operator key exist. [backend/app/aa/router.py : L177-238] [backend/app/aa/bundler.py : L82-124]
+- [SHIPPED] JWT `sub` is the injected EOA. Sponsor iff `SimpleAccount.owner(sender)` or `factory.getAddress(user, 0)` matches. Never sponsor `/auth/*`. `matchOrders` and `executeBatch` return 403.
+- In-process bundler only (`BUNDLER_URL` unused). No Alto/Rundler. This path does not create email AA users.
 
 ## Markets
 
@@ -69,7 +77,6 @@ pointers:
 ## AMM proxy
 
 - [SHIPPED] `GET /amm/{id}/quote` calls `quoteBuy` or `quoteSell` when deployment+RPC exist. [backend/app/amm/router.py : L9-28]
-- [PHASE2] Server-side `buyWithUSDC` / `sellToUSDC` relay for AA wallets.
 
 ## Oracle records
 

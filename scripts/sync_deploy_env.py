@@ -21,12 +21,22 @@ KEYS = {
     "ORACLE_ADDRESS": "ConsensusOracle",
     "FEE_VAULT_ADDRESS": "FeeVault",
     "OU_TOKEN_ADDRESS": "RevenueToken",
-    "ENTRYPOINT_ADDRESS": "MockEntryPoint",
+    "ENTRYPOINT_ADDRESS": "EntryPoint",
     "PAYMASTER_ADDRESS": "OverUnderPaymaster",
+    "ACCOUNT_FACTORY_ADDRESS": "SimpleAccountFactory",
     "NEXT_PUBLIC_AMM_ADDRESS": "MarketAMM",
     "NEXT_PUBLIC_USDC_ADDRESS": "MockUSDC",
     "NEXT_PUBLIC_CTF_ADDRESS": "ConditionalTokens",
+    "NEXT_PUBLIC_ENTRYPOINT": "EntryPoint",
+    "NEXT_PUBLIC_PAYMASTER_ADDRESS": "OverUnderPaymaster",
+    "NEXT_PUBLIC_ACCOUNT_FACTORY": "SimpleAccountFactory",
 }
+
+
+def _lookup(data: dict, json_key: str):
+    if json_key == "EntryPoint":
+        return data.get("EntryPoint") or data.get("MockEntryPoint")
+    return data.get(json_key)
 
 
 def upsert(text: str, key: str, value: str) -> str:
@@ -45,7 +55,7 @@ def main() -> None:
     data = json.loads(DEPLOY.read_text(encoding="utf-8"))
     env_text = ENV.read_text(encoding="utf-8") if ENV.exists() else ""
     for env_key, json_key in KEYS.items():
-        value = data.get(json_key)
+        value = _lookup(data, json_key)
         if value:
             env_text = upsert(env_text, env_key, value)
     ENV.write_text(env_text, encoding="utf-8")

@@ -11,6 +11,8 @@ SRC = ROOT / "src"
 OUT = ROOT / "deployments"
 COOLDOWN = 24 * 60 * 60
 
+CANONICAL_ENTRYPOINT_V07 = "0x0000000071727De22E5E9d8BAf0edAc6f37da032"
+
 ANVIL_KEYS = {
     "operator": "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80",
     "relayer": "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d",
@@ -26,7 +28,7 @@ def _load(name: str, *args):
     return boa.load(str(SRC / name), *args)
 
 
-def deploy(operator: str, treasury: str, generator: str, agents: list[str], cooldown: int = COOLDOWN):
+def deploy(operator: str, treasury: str, generator: str, agents: list[str], cooldown: int = COOLDOWN, chain: int = 31337):
     usdc = _load("MockUSDC.vy")
     ou = _load("RevenueToken.vy", treasury)
     ctf = _load("ConditionalTokens.vy", usdc.address)
@@ -43,10 +45,17 @@ def deploy(operator: str, treasury: str, generator: str, agents: list[str], cool
         operator,
         generator,
     )
-    entrypoint = _load("MockEntryPoint.vy")
+    if chain == 84532:
+        entrypoint_addr = CANONICAL_ENTRYPOINT_V07
+        entrypoint = None
+    else:
+        entrypoint = _load("MockEntryPoint.vy")
+        entrypoint_addr = entrypoint.address
+    account_impl = _load("SimpleAccount.vy")
+    account_factory = _load("SimpleAccountFactory.vy", account_impl.address, entrypoint_addr)
     paymaster = _load(
         "OverUnderPaymaster.vy",
-        entrypoint.address,
+        entrypoint_addr,
         operator,
         usdc.address,
         ctf.address,
@@ -55,12 +64,15 @@ def deploy(operator: str, treasury: str, generator: str, agents: list[str], cool
         oracle.address,
         vault.address,
     )
+    default_deposit = 10**18 if chain == 31337 else 5 * 10**16
+    deposit_wei = int(os.getenv("PAYMASTER_DEPOSIT_WEI") or default_deposit)
     with boa.env.prank(operator):
         oracle.setFactory(factory.address)
         amm.setFactory(factory.address)
-        # Fund paymaster with 1 ETH for testing
-        entrypoint.depositTo(paymaster.address, value=10**18)
-    return {
+        paymaster.addFactory(account_factory.address)
+        paymaster.setWeiPerUsdc(10**15)
+        paymaster.deposit(value=deposit_wei)
+    out = {
         "MockUSDC": usdc,
         "RevenueToken": ou,
         "ConditionalTokens": ctf,
@@ -69,14 +81,20 @@ def deploy(operator: str, treasury: str, generator: str, agents: list[str], cool
         "Exchange": exchange,
         "MarketAMM": amm,
         "MarketFactory": factory,
-        "MockEntryPoint": entrypoint,
+        "SimpleAccount": account_impl,
+        "SimpleAccountFactory": account_factory,
         "OverUnderPaymaster": paymaster,
     }
+    if entrypoint is not None:
+        out["MockEntryPoint"] = entrypoint
+    else:
+        out["EntryPoint"] = entrypoint_addr
+    return out
 
 
 def dump_addresses(contracts: dict, chain: int, extra=None) -> Path:
     OUT.mkdir(exist_ok=True)
-    payload = {name: c.address for name, c in contracts.items()}
+    payload = {name: (c if isinstance(c, str) else c.address) for name, c in contracts.items()}
     payload["chainId"] = chain
     if extra:
         payload.update(extra)
@@ -107,7 +125,7 @@ def main():
         boa.env.set_balance(operator.address, 10**18)
 
     agents = [alpha.address, beta.address, gamma.address]
-    contracts = deploy(operator.address, treasury.address, generator.address, agents)
+    contracts = deploy(operator.address, treasury.address, generator.address, agents, chain=chain)
 
     extra = {
         "operator": operator.address,

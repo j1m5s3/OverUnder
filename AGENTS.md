@@ -25,7 +25,7 @@ Prediction markets on Base. Primaries and wildcards trade on a seeded CPMM settl
 - MIXED docs prefix bullets `[SHIPPED]` / `[STUB]` / `[PHASE2]`
 - Do not dump source into docs. Quote at most 3 lines.
 - When you change a cited function, update `pointers` and `last_verified` on the matching doc.
-- Do not invent ERC-4337, Privy JWKS, or uniform-LVR as shipped. OU-T004–T007 and OU-T011–T013 stay done.
+- Do not invent Privy JWKS or uniform-LVR as shipped. OU-T001 and OU-T004–T007 and OU-T011–T013 stay done. OU-T002, OU-T003, and OU-T008–T010 stay open.
 
 ## Local commands
 

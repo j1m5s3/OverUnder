@@ -1,0 +1,30 @@
+[
+  {
+    "type": "function",
+    "name": "owner",
+    "stateMutability": "view",
+    "inputs": [],
+    "outputs": [{"name": "", "type": "address"}]
+  },
+  {
+    "type": "function",
+    "name": "execute",
+    "stateMutability": "nonpayable",
+    "inputs": [
+      {"name": "target", "type": "address"},
+      {"name": "amount", "type": "uint256"},
+      {"name": "data", "type": "bytes"}
+    ],
+    "outputs": [{"name": "", "type": "bytes"}]
+  },
+  {
+    "type": "function",
+    "name": "initialize",
+    "stateMutability": "nonpayable",
+    "inputs": [
+      {"name": "entryPoint", "type": "address"},
+      {"name": "owner", "type": "address"}
+    ],
+    "outputs": []
+  }
+]
