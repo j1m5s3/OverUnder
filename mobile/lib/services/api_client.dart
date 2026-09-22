@@ -11,8 +11,8 @@ class ApiClient {
 
   ApiClient({required this.baseUrl});
 
-  void setJwt(String jwt) {
-    _jwt = jwt;
+  void setJwt(String? jwt) {
+    _jwt = (jwt == null || jwt.isEmpty) ? null : jwt;
   }
 
   Map<String, String> get _headers => {
@@ -99,18 +99,44 @@ class ApiClient {
     throw Exception('Failed to get nonce');
   }
 
-  Future<String> authPrivy(String token) async {
+  Future<String> authCdpEmail(String email) async {
     final response = await http.post(
-      Uri.parse('$baseUrl/api/v1/auth/privy'),
+      Uri.parse('$baseUrl/api/v1/auth/cdp/email'),
       headers: _headers,
-      body: json.encode({'token': token}),
+      body: json.encode({'email': email}),
     );
 
     if (response.statusCode == 200) {
       final data = json.decode(response.body);
-      return data['jwt'];
+      return data['flowId'] as String;
+    }
+    throw Exception('Failed to send sign-in code');
+  }
+
+  Future<Map<String, dynamic>> authCdpVerify(String flowId, String otp) async {
+    final response = await http.post(
+      Uri.parse('$baseUrl/api/v1/auth/cdp/verify'),
+      headers: _headers,
+      body: json.encode({'flowId': flowId, 'otp': otp}),
+    );
+
+    if (response.statusCode == 200) {
+      return json.decode(response.body) as Map<String, dynamic>;
     }
     throw Exception('Failed to authenticate');
+  }
+
+  Future<Map<String, dynamic>> cdpSend(List<Map<String, dynamic>> calls) async {
+    final response = await http.post(
+      Uri.parse('$baseUrl/api/v1/aa/cdp-send'),
+      headers: _headers,
+      body: json.encode({'calls': calls}),
+    );
+
+    if (response.statusCode == 200) {
+      return json.decode(response.body) as Map<String, dynamic>;
+    }
+    throw Exception('Failed to send trade');
   }
 
   Future<double> getNav() async {

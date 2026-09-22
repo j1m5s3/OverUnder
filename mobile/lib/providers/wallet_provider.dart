@@ -1,42 +1,31 @@
 import 'package:flutter/foundation.dart';
-import 'package:web3dart/web3dart.dart';
-import 'package:http/http.dart' as http;
 
 class WalletProvider extends ChangeNotifier {
-  Web3Client? _web3Client;
-  Credentials? _credentials;
   String? _address;
+  String? _jwt;
   bool _isConnecting = false;
 
-  Web3Client? get web3Client => _web3Client;
-  Credentials? get credentials => _credentials;
   String? get address => _address;
-  bool get isConnected => _credentials != null && _web3Client != null;
+  String? get jwt => _jwt;
+  bool get isConnected => _jwt != null && _address != null;
   bool get isConnecting => _isConnecting;
 
-  Future<void> connect(String privateKey, String rpcUrl) async {
-    _isConnecting = true;
+  void setConnecting(bool value) {
+    _isConnecting = value;
     notifyListeners();
+  }
 
-    try {
-      _web3Client = Web3Client(rpcUrl, http.Client());
-      _credentials = EthPrivateKey.fromHex(privateKey);
-      _address = await _credentials!.extractAddress().then((addr) => addr.hex);
-      
-      _isConnecting = false;
-      notifyListeners();
-    } catch (e) {
-      _isConnecting = false;
-      notifyListeners();
-      rethrow;
-    }
+  void setSession({required String address, required String jwt}) {
+    _address = address;
+    _jwt = jwt;
+    _isConnecting = false;
+    notifyListeners();
   }
 
   void disconnect() {
-    _web3Client?.dispose();
-    _web3Client = null;
-    _credentials = null;
     _address = null;
+    _jwt = null;
+    _isConnecting = false;
     notifyListeners();
   }
 }

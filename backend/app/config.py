@@ -1,9 +1,45 @@
 from functools import lru_cache
+import json
 from pathlib import Path
+from typing import Any
 
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict
 
 ROOT = Path(__file__).resolve().parents[2]
+
+
+def _cb_file_values() -> dict[str, str]:
+    path = ROOT / ".secrets" / "cb_keys.json"
+    if not path.is_file():
+        return {}
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    if not isinstance(raw, dict):
+        return {}
+    out: dict[str, str] = {}
+    project_id = raw.get("PROJECT_ID")
+    key_id = raw.get("API_KEY_ID")
+    secret = raw.get("API_SECRET")
+    if isinstance(project_id, str) and project_id:
+        out["cdp_project_id"] = project_id
+    if isinstance(key_id, str) and key_id:
+        out["cdp_api_key_id"] = key_id
+    if isinstance(secret, str) and secret:
+        out["cdp_api_key_secret"] = secret
+    return out
+
+
+class CbKeysFileSource(PydanticBaseSettingsSource):
+    def get_field_value(self, field: Any, field_name: str) -> tuple[Any, str, bool]:
+        data = _cb_file_values()
+        if field_name in data:
+            return data[field_name], field_name, False
+        return None, field_name, False
+
+    def __call__(self) -> dict[str, Any]:
+        return _cb_file_values()
 
 
 class Settings(BaseSettings):
@@ -13,8 +49,9 @@ class Settings(BaseSettings):
     chain_id: int = 31337
     database_url: str = "sqlite+aiosqlite:///./overunder.db"
     jwt_secret: str = "dev-jwt-secret-change-me-please-32b"
-    privy_app_id: str = ""
-    privy_app_secret: str = ""
+    cdp_project_id: str = ""
+    cdp_api_key_id: str = ""
+    cdp_api_key_secret: str = ""
     coinbase_onramp_app_id: str = ""
     moonpay_api_key: str = ""
     moonpay_secret: str = ""
@@ -41,6 +78,23 @@ class Settings(BaseSettings):
     wildcard_seed_usdc: int = 200
     jwt_ttl_seconds: int = 60 * 60 * 24 * 7
     auth_anvil_bypass: bool = False
+
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls: type[BaseSettings],
+        init_settings: PydanticBaseSettingsSource,
+        env_settings: PydanticBaseSettingsSource,
+        dotenv_settings: PydanticBaseSettingsSource,
+        file_secret_settings: PydanticBaseSettingsSource,
+    ) -> tuple[PydanticBaseSettingsSource, ...]:
+        return (
+            init_settings,
+            env_settings,
+            dotenv_settings,
+            CbKeysFileSource(settings_cls),
+            file_secret_settings,
+        )
 
 
 @lru_cache

@@ -5,7 +5,9 @@
     "/health": { "get": { "responses": { "200": { "description": "ok" } } } },
     "/api/v1/auth/nonce/{address}": { "get": { "responses": { "200": { "description": "nonce" } } } },
     "/api/v1/auth/siwe": { "post": { "responses": { "200": { "description": "jwt" } } } },
-    "/api/v1/auth/privy": { "post": { "responses": { "200": { "description": "jwt" } } } },
+    "/api/v1/auth/cdp": { "post": { "responses": { "200": { "description": "jwt from CDP access token" } } } },
+    "/api/v1/auth/cdp/email": { "post": { "responses": { "200": { "description": "flowId" } } } },
+    "/api/v1/auth/cdp/verify": { "post": { "responses": { "200": { "description": "jwt" } } } },
     "/api/v1/markets": {
       "get": {
         "parameters": [{ "name": "parentId", "in": "query", "schema": { "type": "string" } }],
@@ -24,6 +26,8 @@
     "/api/v1/orderbook/{condition_id}": { "get": { "responses": { "200": { "description": "book" } } } },
     "/api/v1/trades/{condition_id}": { "get": { "responses": { "200": { "description": "trades" } } } },
     "/api/v1/amm/{market_id}/quote": { "get": { "responses": { "200": { "description": "quote" } } } },
+    "/api/v1/aa/cdp-send": { "post": { "responses": { "200": { "description": "sponsored user operation" } } } },
+    "/api/v1/aa/userop": { "post": { "responses": { "410": { "description": "gone; use CDP" } } } },
     "/api/v1/ramps/onramp-url": { "get": { "responses": { "200": { "description": "url" } } } },
     "/api/v1/ramps/offramp-url": { "get": { "responses": { "200": { "description": "url" } } } },
     "/api/v1/oracle/attest": { "post": { "responses": { "200": { "description": "ok" } } } },

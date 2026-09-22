@@ -27,9 +27,6 @@ KEYS = {
     "NEXT_PUBLIC_AMM_ADDRESS": "MarketAMM",
     "NEXT_PUBLIC_USDC_ADDRESS": "MockUSDC",
     "NEXT_PUBLIC_CTF_ADDRESS": "ConditionalTokens",
-    "NEXT_PUBLIC_ENTRYPOINT": "EntryPoint",
-    "NEXT_PUBLIC_PAYMASTER_ADDRESS": "OverUnderPaymaster",
-    "NEXT_PUBLIC_ACCOUNT_FACTORY": "SimpleAccountFactory",
 }
 
 

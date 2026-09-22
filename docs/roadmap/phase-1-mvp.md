@@ -29,14 +29,13 @@ Scope: one operator can list a seeded primary, a generator can seed a wildcard, 
 
 ## Explicit stubs inside the slice
 
-- [STUB] SIWE without `ecrecover`; Privy without JWKS.
 - [STUB] OrderTicket file retained, unrendered leftover overlay.
 - [STUB] Oracle API stores attestations off-chain.
 - [STUB] Coinbase ramp URL builder remains as MoonPay fallback.
 
 ## Out of phase 1
 
-- [PHASE2] Paymaster, Privy JWKS, production relayer, uniform-LVR (OU-T008/T009), permissionless listing (OU-T010).
+- [PHASE2] Production leftover-CLOB relayer, uniform-LVR (OU-T008/T009), permissionless listing (OU-T010).
 - [SHIPPED] Flutter, OU emissions, live LLM agents, MoonPay/KYC are already done (OU-T004–T007); not this closeout.
 
 ## Exit criteria (met)

@@ -11,7 +11,7 @@ MVP settlement is **USDC**. Oracles must reach **unanimous (3/3)** consensus to 
 | Contracts | Vyper, Moccasin, Anvil |
 | API | FastAPI |
 | Oracles | Python agents (Claude/GPT/Gemini + search) |
-| Web | Next.js, Tailwind, wagmi, Privy |
+| Web | Next.js, Tailwind, wagmi, Coinbase CDP hooks |
 | Mobile | Flutter — see `mobile/README.md` |
 
 ## Quickstart (local)

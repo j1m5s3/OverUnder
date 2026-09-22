@@ -1,6 +1,6 @@
 "use client";
 
-import { useAccount, useConnect } from "wagmi";
+import { useCurrentUser, useIsSignedIn } from "@coinbase/cdp-hooks";
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { api } from "@/shared/api/client";
@@ -21,8 +21,9 @@ interface PortfolioData {
 }
 
 export default function PortfolioPage() {
-  const { address, isConnected } = useAccount();
-  const { connect, connectors } = useConnect();
+  const { isSignedIn } = useIsSignedIn();
+  const { currentUser } = useCurrentUser();
+  const address = currentUser?.evmSmartAccounts?.[0];
   const [data, setData] = useState<PortfolioData | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(false);
@@ -43,17 +44,14 @@ export default function PortfolioPage() {
     }
   }, [address]);
 
-  if (!isConnected) {
+  if (!isSignedIn || !address) {
     return (
       <div>
         <h1>My Bets</h1>
         <div className="card" style={{ textAlign: "center", padding: "48px 24px" }}>
           <p className="muted" style={{ marginBottom: "16px" }}>
-            Connect to see your bets.
+            Sign in to see your bets.
           </p>
-          <button className="btn" onClick={() => connect({ connector: connectors[0] })}>
-            connect to see your bets
-          </button>
         </div>
       </div>
     );
@@ -77,7 +75,6 @@ export default function PortfolioPage() {
     );
   }
 
-  // Filter out zero/dust positions - only after successful data fetch
   const activePositions = (data?.positions || []).filter((p) => p.sizeMicros > 0);
 
   if (activePositions.length === 0) {
