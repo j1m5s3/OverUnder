@@ -15,8 +15,9 @@ class WalletScreen extends StatefulWidget {
 }
 
 class _WalletScreenState extends State<WalletScreen> {
-  final _privateKeyController = TextEditingController();
-  final _rpcController = TextEditingController(text: 'http://127.0.0.1:8545');
+  final _emailController = TextEditingController();
+  final _otpController = TextEditingController();
+  String? _flowId;
   double _nav = 0.0;
   bool _loading = false;
   String? _error;
@@ -29,8 +30,8 @@ class _WalletScreenState extends State<WalletScreen> {
 
   @override
   void dispose() {
-    _privateKeyController.dispose();
-    _rpcController.dispose();
+    _emailController.dispose();
+    _otpController.dispose();
     super.dispose();
   }
 
@@ -45,13 +46,11 @@ class _WalletScreenState extends State<WalletScreen> {
     }
   }
 
-  Future<void> _connect() async {
-    final privateKey = _privateKeyController.text.trim();
-    final rpcUrl = _rpcController.text.trim();
-
-    if (privateKey.isEmpty || rpcUrl.isEmpty) {
+  Future<void> _sendOtp() async {
+    final email = _emailController.text.trim();
+    if (email.isEmpty) {
       setState(() {
-        _error = 'Private key and RPC URL are required';
+        _error = 'Email is required';
       });
       return;
     }
@@ -62,39 +61,73 @@ class _WalletScreenState extends State<WalletScreen> {
     });
 
     try {
-      final walletProvider = context.read<WalletProvider>();
-      await walletProvider.connect(privateKey, rpcUrl);
-      
+      final flowId = await widget.apiClient.authCdpEmail(email);
+      setState(() {
+        _flowId = flowId;
+        _loading = false;
+      });
+    } catch (e) {
+      setState(() {
+        _loading = false;
+        _error = 'Failed to send code: $e';
+      });
+    }
+  }
+
+  Future<void> _verifyOtp() async {
+    final otp = _otpController.text.trim();
+    final flowId = _flowId;
+    if (flowId == null || otp.isEmpty) {
+      setState(() {
+        _error = 'Enter the email code';
+      });
+      return;
+    }
+
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+
+    try {
+      final result = await widget.apiClient.authCdpVerify(flowId, otp);
+      widget.apiClient.setJwt(result['token'] as String);
+      context.read<WalletProvider>().setSession(
+            address: result['address'] as String,
+            jwt: result['token'] as String,
+          );
       setState(() {
         _loading = false;
       });
-
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Wallet connected successfully')),
+          const SnackBar(content: Text('Signed in')),
         );
       }
     } catch (e) {
       setState(() {
         _loading = false;
-        _error = 'Failed to connect: $e';
+        _error = 'Failed to verify: $e';
       });
     }
   }
 
   void _disconnect() {
+    widget.apiClient.setJwt('');
     context.read<WalletProvider>().disconnect();
     setState(() {
+      _flowId = null;
+      _otpController.clear();
       _error = null;
     });
   }
 
   Future<void> _openRamp() async {
     final walletProvider = context.read<WalletProvider>();
-    
+
     if (!walletProvider.isConnected) {
       setState(() {
-        _error = 'Connect wallet first';
+        _error = 'Sign in first';
       });
       return;
     }
@@ -137,7 +170,6 @@ class _WalletScreenState extends State<WalletScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            // Connection Card
             Card(
               child: Padding(
                 padding: const EdgeInsets.all(AppTheme.spacingMd),
@@ -180,23 +212,25 @@ class _WalletScreenState extends State<WalletScreen> {
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
                           TextField(
-                            controller: _privateKeyController,
+                            controller: _emailController,
                             decoration: const InputDecoration(
-                              labelText: 'Private Key',
-                              border: OutlineInputBorder(),
-                              hintText: '0x...',
-                            ),
-                            obscureText: true,
-                          ),
-                          const SizedBox(height: AppTheme.spacingMd),
-                          TextField(
-                            controller: _rpcController,
-                            decoration: const InputDecoration(
-                              labelText: 'RPC URL',
+                              labelText: 'Email',
                               border: OutlineInputBorder(),
                             ),
+                            keyboardType: TextInputType.emailAddress,
+                            enabled: _flowId == null,
                           ),
                           const SizedBox(height: AppTheme.spacingMd),
+                          if (_flowId != null)
+                            TextField(
+                              controller: _otpController,
+                              decoration: const InputDecoration(
+                                labelText: 'Email code',
+                                border: OutlineInputBorder(),
+                              ),
+                              keyboardType: TextInputType.number,
+                            ),
+                          if (_flowId != null) const SizedBox(height: AppTheme.spacingMd),
                           if (_error != null)
                             Padding(
                               padding: const EdgeInsets.only(bottom: AppTheme.spacingMd),
@@ -206,23 +240,18 @@ class _WalletScreenState extends State<WalletScreen> {
                               ),
                             ),
                           ElevatedButton(
-                            onPressed: _loading ? null : _connect,
+                            onPressed: _loading
+                                ? null
+                                : _flowId == null
+                                    ? _sendOtp
+                                    : _verifyOtp,
                             child: _loading
                                 ? const SizedBox(
                                     height: 20,
                                     width: 20,
                                     child: CircularProgressIndicator(strokeWidth: 2),
                                   )
-                                : const Text('Connect Wallet'),
-                          ),
-                          const SizedBox(height: AppTheme.spacingSm),
-                          Text(
-                            'Development only: Use Anvil test account private keys',
-                            style: TextStyle(
-                              color: AppTheme.warning,
-                              fontSize: AppTheme.sizeSm,
-                            ),
-                            textAlign: TextAlign.center,
+                                : Text(_flowId == null ? 'Send code' : 'Verify'),
                           ),
                         ],
                       ),
@@ -231,7 +260,6 @@ class _WalletScreenState extends State<WalletScreen> {
               ),
             ),
             const SizedBox(height: AppTheme.spacingMd),
-            // OU NAV Card
             Card(
               child: Padding(
                 padding: const EdgeInsets.all(AppTheme.spacingMd),
@@ -259,7 +287,6 @@ class _WalletScreenState extends State<WalletScreen> {
               ),
             ),
             const SizedBox(height: AppTheme.spacingMd),
-            // Buy USDC Card
             Card(
               child: Padding(
                 padding: const EdgeInsets.all(AppTheme.spacingMd),

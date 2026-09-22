@@ -2,9 +2,8 @@
 
 import { useState, useEffect, useRef } from "react";
 import { api } from "@/shared/api/client";
-import { useAccount, useConnect, useWriteContract, usePublicClient, useWalletClient } from "wagmi";
-import { encodeFunctionData, maxUint256, parseAbi } from "viem";
-import { accountAddress, gaslessConfigured, sendSponsoredExecute } from "@/features/aa/userOp";
+import { useCurrentUser, useIsSignedIn, useSendUserOperation } from "@coinbase/cdp-hooks";
+import { encodeFunctionData, parseAbi } from "viem";
 
 const AMM_ABI = parseAbi([
   "function buyWithUSDC(bytes32 conditionId, bool buyYes, uint256 usdcIn, uint256 minOut) external returns (uint256)",
@@ -41,6 +40,14 @@ function calculateImpliedProbability(quote: any, mode: "buy" | "sell", outcome: 
   return null;
 }
 
+function smartAccountOf(
+  user: { evmSmartAccounts?: Array<string | { address?: string }> } | null | undefined,
+): `0x${string}` | undefined {
+  const account = user?.evmSmartAccounts?.[0];
+  const address = typeof account === "string" ? account : account?.address;
+  return address as `0x${string}` | undefined;
+}
+
 export function AmmSwap({
   conditionId,
   initialSide,
@@ -59,11 +66,11 @@ export function AmmSwap({
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [quoting, setQuoting] = useState(false);
   
-  const { address } = useAccount();
-  const { connect, connectors } = useConnect();
-  const { writeContractAsync } = useWriteContract();
-  const publicClient = usePublicClient();
-  const { data: walletClient } = useWalletClient();
+  const { isSignedIn } = useIsSignedIn();
+  const { currentUser } = useCurrentUser();
+  const { sendUserOperation } = useSendUserOperation();
+  const address = smartAccountOf(currentUser);
+  const smartAccount = currentUser?.evmSmartAccounts?.[0];
 
   const ammAddress = process.env.NEXT_PUBLIC_AMM_ADDRESS as `0x${string}` | undefined;
   const usdcAddress = process.env.NEXT_PUBLIC_USDC_ADDRESS as `0x${string}` | undefined;
@@ -134,10 +141,8 @@ export function AmmSwap({
   }
 
   function handleExecute() {
-    if (!address) {
-      if (connectors[0]) {
-        connect({ connector: connectors[0] });
-      }
+    if (!isSignedIn || !address) {
+      setStatus("sign in to trade");
       return;
     }
 
@@ -162,9 +167,13 @@ export function AmmSwap({
     }
   }
 
-  async function executeBuy(ammAddress: `0x${string}`, usdcAddress: `0x${string}`) {
+  async function executeBuy(amm: `0x${string}`, usdc: `0x${string}`) {
     if (!quote || !quote.tokensOut || quote.tokensOut <= 0) {
       setStatus("get a valid quote first");
+      return;
+    }
+    if (!address) {
+      setStatus("sign in to trade");
       return;
     }
     
@@ -178,107 +187,45 @@ export function AmmSwap({
         return;
       }
 
-      if (gaslessConfigured() && walletClient && publicClient && address) {
-        const paymaster = process.env.NEXT_PUBLIC_PAYMASTER_ADDRESS as `0x${string}`;
-        const smart = await accountAddress(publicClient, address);
-        setStatus("checking usdc approval...");
-        const pmAllowance = await publicClient.readContract({
-          address: usdcAddress,
-          abi: USDC_ABI,
-          functionName: "allowance",
-          args: [smart, paymaster],
-        });
-        if (!pmAllowance || pmAllowance === 0n) {
-          setStatus("approving paymaster...");
-          await sendSponsoredExecute({
-            publicClient,
-            walletClient,
-            owner: address,
-            target: usdcAddress,
-            data: encodeFunctionData({
-              abi: USDC_ABI,
-              functionName: "approve",
-              args: [paymaster, maxUint256],
-            }),
-          });
-        }
-        const allowance = await publicClient.readContract({
-          address: usdcAddress,
-          abi: USDC_ABI,
-          functionName: "allowance",
-          args: [smart, ammAddress],
-        });
-        if (!allowance || allowance < usdcAmount) {
-          setStatus("approving usdc...");
-          await sendSponsoredExecute({
-            publicClient,
-            walletClient,
-            owner: address,
-            target: usdcAddress,
-            data: encodeFunctionData({
-              abi: USDC_ABI,
-              functionName: "approve",
-              args: [ammAddress, usdcAmount],
-            }),
-          });
-        }
-        setStatus("buying...");
-        await sendSponsoredExecute({
-          publicClient,
-          walletClient,
-          owner: address,
-          target: ammAddress,
-          data: encodeFunctionData({
-            abi: AMM_ABI,
-            functionName: "buyWithUSDC",
-            args: [conditionId as `0x${string}`, outcome === "yes", usdcAmount, BigInt(minOut)],
-          }),
-        });
-        setStatus("success! tokens received");
-        return;
-      }
-
-      setStatus("checking usdc approval...");
-
-      const allowance = await publicClient?.readContract({
-        address: usdcAddress,
-        abi: USDC_ABI,
-        functionName: "allowance",
-        args: [address!, ammAddress],
-      });
-
-      if (!allowance || allowance < usdcAmount) {
-        setStatus("approving usdc...");
-        const approveTx = await writeContractAsync({
-          address: usdcAddress,
-          abi: USDC_ABI,
-          functionName: "approve",
-          args: [ammAddress, usdcAmount],
-        });
-        setStatus(`approval submitted`);
-        await publicClient?.waitForTransactionReceipt({ hash: approveTx });
-      }
-
       setStatus("buying...");
-      const swapTx = await writeContractAsync({
-        address: ammAddress,
-        abi: AMM_ABI,
-        functionName: "buyWithUSDC",
-        args: [conditionId as `0x${string}`, outcome === "yes", usdcAmount, BigInt(minOut)],
+      await sendUserOperation({
+        evmSmartAccount: smartAccount,
+        network: "base-sepolia",
+        calls: [
+          {
+            to: usdc,
+            value: 0n,
+            data: encodeFunctionData({
+              abi: USDC_ABI,
+              functionName: "approve",
+              args: [amm, usdcAmount],
+            }),
+          },
+          {
+            to: amm,
+            value: 0n,
+            data: encodeFunctionData({
+              abi: AMM_ABI,
+              functionName: "buyWithUSDC",
+              args: [conditionId as `0x${string}`, outcome === "yes", usdcAmount, BigInt(minOut)],
+            }),
+          },
+        ],
+        useCdpPaymaster: true,
       });
-      
-      setStatus(`buy submitted`);
-      await publicClient?.waitForTransactionReceipt({ hash: swapTx });
       setStatus("success! tokens received");
-      
     } catch (e: any) {
       setStatus(e.message || "transaction failed");
     }
   }
 
-  async function executeSell(ammAddress: `0x${string}`, ctfAddress: `0x${string}`) {
+  async function executeSell(amm: `0x${string}`, ctf: `0x${string}`) {
     if (!quote || !quote.usdcOut || quote.usdcOut <= 0) {
       setStatus("get a valid quote first");
+      return;
+    }
+    if (!address) {
+      setStatus("sign in to trade");
       return;
     }
     
@@ -292,100 +239,33 @@ export function AmmSwap({
       const amountNum = parseFloat(amount);
       const tokenAmount = BigInt(Math.round(amountNum * 1_000_000));
 
-      if (gaslessConfigured() && walletClient && publicClient && address) {
-        const paymaster = process.env.NEXT_PUBLIC_PAYMASTER_ADDRESS as `0x${string}`;
-        const usdcAddress = process.env.NEXT_PUBLIC_USDC_ADDRESS as `0x${string}`;
-        const smart = await accountAddress(publicClient, address);
-        setStatus("checking token approval...");
-        const pmAllowance = await publicClient.readContract({
-          address: usdcAddress,
-          abi: USDC_ABI,
-          functionName: "allowance",
-          args: [smart, paymaster],
-        });
-        if (!pmAllowance || pmAllowance === 0n) {
-          setStatus("approving paymaster...");
-          await sendSponsoredExecute({
-            publicClient,
-            walletClient,
-            owner: address,
-            target: usdcAddress,
-            data: encodeFunctionData({
-              abi: USDC_ABI,
-              functionName: "approve",
-              args: [paymaster, maxUint256],
-            }),
-          });
-        }
-        const isApproved = await publicClient.readContract({
-          address: ctfAddress,
-          abi: CTF_ABI,
-          functionName: "isApprovedForAll",
-          args: [smart, ammAddress],
-        });
-        if (!isApproved) {
-          setStatus("approving outcome tokens...");
-          await sendSponsoredExecute({
-            publicClient,
-            walletClient,
-            owner: address,
-            target: ctfAddress,
+      setStatus("selling...");
+      await sendUserOperation({
+        evmSmartAccount: smartAccount,
+        network: "base-sepolia",
+        calls: [
+          {
+            to: ctf,
+            value: 0n,
             data: encodeFunctionData({
               abi: CTF_ABI,
               functionName: "setApprovalForAll",
-              args: [ammAddress, true],
+              args: [amm, true],
             }),
-          });
-        }
-        setStatus("selling...");
-        await sendSponsoredExecute({
-          publicClient,
-          walletClient,
-          owner: address,
-          target: ammAddress,
-          data: encodeFunctionData({
-            abi: AMM_ABI,
-            functionName: "sellToUSDC",
-            args: [conditionId as `0x${string}`, outcome === "yes", tokenAmount, BigInt(minUsdc)],
-          }),
-        });
-        setStatus("success! usdc received");
-        return;
-      }
-
-      setStatus("checking token approval...");
-
-      const isApproved = await publicClient?.readContract({
-        address: ctfAddress,
-        abi: CTF_ABI,
-        functionName: "isApprovedForAll",
-        args: [address!, ammAddress],
+          },
+          {
+            to: amm,
+            value: 0n,
+            data: encodeFunctionData({
+              abi: AMM_ABI,
+              functionName: "sellToUSDC",
+              args: [conditionId as `0x${string}`, outcome === "yes", tokenAmount, BigInt(minUsdc)],
+            }),
+          },
+        ],
+        useCdpPaymaster: true,
       });
-
-      if (!isApproved) {
-        setStatus("approving outcome tokens...");
-        const approveTx = await writeContractAsync({
-          address: ctfAddress,
-          abi: CTF_ABI,
-          functionName: "setApprovalForAll",
-          args: [ammAddress, true],
-        });
-        setStatus(`approval submitted`);
-        await publicClient?.waitForTransactionReceipt({ hash: approveTx });
-      }
-
-      setStatus("selling...");
-      const swapTx = await writeContractAsync({
-        address: ammAddress,
-        abi: AMM_ABI,
-        functionName: "sellToUSDC",
-        args: [conditionId as `0x${string}`, outcome === "yes", tokenAmount, BigInt(minUsdc)],
-      });
-      
-      setStatus(`sell submitted`);
-      await publicClient?.waitForTransactionReceipt({ hash: swapTx });
       setStatus("success! usdc received");
-      
     } catch (e: any) {
       setStatus(e.message || "transaction failed");
     }
@@ -411,8 +291,8 @@ export function AmmSwap({
 
   const executeLabel = !address 
     ? mode === "buy" 
-      ? `connect to buy ${outcome}`
-      : `connect to sell ${outcome}`
+      ? `sign in to buy ${outcome}`
+      : `sign in to sell ${outcome}`
     : mode === "buy"
       ? `buy ${outcome}`
       : `sell ${outcome}`;
@@ -495,7 +375,7 @@ export function AmmSwap({
         className="btn" 
         style={{ marginTop: 12 }} 
         onClick={handleExecute} 
-        disabled={!envConfigured || (address && (!quote || quoting))}
+        disabled={!envConfigured || (Boolean(address) && (!quote || quoting))}
       >
         {executeLabel}
       </button>

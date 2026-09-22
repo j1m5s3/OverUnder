@@ -13,9 +13,10 @@ pointers:
   - "[contracts/src/MarketAMM.vy : L104-119]"
   - "[contracts/src/MarketAMM.vy : L122-159]"
   - "[contracts/src/MarketAMM.vy : L162-201]"
-  - "[web/src/features/trade/AmmSwap.tsx : L181-238]"
-  - "[web/src/features/trade/AmmSwap.tsx : L243-268]"
-  - "[web/src/features/aa/userOp.ts : L83-155]"
+  - "[web/src/features/trade/AmmSwap.tsx : L187-211]"
+  - "[web/src/features/trade/AmmSwap.tsx : L239-263]"
+  - "[backend/app/cdp.py : L168-179]"
+  - "[backend/app/aa/router.py : L102-142]"
   - "[backend/app/orderbook/matcher.py : L37-86]"
   - "[contracts/src/Exchange.vy : L128-159]"
   - "[oracles/consensus/coordinator.py : L27-43]"
@@ -38,17 +39,17 @@ pointers:
 1. [SHIPPED] Operator calls `createPrimaryMarket` with required `seedUsdc`; factory seeds 50/50 YES/NO pool. [contracts/src/MarketFactory.vy : L82-89] [contracts/src/MarketAMM.vy : L73-82]
 2. [SHIPPED] API `POST /markets` submits the factory tx (fail-closed) and upserts SQLite from `MarketCreated`. [backend/app/markets/router.py : L191-334]
 3. [SHIPPED] Trader calls `GET /amm/{id}/quote` → `quoteBuy` or `quoteSell`. [backend/app/amm/router.py : L9-28]
-4. [SHIPPED] Web AmmSwap buy: approve USDC, then `buyWithUSDC` with `minOut` from quote*(1-slippage). Gasless path uses separate UserOps when paymaster envs are set. [web/src/features/trade/AmmSwap.tsx : L181-238] [web/src/features/trade/AmmSwap.tsx : L243-268]
-5. [SHIPPED] Web AmmSwap sell: CTF `setApprovalForAll`, then `sellToUSDC` with `minUsdc`.
+4. [SHIPPED] Web AmmSwap buy: batched CDP user op, USDC `approve` then `buyWithUSDC`, `useCdpPaymaster: true`. [web/src/features/trade/AmmSwap.tsx : L187-211]
+5. [SHIPPED] Web AmmSwap sell: CTF `setApprovalForAll` then `sellToUSDC` in the same user op. [web/src/features/trade/AmmSwap.tsx : L239-263]
 6. [SHIPPED] On-chain `buyWithUSDC` / `sellToUSDC` apply 50 bps vault + 50 bps LP. [contracts/src/MarketAMM.vy : L122-159] [contracts/src/MarketAMM.vy : L162-201]
 7. [SHIPPED] Indexer stores pool-mid `PricePoint`s (`PoolSeeded` → 0.5, each `Swap` → `pools(conditionId)` mid); failed ranges hold the checkpoint and retry. `GET /markets/{id}/history` feeds the hub chart, empty until the pool is seeded. [backend/app/indexer/listener.py : L175-237]
-8. [SHIPPED] Paymaster-sponsored UserOp for gasless swaps when AA envs are set. Injected EOA remains the JWT subject. [web/src/features/aa/userOp.ts : L83-155]
+8. [SHIPPED] Flutter encodes calldata then `POST /aa/cdp-send`; backend REST send with `useCdpPaymaster: true`. JWT `sub` is the smart account. [backend/app/aa/router.py : L102-142] [backend/app/cdp.py : L168-179]
 
 ## Wildcard AMM swap
 
 1. [SHIPPED] Generator or operator `createWildcardMarket` with optional `seedUsdc`; factory seeds 50/50 YES/NO when seed > 0. [contracts/src/MarketFactory.vy : L92-99] [contracts/src/MarketAMM.vy : L73-82]
-2. [SHIPPED] Same quote + AmmSwap buy/sell path as primaries. [web/src/features/trade/AmmSwap.tsx : L181-268]
-3. [SHIPPED] Paymaster-sponsored UserOp for gasless swaps when AA envs are set.
+2. [SHIPPED] Same quote + AmmSwap buy/sell path as primaries. [web/src/features/trade/AmmSwap.tsx : L187-263]
+3. [SHIPPED] Gasless path is CDP Paymaster, not OverUnderPaymaster.
 
 ## Leftover CLOB overlay (not required)
 

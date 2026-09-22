@@ -15,7 +15,8 @@ pointers:
   - "[oracles/resolve/run.py : L33-119]"
   - "[docs/adr/0008-cursor-runtime-oracles.md : L18-32]"
   - "[docs/adr/0009-dual-gate-sports-resolve-and-week-listing.md : L18-32]"
-  - "[web/src/app/providers.tsx : L10-17]"
+  - "[web/src/app/providers.tsx : L21-36]"
+  - "[docs/adr/0010-cdp-embedded-wallets.md : L28-39]"
   - "[contracts/src/OverUnderPaymaster.vy : L322-355]"
 ---
 
@@ -43,9 +44,10 @@ OverUnder is a Base-chain prediction market. Collateral is USDC (6 decimals). Ou
 - [SHIPPED] `operator` creates primaries, pauses markets, sets factory/generator, arbitrates after the window. [contracts/src/ConsensusOracle.vy : L219-226]
 - [SHIPPED] Off-chain matcher may call leftover `matchOrders` with `relayer_private_key`. Anyone who holds both EIP-712 signatures can settle; the relayer is convenience, not a unique privilege on-chain. This is not the happy path. [backend/app/orderbook/matcher.py : L88-136]
 - [SHIPPED] Three agent EOAs are the only attestors. Unanimous `submitConsensus` resolves immediately. [contracts/src/ConsensusOracle.vy : L144-161]
-- [STUB] Auth treats Privy as an unverified token + address pair. [backend/app/auth/router.py : L90-102]
-- [SHIPPED] ERC-4337 paymaster + in-process bundler for SimpleAccount UserOps owned by the injected EOA. [contracts/src/OverUnderPaymaster.vy : L322-355]
-- [PHASE2] Privy JWKS, production relayer with nonce/gas policy.
+- [SHIPPED] User-facing auth is Coinbase CDP `validateAccessToken`; HS256 `sub` is the smart-account address. CDP users are not operators. [backend/app/auth/router.py : L144-173]
+- [SHIPPED] SIWE with `ecrecover` remains for operator/dev JWT. [backend/app/auth/router.py : L86-141]
+- [SHIPPED] Gasless user ops use CDP Paymaster (`useCdpPaymaster: true`). OverUnderPaymaster stays leftover in-tree. [docs/adr/0010-cdp-embedded-wallets.md : L28-39] [contracts/src/OverUnderPaymaster.vy : L322-355]
+- [PHASE2] Production leftover-CLOB relayer with nonce/gas policy.
 
 ## Settlement
 

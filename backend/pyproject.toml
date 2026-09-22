@@ -16,6 +16,7 @@ dependencies = [
   "eth-account>=0.13.0",
   "pyjwt>=2.9.0",
   "siwe>=4.0.0",
+  "cdp-sdk>=1.32.0",
 ]
 
 [project.optional-dependencies]

@@ -7,7 +7,17 @@ last_verified: 2026-09-21
 pointers:
   - "[backend/app/main.py : L22-39]"
   - "[backend/app/db.py : L17-24]"
-  - "[backend/app/auth/router.py : L61-102]"
+  - "[backend/app/auth/router.py : L41-47]"
+  - "[backend/app/auth/router.py : L68-71]"
+  - "[backend/app/auth/router.py : L86-141]"
+  - "[backend/app/auth/router.py : L144-173]"
+  - "[backend/app/cdp.py : L21-25]"
+  - "[backend/app/cdp.py : L116-134]"
+  - "[backend/app/cdp.py : L168-179]"
+  - "[backend/app/aa/router.py : L70-94]"
+  - "[backend/app/aa/router.py : L97-99]"
+  - "[backend/app/aa/router.py : L102-142]"
+  - "[backend/app/config.py : L45-80]"
   - "[backend/app/orderbook/matcher.py : L37-86]"
   - "[backend/app/orderbook/matcher.py : L88-136]"
   - "[backend/app/orderbook/router.py : L28-58]"
@@ -25,36 +35,34 @@ pointers:
   - "[backend/app/kyc/router.py : L29-168]"
   - "[backend/app/emissions/router.py : L16-79]"
   - "[backend/app/portfolio/router.py : L13-61]"
-  - "[backend/app/config.py : L9-43]"
   - "[backend/app/models.py : L96-103]"
   - "[backend/app/models.py : L106-116]"
   - "[backend/app/models.py : L119-129]"
   - "[backend/app/models.py : L143-148]"
   - "[backend/app/indexer/listener.py : L20-49]"
   - "[backend/app/indexer/listener.py : L175-237]"
-  - "[backend/app/aa/router.py : L177-238]"
-  - "[backend/app/aa/bundler.py : L82-124]"
 ---
 
 # Backend
 
 - [SHIPPED] FastAPI app `create_app` mounts auth, markets, orderbook, amm, ramps, oracle, portfolio, aa under `/api/v1`, plus `/health`. [backend/app/main.py : L42-71]
-- [SHIPPED] Settings from `.env` via pydantic: RPC, chain id, JWT, fee bps, paymaster/entrypoint/account factory, optional Privy/Coinbase/relayer keys. [backend/app/config.py : L9-43]
+- [SHIPPED] Settings from `.env` via pydantic: RPC, chain id, JWT, fee bps, CDP project/key (file fallback `.secrets/cb_keys.json` if env unset), optional Coinbase/relayer keys. Leftover paymaster/entrypoint/account factory fields remain unused by the app path. [backend/app/config.py : L45-80]
 - [SHIPPED] SQLite aiosqlite (`overunder.db`) created on lifespan; `ensure_live_score_facts` idempotently `ADD COLUMN facts` after `create_all`. [backend/app/main.py : L22-26] [backend/app/db.py : L17-24]
 
 ## Auth
 
-- [SHIPPED] `GET /auth/nonce/{address}` stores a hex nonce. [backend/app/auth/router.py : L61-70]
-- [STUB] `POST /auth/siwe` checks address+nonce appear in `message`; it does not recover an ECDSA signature. [backend/app/auth/router.py : L73-87]
-- [STUB] `POST /auth/privy` accepts any non-empty token and issues HS256 JWT. Comment marks JWKS as a later seam. [backend/app/auth/router.py : L90-102]
-- [SHIPPED] Bearer JWT identifies `User`; `require_operator` gates market create/pause.
-- [PHASE2] Verify Privy access tokens against Privy JWKS (`PRIVY_APP_ID` / `PRIVY_APP_SECRET`), SIWE EIP-4361 + `ecrecover`, session rotation, and device binding.
+- [SHIPPED] `GET /auth/nonce/{address}` stores a hex nonce. [backend/app/auth/router.py : L74-83]
+- [SHIPPED] `POST /auth/siwe` recovers ECDSA, matches address and nonce, issues HS256. Operator flag only if the recovered address is `OPERATOR_PRIVATE_KEY`. [backend/app/auth/router.py : L86-141]
+- [SHIPPED] `POST /auth/cdp` / `/auth/cdp/email` / `/auth/cdp/verify`: `validateAccessToken`; JWT `sub` is the smart account; client address ignored; CDP users are not operators. [backend/app/auth/router.py : L144-173] [backend/app/cdp.py : L116-134]
+- [SHIPPED] Bearer JWT identifies `User`; `require_operator` gates market create/pause. [backend/app/auth/router.py : L50-71]
+- [SHIPPED] Fail closed on CDP routes when `CDP_PROJECT_ID` or `CDP_API_KEY_SECRET` is missing. Tests mock CDP. [backend/app/cdp.py : L21-25]
 
 ## Account abstraction
 
-- [SHIPPED] `POST /aa/userop` two-phase: empty signature stamps operator-signed `paymasterAndData`; signature present re-checks policy, verifies prefix + operator sig, `handleOps` when RPC+operator key exist. [backend/app/aa/router.py : L177-238] [backend/app/aa/bundler.py : L82-124]
-- [SHIPPED] JWT `sub` is the injected EOA. Sponsor iff `SimpleAccount.owner(sender)` or `factory.getAddress(user, 0)` matches. Never sponsor `/auth/*`. `matchOrders` and `executeBatch` return 403.
-- In-process bundler only (`BUNDLER_URL` unused). No Alto/Rundler. This path does not create email AA users.
+- [SHIPPED] `POST /aa/userop` returns 410. [backend/app/aa/router.py : L97-99]
+- [SHIPPED] `POST /aa/cdp-send` (JWT): allowlist USDC approve spender=MarketAMM, CTF setApprovalForAll operator=MarketAMM, buyWithUSDC, sellToUSDC; `value` must be 0; `matchOrders` and anything else 403. Sender is JWT `sub`, not the body address. [backend/app/aa/router.py : L70-94] [backend/app/aa/router.py : L102-142]
+- [SHIPPED] Backend REST send uses `useCdpPaymaster: true` on Base Sepolia. [backend/app/cdp.py : L168-179]
+- [SHIPPED] OverUnderPaymaster/SimpleAccount stay in-tree leftover; the app does not call them.
 
 ## Markets
 
@@ -88,7 +96,7 @@ pointers:
 
 ## Ramps
 
-- [SHIPPED] Builds Coinbase Pay URLs from `coinbase_onramp_app_id` or `"demo"`. Coinbase stays as fallback. [backend/app/ramps/router.py : L107-129]
+- [SHIPPED] Builds Coinbase Pay URLs from `coinbase_onramp_app_id` or `"demo"`. Destination is the smart account the client passes (session address). Coinbase stays as fallback. [backend/app/ramps/router.py : L122-138]
 - [SHIPPED] `POST /ramps/moonpay/session` (JWT): Sign widget URL with `MOONPAY_SECRET`; destination = session address, usdc/base. [backend/app/ramps/router.py : L28-56]
 - [SHIPPED] `POST /ramps/moonpay/webhook`: Verify signature on raw body; upsert `RampTx{address, amount, provider_id, status}` only. [backend/app/ramps/router.py : L59-104]
 - [SHIPPED] `RampTx` model stores address, amount, provider_id, status with timestamps. No government IDs. [backend/app/models.py : L119-127]

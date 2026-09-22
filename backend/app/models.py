@@ -11,6 +11,7 @@ class User(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     address: Mapped[str] = mapped_column(String(42), unique=True, index=True)
     is_operator: Mapped[bool] = mapped_column(Boolean, default=False)
+    cdp_user_id: Mapped[str] = mapped_column(String(100), default="", server_default="")
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
 

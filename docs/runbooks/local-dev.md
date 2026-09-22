@@ -10,9 +10,9 @@ pointers:
   - "[scripts/stop_stack.py : L13-14]"
   - "[scripts/e2e_local.py : L1-24]"
   - "[infra/docker-compose.yml : L1-25]"
-  - "[.github/workflows/deploy-gcp.yml : L83-96]"
-  - "[docs/runbooks/local-dev.md : L100-107]"
-  - "[scripts/list_chiefs_primary.py : L76-119]"
+  - "[.github/workflows/deploy-gcp.yml : L85-96]"
+  - "[backend/app/config.py : L11-31]"
+  - "[docs/adr/0010-cdp-embedded-wallets.md : L28-39]"
 ---
 
 # Local development
@@ -99,12 +99,19 @@ gcloud secrets versions add OU_CURSOR_SEARCH_MCP_URL --data-file=cursor-search-m
 
 Local/anvil: set `CURSOR_API_KEY` and `CURSOR_SEARCH_MCP_URL` in `.env`, leave `OU_CURSOR_RUNTIME` unset (local SDK). Pytest/CI/anvil keep `OU_ORACLE_MOCK=1`.
 
-## Paymaster gas tank
+## Coinbase CDP (app wallets)
 
-EntryPoint ETH is the sponsorship tank. Operator deposits via `OverUnderPaymaster.deposit()`.
+User-facing login and gasless swaps use Coinbase CDP embedded wallets, not OverUnderPaymaster. See [ADR-0010](../adr/0010-cdp-embedded-wallets.md).
 
-- After Anvil deploy, `deploy.py` already deposits `PAYMASTER_DEPOSIT_WEI` or 1 ETH.
-- Watch `getDepositInfo` on the EntryPoint for the paymaster address. Refill when the deposit falls below about 0.02 ETH.
-- After a Base Sepolia deploy, call `setWeiPerUsdc` for the live wei-per-USDC rate (Anvil default is `10**15`). Do not rely on a price oracle.
-- Run `scripts/list_chiefs_primary.py` only after the API `.env` points at the **new** factory/AMM/paymaster addresses. The script skips create if the question `Chiefs vs Broncos: Chiefs win?` already exists and never scores a different condition id.
+1. In [CDP Portal](https://portal.cdp.coinbase.com/) create a project and a secret API key.
+2. Enable embedded wallets with smart accounts on login, and CDP Paymaster for Base Sepolia. Do not put a paymaster URL in client code.
+3. Set env (empty placeholders live in `.env.example`): `CDP_PROJECT_ID`, `CDP_API_KEY_ID`, `CDP_API_KEY_SECRET`, `NEXT_PUBLIC_CDP_PROJECT_ID` (same project id on the web build).
+4. If those env vars are unset, local config may read `.secrets/cb_keys.json` keys `PROJECT_ID`, `API_KEY_ID`, `API_SECRET` only. Never log the values. There is no wallet secret unless an SDK call fails without it. [backend/app/config.py : L11-31]
+5. CDP routes return 503 if `CDP_PROJECT_ID` or `CDP_API_KEY_SECRET` is missing. Backend tests mock the CDP client and must not call Coinbase.
+
+Cloud Run: `CDP_PROJECT_ID` from GitHub `vars.CDP_PROJECT_ID`. Secrets `CDP_API_KEY_ID`/`CDP_API_KEY_SECRET` from Secret Manager `OU_CDP_API_KEY_ID` / `OU_CDP_API_KEY_SECRET`. Web image build-arg `NEXT_PUBLIC_CDP_PROJECT_ID`. [`.github/workflows/deploy-gcp.yml : L85-96`]
+
+## Leftover OverUnderPaymaster tank
+
+`OverUnderPaymaster.vy` stays in the repo and is not the app path. After Anvil deploy, `deploy.py` may still deposit EntryPoint ETH. Refilling that tank does not sponsor CDP user ops. Run `scripts/list_chiefs_primary.py` only after the API `.env` points at the **new** factory/AMM addresses. The script skips create if the question `Chiefs vs Broncos: Chiefs win?` already exists and never scores a different condition id.
 

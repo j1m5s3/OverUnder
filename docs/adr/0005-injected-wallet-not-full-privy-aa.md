@@ -2,34 +2,31 @@
 title: Injected wallet not full Privy AA
 status: MIXED
 area: web
-summary: MVP uses wagmi injected plus demo email hex; paymaster for SimpleAccount is shipped; Privy JWKS and email AA remain phase 2.
+summary: Historical injected-wagmi and OverUnderPaymaster app path. User-facing wallets are superseded by ADR-0010 CDP embedded wallets.
 last_verified: 2026-09-21
 pointers:
-  - "[web/src/app/providers.tsx : L10-17]"
-  - "[web/src/features/wallet/ConnectBar.tsx : L13-46]"
-  - "[backend/app/auth/router.py : L90-102]"
+  - "[docs/adr/0010-cdp-embedded-wallets.md : L28-39]"
   - "[contracts/src/OverUnderPaymaster.vy : L322-355]"
-  - "[web/src/features/aa/userOp.ts : L83-155]"
+  - "[contracts/src/SimpleAccount.vy : L40-49]"
+  - "[backend/app/auth/router.py : L86-141]"
 ---
 
 ## Status
 
-Accepted 2026-09-16. Paymaster closeout 2026-09-21.
+Superseded 2026-09-21 for the **user-facing wallet path** by [ADR-0010](0010-cdp-embedded-wallets.md). Decision body below is historical. SIWE for operator/dev JWT and leftover OverUnderPaymaster/SimpleAccount source remain.
 
 ## Context
 
-The product goal includes email/AA wallets (Privy) and gasless flow. Coinbase connector bundling (x402) and Privy app credentials still block email AA. An injected EOA is enough to own a `SimpleAccount` and submit sponsored UserOps.
+The product goal included email/AA wallets and gasless flow. Coinbase connector bundling (x402) and Privy app credentials blocked email AA. An injected EOA was enough to own a `SimpleAccount` and submit sponsored UserOps.
 
 ## Decision
 
-- [SHIPPED] wagmi `injected()` only. [web/src/app/providers.tsx : L10-17]
-- [STUB] SIWE posts `signature: "0x"`. Email maps a string to a fake address and `POST /auth/privy` without JWKS. [web/src/features/wallet/ConnectBar.tsx : L13-46] [backend/app/auth/router.py : L90-102]
-- [SHIPPED] ERC-4337 paymaster + SimpleAccount for injected EOA owners. [contracts/src/OverUnderPaymaster.vy : L322-355] [web/src/features/aa/userOp.ts : L83-155]
-- [PHASE2] Privy embedded wallets, JWKS, and email AA users (see [phase-2.md](../roadmap/phase-2.md)).
+- [SHIPPED] Historical: wagmi `injected()` only, ERC-4337 paymaster + SimpleAccount for injected EOA owners. Contracts remain in-tree; the app no longer calls them. [contracts/src/OverUnderPaymaster.vy : L322-355]
+- [SHIPPED] SIWE with `ecrecover` remains for operator/dev JWT only. [backend/app/auth/router.py : L86-141]
+- [SHIPPED] User-facing login and gasless swaps: Coinbase CDP embedded smart accounts. See [ADR-0010](0010-cdp-embedded-wallets.md).
 
 ## Consequences
 
-- [SHIPPED] `next build` stays free of unused connector barrels.
-- [STUB] Local demo can log in without a browser extension via email hex.
-- [STUB] Negative: demo addresses cannot sign Exchange orders or hold on-chain positions; treating them as users trains a false auth model and must not reach production.
-- Gasless swaps do not imply Privy email wallets exist.
+- [SHIPPED] `next build` stayed free of unused Privy/x402 connector barrels.
+- Negative: demo email-hex login trained a false auth model; that path is removed.
+- Gasless swaps no longer imply an OverUnderPaymaster tank or Privy JWKS.

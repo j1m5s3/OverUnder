@@ -133,8 +133,7 @@ class _MarketDetailScreenState extends State<MarketDetailScreen> {
                         AmmSwapWidget(
                           apiClient: widget.apiClient,
                           marketId: widget.marketId,
-                          web3Client: walletProvider.web3Client,
-                          credentials: walletProvider.credentials,
+                          walletConnected: true,
                         )
                       else
                         Card(

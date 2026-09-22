@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useConnect } from "wagmi";
 import { api } from "@/shared/api/client";
 
 interface KycStatus {
@@ -22,7 +21,6 @@ export function RampCard({ address }: { address: string }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [amount, setAmount] = useState("100");
-  const { connect, connectors } = useConnect();
 
   const humanizeStatus = (status: string) => {
     return status
@@ -34,10 +32,7 @@ export function RampCard({ address }: { address: string }) {
   useEffect(() => {
     if (!address) return;
 
-    // Get KYC status
-    api(`/api/v1/kyc/status`, {
-      headers: { Authorization: `Bearer ${localStorage.getItem("jwt")}` },
-    })
+    api(`/api/v1/kyc/status`)
       .then((r) => setKycStatus(r))
       .catch(() => setKycStatus(null));
   }, [address]);
@@ -47,13 +42,8 @@ export function RampCard({ address }: { address: string }) {
     setError("");
 
     try {
-      // Check KYC requirements
       const checkResponse = await api(`/api/v1/kyc/check`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${localStorage.getItem("jwt")}`,
-        },
         body: JSON.stringify({ notional_usdc: parseFloat(amount) }),
       });
 
@@ -67,14 +57,9 @@ export function RampCard({ address }: { address: string }) {
         return;
       }
 
-      // Try MoonPay first
       try {
         const moonpayResponse = await api(`/api/v1/ramps/moonpay/session`, {
           method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${localStorage.getItem("jwt")}`,
-          },
           body: JSON.stringify({ usdc_amount: amount }),
         });
 
@@ -87,7 +72,6 @@ export function RampCard({ address }: { address: string }) {
         console.warn("Primary payment provider not available, trying alternative");
       }
 
-      // Fallback to Coinbase
       try {
         const coinbaseResponse = await api(`/api/v1/ramps/onramp-url?address=${address}&usdc_amount=${amount}`);
         if (coinbaseResponse.url) {
@@ -147,12 +131,7 @@ export function RampCard({ address }: { address: string }) {
           </button>
         </div>
       ) : (
-        <button 
-          className="btn"
-          onClick={() => connect({ connector: connectors[0] })}
-        >
-          Connect to Add Money
-        </button>
+        <p className="muted">Sign in to add money to your smart account.</p>
       )}
     </div>
   );

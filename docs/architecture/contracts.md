@@ -103,7 +103,7 @@ Treasury-gated OU distribution. Never mints; only `transferFrom` treasury to rec
 
 ## OverUnderPaymaster
 
-[SHIPPED] ERC-4337 v0.7 paymaster. Deny-by-default allowlist. `matchOrders` and `executeBatch` stay denied. Canonical EntryPoint `0x0000000071727De22E5E9d8BAf0edAc6f37da032` on 84532; Anvil uses MockEntryPoint.
+[SHIPPED] Leftover ERC-4337 v0.7 paymaster. The app path is Coinbase CDP Paymaster (ADR-0010); `POST /aa/userop` returns 410. Contracts stay in-tree and are not redeployed for that path.
 
 - Operator-gated deposit, factories, `weiPerUsdc`, `feeRecipient`, daily cap.
 - Sponsor iff `allowedSenders[sender]` or `initCode` from `allowedFactories`. Non-empty `initCode` must use an allowed factory even if the sender is already listed.

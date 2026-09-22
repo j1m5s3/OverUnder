@@ -1,11 +1,11 @@
 ---
 title: TODO registry
-status: PHASE2
+status: MIXED
 area: cross
-summary: Machine-parseable gaps for JWKS, leftover CLOB relayer, uniform-LVR, and permissionless listing.
+summary: Machine-parseable gaps for leftover CLOB relayer, uniform-LVR, and permissionless listing. CDP token verify is done.
 last_verified: 2026-09-21
 pointers:
-  - "[backend/app/auth/router.py : L90-102]"
+  - "[backend/app/cdp.py : L116-134]"
   - "[backend/app/orderbook/matcher.py : L88-136]"
   - "[contracts/src/MarketAMM.vy : L40]"
   - "[contracts/src/MarketFactory.vy : L82-89]"
@@ -13,6 +13,7 @@ pointers:
   - "[docs/adr/0007-amm-first-uniform-lvr.md : L29-36]"
   - "[docs/adr/0008-cursor-runtime-oracles.md : L18-32]"
   - "[docs/adr/0009-dual-gate-sports-resolve-and-week-listing.md : L18-32]"
+  - "[docs/adr/0010-cdp-embedded-wallets.md : L28-39]"
   - "[oracles/resolve/run.py : L33-119]"
   - "[oracles/listing/run.py : L58-137]"
 ---
@@ -21,8 +22,8 @@ pointers:
 
 Machine registry below. Human index:
 
-- [SHIPPED] OU-T001 ERC-4337 paymaster
-- [PHASE2] OU-T002 Privy JWKS + SIWE ecrecover
+- [SHIPPED] OU-T001 ERC-4337 paymaster (leftover; app uses CDP)
+- [SHIPPED] OU-T002 CDP validateAccessToken
 - [PHASE2] OU-T003 Centralized production relayer
 - [SHIPPED] OU-T004 OU emissions from treasury (no FeeVault mint)
 - [SHIPPED] OU-T005 Cursor-runtime agents; MockSearch tests-only
@@ -44,22 +45,23 @@ todos:
     status: done
     area: contracts
     phase: 2
-    summary: Sponsor approve/split/AMM/vote/cancel UserOps; keep matchOrders on the relayer.
+    summary: OverUnderPaymaster and SimpleAccount remain in-tree leftover. The app path is Coinbase CDP Paymaster (ADR-0010); POST /aa/userop returns 410.
     pointers:
       - "[contracts/src/OverUnderPaymaster.vy : L322-355]"
       - "[contracts/src/OverUnderPaymaster.vy : L358-368]"
       - "[contracts/src/SimpleAccount.vy : L40-49]"
-      - "[backend/app/aa/router.py : L177-238]"
-      - "[web/src/features/aa/userOp.ts : L83-155]"
+      - "[backend/app/aa/router.py : L97-99]"
+      - "[docs/adr/0010-cdp-embedded-wallets.md : L28-39]"
   - id: OU-T002
-    title: Verify Privy JWKS instead of trusting body.address
-    status: open
+    title: Verify CDP access tokens instead of trusting body.address
+    status: done
     area: backend
     phase: 2
-    summary: RS256 JWKS, audience check, SIWE ecrecover; delete demo hex email login.
+    summary: validateAccessToken; HS256 session JWT sub is the smart-account address; ignore client-supplied address.
     pointers:
-      - "[backend/app/auth/router.py : L90-102]"
-      - "[web/src/features/wallet/ConnectBar.tsx : L32-46]"
+      - "[backend/app/cdp.py : L116-134]"
+      - "[backend/app/auth/router.py : L144-173]"
+      - "[web/src/features/wallet/ConnectBar.tsx : L35-57]"
   - id: OU-T003
     title: Centralized production relayer
     status: open
@@ -99,7 +101,7 @@ todos:
     phase: 2
     summary: Implement lib/features/* mirroring web; consume tokens.json and openapi.json.
     pointers:
-      - "[mobile/README.md : L1-70]"
+      - "[mobile/README.md : L1-65]"
       - "[mobile/lib/main.dart : L1-72]"
       - "[mobile/lib/theme/app_theme.dart : L1-92]"
       - "[mobile/lib/services/api_client.dart : L1-137]"

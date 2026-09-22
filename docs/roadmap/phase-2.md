@@ -2,23 +2,25 @@
 title: Phase 2 remaining vision
 status: MIXED
 area: roadmap
-summary: MIXED spec — Flutter/emissions/KYC/Cursor-runtime agents/dual-gate resolve/paymaster shipped; remaining JWKS, leftover CLOB relayer, uniform-LVR, permissionless listing.
+summary: MIXED spec — Flutter/emissions/KYC/Cursor-runtime agents/dual-gate resolve/CDP wallets shipped; remaining leftover CLOB relayer, uniform-LVR, permissionless listing.
 last_verified: 2026-09-21
 pointers:
   - "[mobile/README.md : L1-25]"
-  - "[web/src/app/providers.tsx : L10-17]"
-  - "[backend/app/auth/router.py : L90-102]"
+  - "[web/src/app/providers.tsx : L21-36]"
+  - "[backend/app/auth/router.py : L144-173]"
+  - "[backend/app/cdp.py : L116-134]"
   - "[backend/app/ramps/router.py : L9-32]"
   - "[contracts/src/RevenueToken.vy : L13-32]"
   - "[contracts/src/FeeVault.vy : L44-50]"
   - "[contracts/src/OverUnderPaymaster.vy : L322-355]"
+  - "[docs/adr/0010-cdp-embedded-wallets.md : L28-39]"
   - "[docs/adr/0007-amm-first-uniform-lvr.md : L29-36]"
   - "[contracts/src/MarketAMM.vy : L40]"
 ---
 
 # Phase 2
 
-This file is MIXED. [SHIPPED] Flutter (OU-T006), emissions (OU-T004), Cursor-runtime agents (OU-T005), score scout (OU-T011), dual-gate resolve (OU-T012), week-roll listing (OU-T013), MoonPay/KYC (OU-T007), ERC-4337 paymaster (OU-T001). Remaining open: Privy JWKS (OU-T002), leftover CLOB production relayer (OU-T003), uniform-LVR (OU-T008/T009), permissionless listing (OU-T010). CLOB UX is an optional overlay, not a required depth-chart milestone. Do not invent JWKS or uniform-LVR as shipped. Paymaster does not create email AA users.
+This file is MIXED. [SHIPPED] Flutter (OU-T006), emissions (OU-T004), Cursor-runtime agents (OU-T005), score scout (OU-T011), dual-gate resolve (OU-T012), week-roll listing (OU-T013), MoonPay/KYC (OU-T007), leftover OverUnderPaymaster (OU-T001), CDP wallets (OU-T002). Remaining open: leftover CLOB production relayer (OU-T003), uniform-LVR (OU-T008/T009), permissionless listing (OU-T010). CLOB UX is an optional overlay, not a required depth-chart milestone. Do not invent uniform-LVR as shipped. The app path is CDP Paymaster, not OverUnderPaymaster.
 
 ## 1. Flutter
 
@@ -43,7 +45,7 @@ Shared inputs (already in repo, do not fork):
 
 1. **Market list** — primaries as full-width cards; wildcard children as chips under the parent. Pull `GET /api/v1/markets` (EventCard[] of primaries with nested children; orphan wildcards listed alone) and `?parentId=` for a flat child filter.
 2. **Market detail** — type 0 and type 1 render AMM buy/sell with `quoteBuy`/`quoteSell` then a wallet `buyWithUSDC` / `sellToUSDC`. CLOB ticket is leftover overlay, not required.
-3. **Wallet** — Privy email OTP + injected EOA. Show USDC, YES/NO balances for open markets, OU + NAV. Coinbase Onramp URL from `GET /api/v1/ramps/onramp-url` until MoonPay ships (section 5).
+3. **Wallet** — CDP email OTP. Show USDC, YES/NO balances for open markets, OU + NAV. Onramp destination is the smart account (`GET /api/v1/ramps/onramp-url`).
 4. **Oracle** — attestations, unanimity flag, countdown to `closeTime + 86400`, vote CTA calling `castVote` through the AA wallet.
 
 ### Mobile-specific rules
@@ -103,58 +105,45 @@ The MVP proves AMM settlement. A CLOB overlay may be scheduled later; it is **no
 
 [PHASE2] Listing becomes permissionless or loosely gated so AMM seed—not operator-recruited makers—bootstraps a market. Factory stays operator/generator gated until this lands. [contracts/src/MarketFactory.vy : L82-98]
 
-## 5. Paymaster (ERC-4337)
+## 5. Paymaster (CDP app path; OverUnderPaymaster leftover)
 
-[SHIPPED] Gasless `execute` UserOps for injected-EOA owners of `SimpleAccount`. `matchOrders` stays relayer-only. `executeBatch` is denied. Email/Privy AA users are not shipped.
+[SHIPPED] User-facing gasless ops use Coinbase CDP Paymaster (`useCdpPaymaster: true`) from CDP smart accounts. `matchOrders` stays relayer-only and is 403 on `/aa/cdp-send`. See [ADR-0010](../adr/0010-cdp-embedded-wallets.md).
 
-### Contracts
+### App path
 
-- [SHIPPED] `OverUnderPaymaster` on EntryPoint v0.7 (`validatePaymasterUserOp` returns `(Bytes, uint256)` plus `postOp`). [contracts/src/OverUnderPaymaster.vy : L322-355] [contracts/src/OverUnderPaymaster.vy : L358-368]
-- [SHIPPED] Selector allowlist: USDC `approve` toward CTF, Exchange, AMM, FeeVault, paymaster; CTF split / `setApprovalForAll`; AMM buy/sell/addLiquidity; FeeVault redeem/claim; `castVote`; Exchange cancel/incrementNonce. Not `matchOrders`.
-- [SHIPPED] Sender must be allowlisted or `initCode` from an operator-allowed factory. Canonical EntryPoint on 84532; Anvil keeps `MockEntryPoint`. [contracts/src/MockEntryPoint.vy : L94-120]
-- [SHIPPED] Fee is operator `weiPerUsdc` (no price oracle), rolling 24h USDC cap, `transferFrom` sender to `feeRecipient`. Gas tank is the EntryPoint deposit via `paymaster.deposit()`.
-- [SHIPPED] `SimpleAccount` + `SimpleAccountFactory` (EIP-1167, salt 0). [contracts/src/SimpleAccount.vy : L40-49] [contracts/src/SimpleAccountFactory.vy : L46-53]
+- [SHIPPED] Web: `useSendUserOperation` on `base-sepolia` with `useCdpPaymaster: true`. Never a paymaster URL in client code. [web/src/features/trade/AmmSwap.tsx : L187-211]
+- [SHIPPED] Flutter: `POST /aa/cdp-send`; backend `POST /v2/embedded-wallet-api/end-users/{userId}/evm/smart-accounts/{address}/send` with `useCdpPaymaster: true`. [backend/app/cdp.py : L168-179]
+- [SHIPPED] Allowlist: USDC approve spender=MarketAMM, CTF setApprovalForAll operator=MarketAMM, buyWithUSDC, sellToUSDC; `value` 0. [backend/app/aa/router.py : L70-94]
+- [SHIPPED] `POST /aa/userop` returns 410. [backend/app/aa/router.py : L97-99]
 
-### Bundler
+### Leftover contracts
 
-- [SHIPPED] In-process `POST /aa/userop`: empty signature stamps `paymasterAndData`; signature present submits `handleOps`. [backend/app/aa/router.py : L177-238]
-- Never sponsor `POST /auth/*`. JWT `sub` is the injected EOA; sender must be that owner's SimpleAccount.
-
-### Relayer vs paymaster
-
+- [SHIPPED] `OverUnderPaymaster` and `SimpleAccount` stay in-tree. Do not redeploy them for the app path. The app does not call them. [contracts/src/OverUnderPaymaster.vy : L322-355] [contracts/src/SimpleAccount.vy : L40-49]
 - Leftover CLOB **fills** stay relayer-submitted `matchOrders`.
-- Paymaster covers the **user** half: approvals, splits, AMM, votes, cancels.
-- Gas tank refill: [docs/runbooks/local-dev.md : L100-107]
 
-### Tests
+## 6. CDP wallets (OU-T002)
 
-- [SHIPPED] boa: 0 ETH SimpleAccount, USDC > 0, `handleOps` buy YES, deposit decreases, fee at recipient.
-- [SHIPPED] Negative: `matchOrders`, unknown selector, crafted execute offset, unknown factory.
-
-## 6. Privy JWKS
-
-Replace [backend/app/auth/router.py : L90-102].
+[SHIPPED] Replace Privy. Session JWT stays HS256. `sub` is the smart-account address from `validateAccessToken`. Ignore any client-supplied address. CDP users are not operators.
 
 ### Verify
 
-- Fetch `https://auth.privy.io/api/v1/apps/{PRIVY_APP_ID}/jwks.json` (or the then-current Privy JWKS URL) with cache-control TTL ≤ 10 minutes.
-- `jwt.decode` with RS256, `audience=PRIVY_APP_ID`, issuer allowlist from Privy docs.
-- Extract the linked embedded-wallet address from the token’s custom claims (or Privy user API using `PRIVY_APP_SECRET` server-side). **Do not** trust `body.address` unless it matches the verified claim.
-- Reject expired/alg=none/HS256 tokens. MVP HS256 session JWTs remain internal after verification.
+- [SHIPPED] `cdp.end_user.validate_access_token`. Fail closed if `CDP_PROJECT_ID` or `CDP_API_KEY_SECRET` is missing. Tests mock the client. [backend/app/cdp.py : L21-25] [backend/app/cdp.py : L116-134]
+- [SHIPPED] `POST /auth/cdp` upserts `User.address` = smart account, `cdp_user_id`, `is_operator=False`. [backend/app/auth/router.py : L144-173]
 
 ### SIWE
 
-- `POST /auth/siwe` must `ecrecover` the EIP-4361 message, match nonce, match domain (`overunder.local` in dev, production host in prod), and consume nonce.
-- Web `ConnectBar` uses `personal_sign` / `signMessage`; delete `signature: "0x"`.
+- [SHIPPED] `POST /auth/siwe` `ecrecover`s, matches nonce, consumes nonce. Operator flag only for `OPERATOR_PRIVATE_KEY`. [backend/app/auth/router.py : L86-141]
+- Web `ConnectBar` is email OTP, not SIWE.
 
 ### Email AA
 
-- Privy React (`@privy-io/react-auth`) + wagmi connector. Remove the email-to-hex demo path.
-- Same session cookie/JWT shape (`sub` = address.lower(), `op` = operator flag) so existing `get_current_user` stays.
+- [SHIPPED] Web `@coinbase/cdp-hooks` with `ethereum.createOnLogin: "smart"`. [web/src/app/providers.tsx : L21-36]
+- [SHIPPED] Flutter has no CDP SDK; email/OTP and trades go through OverUnder API only.
 
 ### Config
 
-- `PRIVY_APP_ID` / `PRIVY_APP_SECRET` already exist on Settings. Fail closed if unset outside `chain_id==31337`.
+- Env: `CDP_PROJECT_ID`, `CDP_API_KEY_ID`, `CDP_API_KEY_SECRET`, `NEXT_PUBLIC_CDP_PROJECT_ID`.
+- Local file `.secrets/cb_keys.json` keys `PROJECT_ID`, `API_KEY_ID`, `API_SECRET` only if env unset. Never log values. No wallet secret unless an SDK call fails without it.
 
 ## 7. MoonPay / KYC
 
@@ -176,7 +165,7 @@ Coinbase URL builder remains as a fallback ([backend/app/ramps/router.py : L9-32
 ### Off-ramp
 
 - Keep Coinbase offramp URL; add MoonPay sell URL with the same KYC gate.
-- Never send users to a dApp that asks for the Privy recovery key.
+- Never send users to a dApp that asks for a wallet recovery key.
 
 ## 8. OU emissions
 

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:web3dart/crypto.dart';
 import 'package:web3dart/web3dart.dart';
 import '../../models/models.dart';
 import '../../models/deployments.dart';
@@ -9,15 +10,13 @@ import '../../theme/app_theme.dart';
 class AmmSwapWidget extends StatefulWidget {
   final ApiClient apiClient;
   final String marketId;
-  final Web3Client? web3Client;
-  final Credentials? credentials;
+  final bool walletConnected;
 
   const AmmSwapWidget({
     super.key,
     required this.apiClient,
     required this.marketId,
-    this.web3Client,
-    this.credentials,
+    this.walletConnected = false,
   });
 
   @override
@@ -96,9 +95,9 @@ class _AmmSwapWidgetState extends State<AmmSwapWidget> {
   }
 
   Future<void> _executeSwap() async {
-    if (widget.credentials == null || widget.web3Client == null) {
+    if (!widget.walletConnected) {
       setState(() {
-        _error = 'Wallet not connected. Connect wallet to execute swaps.';
+        _error = 'Sign in to execute swaps.';
       });
       return;
     }
@@ -137,6 +136,8 @@ class _AmmSwapWidgetState extends State<AmmSwapWidget> {
     }
   }
 
+  String _hexData(Uint8List bytes) => '0x${bytesToHex(bytes, include0x: false)}';
+
   Future<void> _executeBuy() async {
     final ammAddress = _deployments!.marketAmm;
     final usdcAddress = _deployments!.mockUsdc;
@@ -145,59 +146,26 @@ class _AmmSwapWidgetState extends State<AmmSwapWidget> {
       throw Exception('AMM or USDC address not found in deployments');
     }
 
-    // Check quote validity
     if (_quote!.tokensOut <= 0) {
       throw Exception('Quote too small. Get a fresh quote.');
     }
 
-    setState(() => _status = 'Checking USDC approval...');
-
-    // Check and approve USDC if needed
-    final usdcContract = DeployedContract(
-      ContractAbi.fromJson(
-        '[{"inputs":[{"name":"spender","type":"address"},{"name":"amount","type":"uint256"}],"name":"approve","outputs":[{"type":"bool"}],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"name":"owner","type":"address"},{"name":"spender","type":"address"}],"name":"allowance","outputs":[{"type":"uint256"}],"stateMutability":"view","type":"function"}]',
-        'USDC',
-      ),
-      EthereumAddress.fromHex(usdcAddress),
-    );
-
-    final allowanceFunction = usdcContract.function('allowance');
-    final allowance = await widget.web3Client!.call(
-      contract: usdcContract,
-      function: allowanceFunction,
-      params: [
-        widget.credentials!.address,
-        EthereumAddress.fromHex(ammAddress),
-      ],
-    );
-
     final usdcAmount = BigInt.from(int.parse(_amountController.text));
-
-    if ((allowance[0] as BigInt) < usdcAmount) {
-      setState(() => _status = 'Approving USDC...');
-      final approveFunction = usdcContract.function('approve');
-      await widget.web3Client!.sendTransaction(
-        widget.credentials!,
-        Transaction.callContract(
-          contract: usdcContract,
-          function: approveFunction,
-          parameters: [EthereumAddress.fromHex(ammAddress), usdcAmount],
-        ),
-        chainId: _deployments!.chainId,
-      );
-    }
-
-    setState(() => _status = 'Buying tokens...');
-
-    // Calculate minOut with slippage
     final slippagePercent = double.parse(_slippageController.text);
     final minOut = (_quote!.tokensOut * (100 - slippagePercent) / 100).floor();
-
     if (minOut <= 0) {
       throw Exception('Quote too small or slippage too high. Get a fresh quote.');
     }
 
-    // Execute buy
+    setState(() => _status = 'Buying tokens...');
+
+    final usdcContract = DeployedContract(
+      ContractAbi.fromJson(
+        '[{"inputs":[{"name":"spender","type":"address"},{"name":"amount","type":"uint256"}],"name":"approve","outputs":[{"type":"bool"}],"stateMutability":"nonpayable","type":"function"}]',
+        'USDC',
+      ),
+      EthereumAddress.fromHex(usdcAddress),
+    );
     final ammContract = DeployedContract(
       ContractAbi.fromJson(
         '[{"inputs":[{"name":"conditionId","type":"bytes32"},{"name":"buyYes","type":"bool"},{"name":"usdcIn","type":"uint256"},{"name":"minOut","type":"uint256"}],"name":"buyWithUSDC","outputs":[{"type":"uint256"}],"stateMutability":"nonpayable","type":"function"}]',
@@ -206,21 +174,21 @@ class _AmmSwapWidgetState extends State<AmmSwapWidget> {
       EthereumAddress.fromHex(ammAddress),
     );
 
-    final buyFunction = ammContract.function('buyWithUSDC');
-    await widget.web3Client!.sendTransaction(
-      widget.credentials!,
-      Transaction.callContract(
-        contract: ammContract,
-        function: buyFunction,
-        parameters: [
-          hexToBytes(widget.marketId),
-          _isYes,
-          usdcAmount,
-          BigInt.from(minOut),
-        ],
-      ),
-      chainId: _deployments!.chainId,
-    );
+    final approveData = usdcContract.function('approve').encodeCall([
+      EthereumAddress.fromHex(ammAddress),
+      usdcAmount,
+    ]);
+    final buyData = ammContract.function('buyWithUSDC').encodeCall([
+      hexToBytes(widget.marketId),
+      _isYes,
+      usdcAmount,
+      BigInt.from(minOut),
+    ]);
+
+    await widget.apiClient.cdpSend([
+      {'to': usdcAddress, 'data': _hexData(approveData), 'value': 0},
+      {'to': ammAddress, 'data': _hexData(buyData), 'value': 0},
+    ]);
 
     setState(() {
       _status = 'Success! Tokens received.';
@@ -237,57 +205,25 @@ class _AmmSwapWidgetState extends State<AmmSwapWidget> {
       throw Exception('AMM or CTF address not found in deployments');
     }
 
-    // Check quote validity
     if (_quote!.usdc <= 0) {
       throw Exception('Quote too small. Get a fresh quote.');
     }
 
-    setState(() => _status = 'Checking token approval...');
-
-    // Check and approve CTF if needed
-    final ctfContract = DeployedContract(
-      ContractAbi.fromJson(
-        '[{"inputs":[{"name":"operator","type":"address"},{"name":"approved","type":"bool"}],"name":"setApprovalForAll","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"name":"account","type":"address"},{"name":"operator","type":"address"}],"name":"isApprovedForAll","outputs":[{"type":"bool"}],"stateMutability":"view","type":"function"}]',
-        'CTF',
-      ),
-      EthereumAddress.fromHex(ctfAddress),
-    );
-
-    final isApprovedFunction = ctfContract.function('isApprovedForAll');
-    final isApproved = await widget.web3Client!.call(
-      contract: ctfContract,
-      function: isApprovedFunction,
-      params: [
-        widget.credentials!.address,
-        EthereumAddress.fromHex(ammAddress),
-      ],
-    );
-
-    if (!(isApproved[0] as bool)) {
-      setState(() => _status = 'Approving tokens...');
-      final approveFunction = ctfContract.function('setApprovalForAll');
-      await widget.web3Client!.sendTransaction(
-        widget.credentials!,
-        Transaction.callContract(
-          contract: ctfContract,
-          function: approveFunction,
-          parameters: [EthereumAddress.fromHex(ammAddress), true],
-        ),
-        chainId: _deployments!.chainId,
-      );
-    }
-
-    setState(() => _status = 'Selling tokens...');
-
-    // Calculate minUsdc with slippage
     final slippagePercent = double.parse(_slippageController.text);
     final minUsdc = (_quote!.usdc * (100 - slippagePercent) / 100).floor();
-
     if (minUsdc <= 0) {
       throw Exception('Quote too small or slippage too high. Get a fresh quote.');
     }
 
-    // Execute sell
+    setState(() => _status = 'Selling tokens...');
+
+    final ctfContract = DeployedContract(
+      ContractAbi.fromJson(
+        '[{"inputs":[{"name":"operator","type":"address"},{"name":"approved","type":"bool"}],"name":"setApprovalForAll","outputs":[],"stateMutability":"nonpayable","type":"function"}]',
+        'CTF',
+      ),
+      EthereumAddress.fromHex(ctfAddress),
+    );
     final ammContract = DeployedContract(
       ContractAbi.fromJson(
         '[{"inputs":[{"name":"conditionId","type":"bytes32"},{"name":"sellYes","type":"bool"},{"name":"tokenAmount","type":"uint256"},{"name":"minUsdc","type":"uint256"}],"name":"sellToUSDC","outputs":[{"type":"uint256"}],"stateMutability":"nonpayable","type":"function"}]',
@@ -296,23 +232,21 @@ class _AmmSwapWidgetState extends State<AmmSwapWidget> {
       EthereumAddress.fromHex(ammAddress),
     );
 
-    final sellFunction = ammContract.function('sellToUSDC');
-    final tokenAmount = BigInt.from(int.parse(_amountController.text));
+    final approveData = ctfContract.function('setApprovalForAll').encodeCall([
+      EthereumAddress.fromHex(ammAddress),
+      true,
+    ]);
+    final sellData = ammContract.function('sellToUSDC').encodeCall([
+      hexToBytes(widget.marketId),
+      _isYes,
+      BigInt.from(int.parse(_amountController.text)),
+      BigInt.from(minUsdc),
+    ]);
 
-    await widget.web3Client!.sendTransaction(
-      widget.credentials!,
-      Transaction.callContract(
-        contract: ammContract,
-        function: sellFunction,
-        parameters: [
-          hexToBytes(widget.marketId),
-          _isYes,
-          tokenAmount,
-          BigInt.from(minUsdc),
-        ],
-      ),
-      chainId: _deployments!.chainId,
-    );
+    await widget.apiClient.cdpSend([
+      {'to': ctfAddress, 'data': _hexData(approveData), 'value': 0},
+      {'to': ammAddress, 'data': _hexData(sellData), 'value': 0},
+    ]);
 
     setState(() {
       _status = 'Success! USDC received.';
@@ -343,7 +277,6 @@ class _AmmSwapWidgetState extends State<AmmSwapWidget> {
                   ),
             ),
             const SizedBox(height: AppTheme.spacingMd),
-            // Buy/Sell Toggle
             Row(
               children: [
                 Expanded(
@@ -364,7 +297,6 @@ class _AmmSwapWidgetState extends State<AmmSwapWidget> {
               ],
             ),
             const SizedBox(height: AppTheme.spacingMd),
-            // Yes/No Toggle
             Row(
               children: [
                 Expanded(
@@ -390,7 +322,6 @@ class _AmmSwapWidgetState extends State<AmmSwapWidget> {
               ],
             ),
             const SizedBox(height: AppTheme.spacingMd),
-            // Amount Input
             TextField(
               controller: _amountController,
               decoration: InputDecoration(
@@ -406,7 +337,6 @@ class _AmmSwapWidgetState extends State<AmmSwapWidget> {
               onChanged: (_) => setState(() => _quote = null),
             ),
             const SizedBox(height: AppTheme.spacingMd),
-            // Slippage Input
             TextField(
               controller: _slippageController,
               decoration: const InputDecoration(
@@ -416,7 +346,6 @@ class _AmmSwapWidgetState extends State<AmmSwapWidget> {
               keyboardType: const TextInputType.numberWithOptions(decimal: true),
             ),
             const SizedBox(height: AppTheme.spacingMd),
-            // Quote Display
             if (_quoting)
               const Center(child: CircularProgressIndicator())
             else if (_error != null)
@@ -477,7 +406,6 @@ class _AmmSwapWidgetState extends State<AmmSwapWidget> {
                 ),
               ),
             const SizedBox(height: AppTheme.spacingMd),
-            // Status
             if (_status != null)
               Padding(
                 padding: const EdgeInsets.only(bottom: AppTheme.spacingMd),
@@ -486,7 +414,6 @@ class _AmmSwapWidgetState extends State<AmmSwapWidget> {
                   style: TextStyle(color: AppTheme.accent, fontSize: AppTheme.sizeSm),
                 ),
               ),
-            // Execute Button
             SizedBox(
               width: double.infinity,
               child: ElevatedButton(

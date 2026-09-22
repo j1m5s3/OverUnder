@@ -25,7 +25,8 @@ The following secret names exist with **empty versions** (James fills later):
 - `OU_JWT_SECRET` — JWT signing key (HS256, 32+ bytes recommended) **[REQUIRED]**
 - `OU_DATABASE_URL` — PostgreSQL connection string (must NOT be SQLite; Cloud Run needs persistent DB) **[REQUIRED]**
 - `OU_ANVIL_RPC_URL` — Base Sepolia RPC endpoint (chain_id 84532) **[REQUIRED]**
-- `OU_PRIVY_APP_SECRET` — Privy app secret for auth validation
+- `OU_CDP_API_KEY_ID` — Coinbase CDP API key id **[REQUIRED for wallets]**
+- `OU_CDP_API_KEY_SECRET` — Coinbase CDP API key secret **[REQUIRED for wallets]**
 - `OU_MOONPAY_SECRET` — MoonPay API secret (mapped to MOONPAY_SECRET env; PHASE2)
 - `OU_OPERATOR_PRIVATE_KEY` — EOA private key for market operations (0x-prefixed hex; **Sepolia smoke only**)
 - `OU_RELAYER_PRIVATE_KEY` — EOA private key for CLOB settlement (0x-prefixed hex; **Sepolia smoke only**)
@@ -57,7 +58,7 @@ The workflow:
 - `GCP_PROJECT_NUMBER` — GCP project number for WIF provider path (not project id) **[REQUIRED]**
 
 **Repository Variables** (optional, set at `/settings/variables/actions`):
-- `PRIVY_APP_ID` — Privy app identifier
+- `CDP_PROJECT_ID` — Coinbase CDP project id
 - Contract addresses: `USDC_ADDRESS`, `CTF_ADDRESS`, `FACTORY_ADDRESS`, `EXCHANGE_ADDRESS`, `AMM_ADDRESS`, `ORACLE_ADDRESS`, `FEE_VAULT_ADDRESS`, `OU_TOKEN_ADDRESS`
 - `COINBASE_ONRAMP_APP_ID` — Coinbase Pay app id
 
@@ -100,9 +101,9 @@ echo -n "0x1234567890abcdef..." | \
   --data-file=- \
   --project=overunder-509107
 
-# Example: Add Privy app secret
-echo -n "privy-secret-here" | \
-  gcloud secrets versions add OU_PRIVY_APP_SECRET \
+# Example: Add CDP API key secret
+echo -n "cdp-api-key-secret-here" | \
+  gcloud secrets versions add OU_CDP_API_KEY_SECRET \
   --data-file=- \
   --project=overunder-509107
 ```
@@ -204,13 +205,13 @@ gcloud run deploy overunder-web \
 - `JWT_SECRET` — JWT signing key
 - `DATABASE_URL` — Database connection string
 - `ANVIL_RPC_URL` — Base Sepolia RPC (mapped from OU_ANVIL_RPC_URL)
-- `PRIVY_APP_SECRET` — Privy auth secret
+- `CDP_API_KEY_ID` / `CDP_API_KEY_SECRET` — Coinbase CDP API credentials
 - `OPERATOR_PRIVATE_KEY` — Operator EOA key
 - `RELAYER_PRIVATE_KEY` — Relayer EOA key
 
 **Set in workflow**:
 - `CHAIN_ID=84532` — Base Sepolia chain ID
-- `PRIVY_APP_ID` — From GitHub variable
+- `CDP_PROJECT_ID` — From GitHub variable
 - Contract addresses (from GitHub variables or empty)
 
 See `infra/gcp/cloudrun.env.example` for complete list.
@@ -219,6 +220,7 @@ See `infra/gcp/cloudrun.env.example` for complete list.
 
 **Build-time**:
 - `NEXT_PUBLIC_API_URL` — Backend API URL (automatically captured from deployed API service; rebuilt on each deploy)
+- `NEXT_PUBLIC_CDP_PROJECT_ID` — Coinbase CDP project id (build-arg)
 
 **Runtime**:
 - `PORT` — Cloud Run sets this (default 8080)
@@ -395,7 +397,7 @@ Store this as `GCP_PROJECT_NUMBER` GitHub secret.
 
 1. Fill Secret Manager secrets (JWT, DATABASE_URL, RPC, private keys)
 2. Deploy contracts to Base Sepolia and record addresses
-3. Set GitHub variables for contract addresses and Privy app ID
+3. Set GitHub variables for contract addresses and `CDP_PROJECT_ID`
 4. Trigger workflow via push to `feat/mvp-docs` or manual dispatch
 5. Verify services are running: `gcloud run services list --project=overunder-509107`
 6. Test API health: `curl https://overunder-api-XXX.run.app/health`

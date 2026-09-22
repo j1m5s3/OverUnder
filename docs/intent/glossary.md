@@ -26,9 +26,9 @@ pointers: []
 - [SHIPPED] **Participant vote** — Token-weighted `castVote` using YES+NO balances.
 - [SHIPPED] **NAV** — USDC on FeeVault per 1e18 OU (`balance * 1e18 / supply`).
 - [SHIPPED] **OU** — Fixed-supply revenue token (100M). Redeem burns OU for USDC.
-- [STUB] **Privy login** — API accepts a token without JWKS; web synthesizes a hex address from email.
+- [SHIPPED] **CDP login** — Email OTP; backend `validateAccessToken`; HS256 `sub` is the smart-account address.
 - [STUB] **Relayer** — Optional `relayer_private_key` that submits leftover `matchOrders`; fills may stay off-chain.
-- [SHIPPED] **Paymaster** — ERC-4337 contract that sponsors UserOps (approvals, swaps) and pulls a USDC fee; EntryPoint ETH is the gas tank.
-- [PHASE2] **Privy JWKS** — Verify Privy access tokens; email AA users are not shipped.
+- [SHIPPED] **CDP Paymaster** — Coinbase-sponsored user ops via `useCdpPaymaster: true`. Never a paymaster URL in client code.
+- [SHIPPED] **OverUnderPaymaster** — Leftover ERC-4337 contract; app does not call it. EntryPoint ETH tank is unused by the app path.
 - [SHIPPED] **Emissions** — Scheduled OU transfers from treasury; not FeeVault mint.
 - [SHIPPED] **MoonPay / KYC** — Fiat on-ramp plus identity checks before card buys; Coinbase URL stays fallback.

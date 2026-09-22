@@ -42,9 +42,10 @@ last_verified: 2026-09-21
 - [oracles/scores/publish.py : L15-52] - mint HS256 operator JWT matching _issue
 - [oracles/scores/job.py : L116-150] - score scout loop; cap OU_SCOUT_MAX_MARKETS
 - [oracles/wildcard/generator.py] - child market proposals
-- [web/src/features/aa/userOp.ts : L30-36] - gaslessConfigured from three NEXT_PUBLIC envs
-- [web/src/features/aa/userOp.ts : L83-155] - two-phase sponsored execute
-- [web/src/features/trade/AmmSwap.tsx : L181-268] - gasless UserOps else EOA writeContract
+- [backend/app/cdp.py : L137-166] - CDP email OTP init and verify
+- [backend/app/aa/router.py : L97-142] - /aa/userop 410; cdp-send allowlist
+- [web/src/features/wallet/ConnectBar.tsx : L19-75] - CDP email OTP then session JWT
+- [web/src/features/trade/AmmSwap.tsx : L189-214] - CDP sponsored buy user operation
 - [web/src/features/markets/MarketInfo.tsx : L15-60] - event hub + one muted facts line
 - [shared/design-tokens/tokens.json] - Flutter theme contract
 - [shared/openapi.json] - Flutter API contract
@@ -64,8 +65,9 @@ last_verified: 2026-09-21
 - ADR-0001 superseded (historical hybrid CLOB-primary / AMM-wildcard)
 - OU is fixed-supply NAV token, not a public savings vault
 - Trusted operator/relayer/oracle keys in MVP
-- Do not invent Privy JWKS or uniform-LVR as shipped
-- T001 paymaster implemented; T002 JWKS stays open; T003 and T008–T010 stay open; T004–T007 and T011–T013 done
+- Do not invent uniform-LVR as shipped
+- ADR-0010: app login and gas sponsorship use Coinbase CDP; OverUnderPaymaster stays unused by the app
+- T001 and T002 done; T003 and T008–T010 stay open; T004–T007 and T011–T013 done
 - T005 retargeted to Cursor agents
 - Exchange remains deployed leftover overlay
 - 2026-09-20 Stage 4: mock pytest does not need cursor_sdk; live smoke skipif no key

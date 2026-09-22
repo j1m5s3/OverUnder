@@ -4,12 +4,11 @@ from sqlalchemy import select, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 import secrets
 import jwt
-import httpx
-import json
 from datetime import datetime, timedelta, timezone
 from eth_account.messages import encode_defunct
 from eth_account import Account
 
+from app.cdp import CdpUser, sign_in_with_email, validate_access_token, verify_email_otp
 from app.config import get_settings
 from app.db import get_db
 from app.models import Nonce, User
@@ -24,8 +23,19 @@ class SiweVerify(BaseModel):
     address: str
 
 
-class PrivyVerify(BaseModel):
-    token: str
+class CdpAccessToken(BaseModel):
+    accessToken: str
+    address: str | None = None
+
+
+class CdpEmailStart(BaseModel):
+    email: str
+
+
+class CdpEmailVerify(BaseModel):
+    flowId: str
+    otp: str
+    address: str | None = None
 
 
 def _issue(address: str, is_operator: bool) -> str:
@@ -131,111 +141,33 @@ async def siwe(body: SiweVerify, db: AsyncSession = Depends(get_db)):
     return {"token": _issue(addr, user.is_operator), "address": addr}
 
 
-@router.post("/privy")
-async def privy(body: PrivyVerify, db: AsyncSession = Depends(get_db)):
-    if not body.token:
-        raise HTTPException(400, "missing privy token")
-    
-    anvil_bypass = getattr(settings, 'auth_anvil_bypass', False) or False
-    if anvil_bypass and settings.chain_id == 31337:
-        if body.token == "privy-demo-anvil-only":
-            addr = "0x" + "de" * 20
-            
-            # Check if this is the operator address
-            is_operator = False
-            if settings.operator_private_key:
-                try:
-                    operator_acct = Account.from_key(settings.operator_private_key)
-                    is_operator = (addr.lower() == operator_acct.address.lower())
-                except Exception:
-                    pass
-            
-            user = (await db.execute(select(User).where(User.address == addr))).scalar_one_or_none()
-            if user is None:
-                user = User(address=addr, is_operator=is_operator)
-                db.add(user)
-                await db.commit()
-                await db.refresh(user)
-            else:
-                if user.is_operator != is_operator:
-                    user.is_operator = is_operator
-                    await db.commit()
-            return {"token": _issue(addr, user.is_operator), "address": addr}
-    
-    if not settings.privy_app_id:
-        raise HTTPException(503, "Privy not configured")
-    
-    try:
-        jwks_resp = await httpx.AsyncClient().get(
-            "https://auth.privy.io/.well-known/jwks.json",
-            timeout=5.0
-        )
-        jwks_resp.raise_for_status()
-        jwks = jwks_resp.json()
-    except Exception as e:
-        raise HTTPException(503, f"Failed to fetch Privy JWKS: {e}")
-    
-    try:
-        unverified_header = jwt.get_unverified_header(body.token)
-        kid = unverified_header.get("kid")
-        
-        key = None
-        for jwk in jwks.get("keys", []):
-            if jwk.get("kid") == kid:
-                key = jwt.algorithms.RSAAlgorithm.from_jwk(jwk)
-                break
-        
-        if key is None:
-            raise HTTPException(401, "Privy key not found in JWKS")
-        
-        claims = jwt.decode(
-            body.token,
-            key,
-            algorithms=["RS256"],
-            audience=settings.privy_app_id,
-            issuer="privy.io",
-        )
-    except jwt.PyJWTError as e:
-        raise HTTPException(401, f"Privy token verification failed: {e}")
-    
-    linked_accounts = claims.get("linked_accounts", [])
-    
-    if isinstance(linked_accounts, str):
-        try:
-            linked_accounts = json.loads(linked_accounts)
-        except json.JSONDecodeError:
-            raise HTTPException(401, "Invalid linked_accounts format in Privy claims")
-    
-    wallet_address = None
-    for account in linked_accounts:
-        if isinstance(account, dict) and account.get("type") == "wallet":
-            wallet_address = account.get("address")
-            break
-    
-    if not wallet_address:
-        raise HTTPException(401, "No linked wallet in Privy claims")
-    
-    addr = wallet_address.lower()
-    
-    # Check if this is the operator address
-    is_operator = False
-    if settings.operator_private_key:
-        try:
-            operator_acct = Account.from_key(settings.operator_private_key)
-            is_operator = (addr == operator_acct.address.lower())
-        except Exception:
-            pass
-    
+async def _upsert_cdp_session(db: AsyncSession, cdp_user: CdpUser) -> dict:
+    addr = cdp_user.smart_account.lower()
     user = (await db.execute(select(User).where(User.address == addr))).scalar_one_or_none()
     if user is None:
-        user = User(address=addr, is_operator=is_operator)
+        user = User(address=addr, is_operator=False, cdp_user_id=cdp_user.user_id)
         db.add(user)
         await db.commit()
         await db.refresh(user)
     else:
-        # Update operator flag if it changed
-        if user.is_operator != is_operator:
-            user.is_operator = is_operator
-            await db.commit()
-    
-    return {"token": _issue(addr, user.is_operator), "address": addr}
+        user.is_operator = False
+        user.cdp_user_id = cdp_user.user_id
+        await db.commit()
+    return {"token": _issue(addr, False), "address": addr}
+
+
+@router.post("/cdp")
+async def cdp_session(body: CdpAccessToken, db: AsyncSession = Depends(get_db)):
+    cdp_user = await validate_access_token(body.accessToken)
+    return await _upsert_cdp_session(db, cdp_user)
+
+
+@router.post("/cdp/email")
+async def cdp_email(body: CdpEmailStart):
+    return await sign_in_with_email(body.email)
+
+
+@router.post("/cdp/verify")
+async def cdp_verify(body: CdpEmailVerify, db: AsyncSession = Depends(get_db)):
+    cdp_user = await verify_email_otp(body.flowId, body.otp)
+    return await _upsert_cdp_session(db, cdp_user)
