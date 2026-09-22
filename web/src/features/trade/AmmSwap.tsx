@@ -70,7 +70,6 @@ export function AmmSwap({
   const { currentUser } = useCurrentUser();
   const { sendUserOperation } = useSendUserOperation();
   const address = smartAccountOf(currentUser);
-  const smartAccount = currentUser?.evmSmartAccounts?.[0];
 
   const ammAddress = process.env.NEXT_PUBLIC_AMM_ADDRESS as `0x${string}` | undefined;
   const usdcAddress = process.env.NEXT_PUBLIC_USDC_ADDRESS as `0x${string}` | undefined;
@@ -189,7 +188,7 @@ export function AmmSwap({
 
       setStatus("buying...");
       await sendUserOperation({
-        evmSmartAccount: smartAccount,
+        evmSmartAccount: address!,
         network: "base-sepolia",
         calls: [
           {
@@ -241,7 +240,7 @@ export function AmmSwap({
 
       setStatus("selling...");
       await sendUserOperation({
-        evmSmartAccount: smartAccount,
+        evmSmartAccount: address!,
         network: "base-sepolia",
         calls: [
           {
