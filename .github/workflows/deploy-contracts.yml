@@ -1,0 +1,255 @@
+name: Contracts on Base Sepolia
+
+# Manual dispatch only. verify is read-only; v2 and core simulate on a fork unless broadcast is checked.
+# Order for the AMM + Factory redeploy: verify -> v2 (simulate) -> v2 (broadcast) -> gh variable set -> deploy-gcp.
+# A broadcast signs with the operator key that the oracle job and the API also use: it pauses the
+# overunder-oracle-tick scheduler, waits for running executions, and refuses while operator txs are pending.
+# The scheduler stays paused after a successful broadcast (resume it after deploy-gcp); it is resumed on failure.
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "verify = read-only wiring check of the repo-var addresses; v2 = MarketAMM v2 + MarketFactory v2 (reuses CTF, oracle, vault, USDC, Exchange); core = full new stack"
+        type: choice
+        options: [verify, v2, core]
+        default: verify
+      broadcast:
+        description: "Send real transactions (unchecked = simulate on a fork, nothing sent)"
+        type: boolean
+        default: false
+      permissionless:
+        description: "v2: open user listing to everyone (unchecked = allowlisted listers only)"
+        type: boolean
+        default: true
+      close_gate:
+        description: "v2: MarketAMM rejects buys/sells at or after closeTime"
+        type: boolean
+        default: true
+      min_seed_usdc:
+        description: "v2: minimum seed for user-listed markets, in 6-decimal USDC units (10000000 = 10 USDC)"
+        type: string
+        default: "10000000"
+      listing_cooldown:
+        description: "v2: seconds between user listings per creator (0 = no cooldown)"
+        type: string
+        default: "3600"
+      api_url:
+        description: "v2: API that lists the legacy markets to import (blank = the overunder-api Cloud Run URL)"
+        type: string
+        default: ""
+      extra_cids:
+        description: "v2: extra legacy condition ids to import, comma separated (paused markets are hidden from the API list)"
+        type: string
+        default: ""
+      rpc_source:
+        description: "RPC: secret = Secret Manager OU_ANVIL_RPC_URL; public = https://sepolia.base.org"
+        type: choice
+        options: [secret, public]
+        default: secret
+
+concurrency:
+  group: deploy-contracts
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  GCP_PROJECT_ID: overunder-509107
+  GCP_REGION: us-central1
+  API_SERVICE_NAME: overunder-api
+  ORACLE_JOB_NAME: overunder-oracle
+  SCHEDULER_JOB_NAME: overunder-oracle-tick
+  PUBLIC_RPC_URL: https://sepolia.base.org
+
+jobs:
+  contracts:
+    name: ${{ inputs.target }} (${{ inputs.broadcast && 'broadcast' || 'simulate' }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: projects/${{ secrets.GCP_PROJECT_NUMBER }}/locations/global/workloadIdentityPools/github-pool/providers/github
+          service_account: github-deploy@overunder-509107.iam.gserviceaccount.com
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v3
+
+      # Outputs are masked by the action; they only ever reach the deploy step's env.
+      - name: Read operator key and RPC URL (masked, never printed)
+        id: sm
+        uses: google-github-actions/get-secretmanager-secrets@v3
+        with:
+          secrets: |-
+            operator_key:overunder-509107/OU_OPERATOR_PRIVATE_KEY
+            rpc_url:overunder-509107/OU_ANVIL_RPC_URL
+
+      - name: Read agent keys (verify and core only; masked)
+        id: agents
+        if: inputs.target != 'v2'
+        uses: google-github-actions/get-secretmanager-secrets@v3
+        with:
+          secrets: |-
+            alpha:overunder-509107/OU_AGENT_ALPHA_KEY
+            beta:overunder-509107/OU_AGENT_BETA_KEY
+            gamma:overunder-509107/OU_AGENT_GAMMA_KEY
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: contracts/requirements.txt
+
+      - name: Install contract toolchain
+        run: python -m pip install -r contracts/requirements.txt
+
+      - name: Contract tests (gate before broadcast)
+        if: inputs.broadcast && inputs.target != 'verify'
+        working-directory: contracts
+        timeout-minutes: 30
+        run: python -m pytest tests -q
+
+      - name: Resolve API URL for legacy markets
+        id: api
+        if: inputs.target == 'v2'
+        shell: bash
+        env:
+          API_URL_INPUT: ${{ inputs.api_url }}
+        run: |
+          set -euo pipefail
+          url="${API_URL_INPUT:-}"
+          if [ -z "$url" ]; then
+            url=$(gcloud run services describe "$API_SERVICE_NAME" --region="$GCP_REGION" --project="$GCP_PROJECT_ID" --format='value(status.url)' 2>/dev/null || true)
+          fi
+          case "$url" in
+            http://*|https://*) ;;
+            *)
+              echo "ERROR: could not resolve the API URL. Fix: pass api_url, or deploy $API_SERVICE_NAME first (deploy-gcp.yml)."
+              exit 1
+              ;;
+          esac
+          echo "url=${url%/}" >> "$GITHUB_OUTPUT"
+          echo "Legacy markets from: ${url%/}/api/v1/markets"
+
+      # The broadcast signs with OU_OPERATOR_PRIVATE_KEY, like the oracle job (every 15 min) and the API.
+      # boa takes nonces from 'latest' and predicts CREATE addresses locally, so a concurrent operator tx
+      # can replace a pending tx or leave a contract mined at an unexpected address.
+      - name: Pause the oracle scheduler and wait for running executions
+        id: pause
+        if: inputs.broadcast && inputs.target != 'verify'
+        shell: bash
+        timeout-minutes: 25
+        run: |
+          set -uo pipefail
+          project="$GCP_PROJECT_ID"
+          state=$(gcloud scheduler jobs describe "$SCHEDULER_JOB_NAME" --location="$GCP_REGION" --project="$project" --format='value(state)' 2>/dev/null) || state=""
+          case "$state" in
+            ENABLED)
+              if ! gcloud scheduler jobs pause "$SCHEDULER_JOB_NAME" --location="$GCP_REGION" --project="$project" --quiet >/dev/null; then
+                echo "ERROR: could not pause $SCHEDULER_JOB_NAME. Fix: grant github-deploy roles/cloudscheduler.admin, or pause it by hand and re-run."
+                exit 1
+              fi
+              echo "paused=true" >> "$GITHUB_OUTPUT"
+              echo "Paused $SCHEDULER_JOB_NAME."
+              ;;
+            "") echo "::warning::Could not read $SCHEDULER_JOB_NAME (missing or no access); not pausing it." ;;
+            *) echo "$SCHEDULER_JOB_NAME is $state; leaving it as is." ;;
+          esac
+          deadline=$(( $(date +%s) + 20 * 60 ))
+          while :; do
+            if ! running=$(gcloud run jobs executions list --job="$ORACLE_JOB_NAME" --region="$GCP_REGION" --project="$project" \
+                --limit=20 --filter='NOT status.completionTime:*' --format='value(metadata.name)' 2>/dev/null); then
+              echo "::warning::Could not list $ORACLE_JOB_NAME executions; relying on the pending-transaction preflight."
+              break
+            fi
+            running=$(printf '%s' "$running" | tr '\n' ' ')
+            if [ -z "${running// /}" ]; then echo "No running $ORACLE_JOB_NAME execution."; break; fi
+            if [ "$(date +%s)" -ge "$deadline" ]; then
+              echo "ERROR: $ORACLE_JOB_NAME still running after 20 min: $running. Fix: wait, or cancel it (gcloud run jobs executions cancel <name> --region=$GCP_REGION --project=$project), then re-run."
+              exit 1
+            fi
+            echo "Waiting for running execution(s): $running"
+            sleep 20
+          done
+
+      - name: Run ${{ inputs.target }}
+        working-directory: contracts
+        shell: bash
+        env:
+          OPERATOR_PRIVATE_KEY: ${{ steps.sm.outputs.operator_key }}
+          AGENT_ALPHA_KEY: ${{ steps.agents.outputs.alpha }}
+          AGENT_BETA_KEY: ${{ steps.agents.outputs.beta }}
+          AGENT_GAMMA_KEY: ${{ steps.agents.outputs.gamma }}
+          DEPLOY_RPC_URL: ${{ inputs.rpc_source == 'public' && env.PUBLIC_RPC_URL || steps.sm.outputs.rpc_url }}
+          TREASURY_ADDRESS: ${{ vars.TREASURY_ADDRESS }}
+          USDC_ADDRESS: ${{ vars.USDC_ADDRESS }}
+          CTF_ADDRESS: ${{ vars.CTF_ADDRESS }}
+          FACTORY_ADDRESS: ${{ vars.FACTORY_ADDRESS }}
+          EXCHANGE_ADDRESS: ${{ vars.EXCHANGE_ADDRESS }}
+          AMM_ADDRESS: ${{ vars.AMM_ADDRESS }}
+          ORACLE_ADDRESS: ${{ vars.ORACLE_ADDRESS }}
+          FEE_VAULT_ADDRESS: ${{ vars.FEE_VAULT_ADDRESS }}
+          OU_TOKEN_ADDRESS: ${{ vars.OU_TOKEN_ADDRESS }}
+          PAYMASTER_ADDRESS: ${{ vars.PAYMASTER_ADDRESS }}
+          ENTRYPOINT_ADDRESS: ${{ vars.ENTRYPOINT_ADDRESS }}
+          ACCOUNT_FACTORY_ADDRESS: ${{ vars.ACCOUNT_FACTORY_ADDRESS }}
+          TARGET: ${{ inputs.target }}
+          BROADCAST: ${{ inputs.broadcast }}
+          PERMISSIONLESS: ${{ inputs.permissionless }}
+          CLOSE_GATE: ${{ inputs.close_gate }}
+          MIN_SEED_USDC: ${{ inputs.min_seed_usdc }}
+          LISTING_COOLDOWN: ${{ inputs.listing_cooldown }}
+          EXTRA_CIDS: ${{ inputs.extra_cids }}
+          API_URL: ${{ steps.api.outputs.url }}
+          OUT_DIR: ${{ runner.temp }}/deployments
+        run: |
+          # Never enable xtrace here: the env holds private keys.
+          set -euo pipefail
+          args=(--target "$TARGET" --out "$OUT_DIR" --summary "$GITHUB_STEP_SUMMARY")
+          if [ "$BROADCAST" = true ]; then args+=(--broadcast); fi
+          if [ "$TARGET" = v2 ]; then
+            args+=(--api-url "$API_URL" --legacy-cids "$EXTRA_CIDS" --min-seed-usdc "$MIN_SEED_USDC" --listing-cooldown "$LISTING_COOLDOWN")
+            if [ "$PERMISSIONLESS" = true ]; then args+=(--permissionless); else args+=(--no-permissionless); fi
+            if [ "$CLOSE_GATE" = true ]; then args+=(--close-gate); else args+=(--no-close-gate); fi
+          fi
+          python script/deploy_ci.py "${args[@]}"
+
+      - name: Resume the oracle scheduler (run failed or was cancelled)
+        if: (failure() || cancelled()) && steps.pause.outputs.paused == 'true'
+        shell: bash
+        run: |
+          set -uo pipefail
+          if gcloud scheduler jobs resume "$SCHEDULER_JOB_NAME" --location="$GCP_REGION" --project="$GCP_PROJECT_ID" --quiet >/dev/null; then
+            echo "Resumed $SCHEDULER_JOB_NAME."
+          else
+            echo "::error::Could not resume $SCHEDULER_JOB_NAME. Fix: gcloud scheduler jobs resume $SCHEDULER_JOB_NAME --location=$GCP_REGION --project=$GCP_PROJECT_ID"
+            exit 1
+          fi
+
+      - name: Scheduler left paused (resume after deploy-gcp)
+        if: success() && steps.pause.outputs.paused == 'true'
+        shell: bash
+        run: |
+          {
+            echo ""
+            echo "**$SCHEDULER_JOB_NAME is paused.** After the repo variables are updated and deploy-gcp.yml has finished:"
+            echo '```'
+            echo "gcloud scheduler jobs resume $SCHEDULER_JOB_NAME --location=$GCP_REGION --project=$GCP_PROJECT_ID"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload deployments JSON (public addresses only)
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: contracts-84532-${{ inputs.target }}-${{ inputs.broadcast && 'broadcast' || 'simulate' }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/deployments/*.json
+          if-no-files-found: ignore
+          retention-days: 90

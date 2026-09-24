@@ -1,5 +1,6 @@
 # Multi-stage Dockerfile for Next.js frontend
-FROM node:20-slim as builder
+# Node 22 LTS (Node 20 is end-of-life); CI builds with the same major.
+FROM node:22-slim AS builder
 
 WORKDIR /app
 
@@ -10,6 +11,8 @@ ARG NEXT_PUBLIC_USDC_ADDRESS
 ARG NEXT_PUBLIC_CTF_ADDRESS
 ARG NEXT_PUBLIC_RPC_URL
 ARG NEXT_PUBLIC_CDP_PROJECT_ID
+# Disable trading UI at closeTime (MarketAMM v2 also rejects trades on chain)
+ARG NEXT_PUBLIC_TRADING_HALT_AT_CLOSE=true
 
 ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
 ENV NEXT_PUBLIC_AMM_ADDRESS=$NEXT_PUBLIC_AMM_ADDRESS
@@ -17,6 +20,8 @@ ENV NEXT_PUBLIC_USDC_ADDRESS=$NEXT_PUBLIC_USDC_ADDRESS
 ENV NEXT_PUBLIC_CTF_ADDRESS=$NEXT_PUBLIC_CTF_ADDRESS
 ENV NEXT_PUBLIC_RPC_URL=$NEXT_PUBLIC_RPC_URL
 ENV NEXT_PUBLIC_CDP_PROJECT_ID=$NEXT_PUBLIC_CDP_PROJECT_ID
+ENV NEXT_PUBLIC_TRADING_HALT_AT_CLOSE=$NEXT_PUBLIC_TRADING_HALT_AT_CLOSE
+ENV NEXT_TELEMETRY_DISABLED=1
 
 # Copy package files
 COPY package.json package-lock.json* ./
@@ -31,7 +36,7 @@ COPY . .
 RUN npm run build
 
 # Production stage
-FROM node:20-slim
+FROM node:22-slim
 
 WORKDIR /app
 
@@ -44,6 +49,7 @@ COPY --from=builder /app/next.config.ts ./next.config.ts
 # Cloud Run sets PORT env; default to 8080
 ENV PORT=8080
 ENV NODE_ENV=production
+ENV NEXT_TELEMETRY_DISABLED=1
 
 # Next.js will listen on PORT
 CMD ["npm", "start"]

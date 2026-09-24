@@ -4,6 +4,15 @@ name: Deploy to GCP Cloud Run
 # To run: GitHub Actions tab → Deploy to GCP Cloud Run → Run workflow
 on:
   workflow_dispatch:
+    inputs:
+      ready_timeout_minutes:
+        description: "Minutes to keep waiting after Cloud Run reports 'Resource readiness deadline exceeded'"
+        required: false
+        default: "45"
+
+concurrency:
+  group: deploy-gcp
+  cancel-in-progress: false
 
 env:
   GCP_PROJECT_ID: overunder-509107
@@ -12,127 +21,428 @@ env:
   API_SERVICE_NAME: overunder-api
   WEB_SERVICE_NAME: overunder-web
   ORACLE_JOB_NAME: overunder-oracle
+  SCHEDULER_JOB_NAME: overunder-oracle-tick
+  READY_TIMEOUT_MINUTES: ${{ inputs.ready_timeout_minutes || '45' }}
+  # ENV=SECRET maps (no :latest). One source for the preflight and both --set-secrets.
+  API_SECRETS_REQUIRED: JWT_SECRET=OU_JWT_SECRET,DATABASE_URL=OU_DATABASE_URL,ANVIL_RPC_URL=OU_ANVIL_RPC_URL,CDP_API_KEY_ID=OU_CDP_API_KEY_ID,CDP_API_KEY_SECRET=OU_CDP_API_KEY_SECRET,OPERATOR_PRIVATE_KEY=OU_OPERATOR_PRIVATE_KEY
+  API_SECRETS_OPTIONAL: MOONPAY_SECRET=OU_MOONPAY_SECRET,RELAYER_PRIVATE_KEY=OU_RELAYER_PRIVATE_KEY
+  ORACLE_SECRETS_REQUIRED: CURSOR_API_KEY=OU_CURSOR_API_KEY,CURSOR_SEARCH_MCP_URL=OU_CURSOR_SEARCH_MCP_URL,JWT_SECRET=OU_JWT_SECRET,OPERATOR_PRIVATE_KEY=OU_OPERATOR_PRIVATE_KEY,AGENT_ALPHA_KEY=OU_AGENT_ALPHA_KEY,AGENT_BETA_KEY=OU_AGENT_BETA_KEY,AGENT_GAMMA_KEY=OU_AGENT_GAMMA_KEY,ANVIL_RPC_URL=OU_ANVIL_RPC_URL
+  # OU_QUESTION_ID_KEY: HMAC key for listing question ids (oracles/listing/questions.py); unset = public sha256 ids.
+  ORACLE_SECRETS_OPTIONAL: OU_QUESTION_ID_KEY=OU_QUESTION_ID_KEY
 
 jobs:
   deploy:
     name: Build and Deploy to Cloud Run
     runs-on: ubuntu-latest
-    
+    timeout-minutes: 150
+
     permissions:
       contents: read
       id-token: write
-    
+
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
-      
+        uses: actions/checkout@v5
+
       - name: Authenticate to Google Cloud
-        uses: google-github-actions/auth@v2
+        uses: google-github-actions/auth@v3
         with:
           workload_identity_provider: projects/${{ secrets.GCP_PROJECT_NUMBER }}/locations/global/workloadIdentityPools/github-pool/providers/github
           service_account: github-deploy@overunder-509107.iam.gserviceaccount.com
-      
+
       - name: Set up Cloud SDK
-        uses: google-github-actions/setup-gcloud@v2
-      
+        uses: google-github-actions/setup-gcloud@v3
+
       - name: Configure Docker for Artifact Registry
         run: gcloud auth configure-docker us-central1-docker.pkg.dev --quiet
-      
-      - name: Preflight check required secrets
+
+      - name: Preflight Secret Manager secrets
+        id: secrets
+        shell: bash
+        timeout-minutes: 15
+        env:
+          # With the relayer on, its key is required: without it every order POST returns 503.
+          RELAYER_ENABLED: ${{ vars.RELAYER_ENABLED || 'false' }}
+          RELAYER_WORKER_ENABLED: ${{ vars.RELAYER_WORKER_ENABLED || 'false' }}
         run: |
-          echo "Checking Secret Manager secrets..."
-          
-          # Check OU_JWT_SECRET has at least one version
-          if ! gcloud secrets versions list OU_JWT_SECRET --project=${{ env.GCP_PROJECT_ID }} --limit=1 --format="value(name)" 2>/dev/null | grep -q .; then
-            echo "ERROR: Secret OU_JWT_SECRET has no versions. Please add a version before deploying."
-            exit 1
-          fi
-          
-          # Check OU_ANVIL_RPC_URL has at least one version
-          if ! gcloud secrets versions list OU_ANVIL_RPC_URL --project=${{ env.GCP_PROJECT_ID }} --limit=1 --format="value(name)" 2>/dev/null | grep -q .; then
-            echo "ERROR: Secret OU_ANVIL_RPC_URL has no versions. Please add a version before deploying."
-            exit 1
-          fi
-          
-          # Check OU_DATABASE_URL has at least one version
-          if ! gcloud secrets versions list OU_DATABASE_URL --project=${{ env.GCP_PROJECT_ID }} --limit=1 --format="value(name)" 2>/dev/null | grep -q .; then
-            echo "ERROR: Secret OU_DATABASE_URL has no versions. Please add a version before deploying."
-            exit 1
-          fi
-          
-          # Check OU_DATABASE_URL is NOT sqlite/aiosqlite (Cloud Run needs persistent DB)
-          # Never echo secret contents to avoid leaking credentials into logs
-          DB_URL=$(gcloud secrets versions access latest --secret=OU_DATABASE_URL --project=${{ env.GCP_PROJECT_ID }} 2>/dev/null || echo "")
-          if [ -z "$DB_URL" ]; then
-            echo "ERROR: Secret OU_DATABASE_URL rejected: empty."
-            echo "Cloud Run requires Cloud SQL or external PostgreSQL."
-            echo "Expected format: postgresql://user:pass@host/dbname"
-            exit 1
-          fi
-          if echo "$DB_URL" | grep -qiE "sqlite|aiosqlite"; then
-            echo "ERROR: Secret OU_DATABASE_URL rejected: contains sqlite/aiosqlite."
-            echo "Cloud Run requires persistent database (Cloud SQL or external PostgreSQL)."
-            echo "Expected format: postgresql://user:pass@host/dbname"
-            exit 1
-          fi
-          if ! echo "$DB_URL" | grep -qiE "^postgres"; then
-            echo "WARNING: Secret OU_DATABASE_URL does not start with 'postgresql://' or 'postgres://'."
-            echo "Proceeding anyway, but verify this is a valid database URL."
-          fi
-          
-          echo "Preflight checks passed."
-      
-      - name: Preflight CDP secrets
-        run: |
-          echo "Checking CDP Secret Manager secrets..."
-          for SECRET in OU_CDP_API_KEY_ID OU_CDP_API_KEY_SECRET; do
-            if ! gcloud secrets versions list "$SECRET" --project=${{ env.GCP_PROJECT_ID }} --limit=1 --format="value(name)" 2>/dev/null | grep -q .; then
-              echo "ERROR: Secret $SECRET has no versions. Create it before deploying."
-              echo "gcloud secrets create $SECRET --project=${{ env.GCP_PROJECT_ID }}"
-              echo "Then add a version. Deploy fails closed and does not invent keys."
-              exit 1
+          # Never enable xtrace here: later rules pipe secret payloads.
+          set +e -uo pipefail
+          project="$GCP_PROJECT_ID"
+          key_secrets=" OU_OPERATOR_PRIVATE_KEY OU_AGENT_ALPHA_KEY OU_AGENT_BETA_KEY OU_AGENT_GAMMA_KEY OU_RELAYER_PRIVATE_KEY "
+          url_secrets=" OU_ANVIL_RPC_URL OU_CURSOR_SEARCH_MCP_URL "
+          multiline_ok=" OU_CDP_API_KEY_SECRET "
+          declare -A state=()
+
+          # Payloads only ever flow into pipes (wc, grep -q). Never into a variable, file or echo.
+          payload() { gcloud secrets versions access latest --secret="$1" --project="$project" 2>/dev/null; }
+          payload_bytes() { payload "$1" | wc -c; }
+          payload_lines() { payload "$1" | wc -l; }
+          payload_grep() { local s=$1; shift; payload "$s" | LC_ALL=C grep -q "$@"; return "${PIPESTATUS[1]}"; }
+          value_hint() { printf "printf %%s '<value>' | gcloud secrets versions add %s --data-file=- --project=%s" "$1" "$project"; }
+
+          check_map() {
+            local pair
+            IFS=',' read -ra pairs <<<"$1"
+            for pair in "${pairs[@]}"; do
+              if ! printf '%s' "$pair" | grep -Eqx '[A-Z][A-Z0-9_]*=OU_[A-Z0-9_]+'; then
+                echo "ERROR: workflow env map has a malformed entry '$pair'. Fix: use ENV=OU_SECRET pairs."
+                exit 1
+              fi
+            done
+          }
+          secret_names() {
+            local map pair
+            for map in "$@"; do
+              IFS=',' read -ra pairs <<<"$map"
+              for pair in "${pairs[@]}"; do printf '%s\n' "${pair#*=}"; done
+            done | awk '!seen[$0]++'
+          }
+
+          check_access() {
+            local s=$1 err
+            err=$(gcloud secrets versions access latest --secret="$s" --project="$project" 2>&1 >/dev/null) && return 0
+            ACCESS_ERR=$err
+            if grep -q 'PERMISSION_DENIED' <<<"$err"; then
+              RULE="access denied"
+              HINT="gcloud secrets add-iam-policy-binding $s --member=serviceAccount:github-deploy@$project.iam.gserviceaccount.com --role=roles/secretmanager.secretAccessor --project=$project"
+            elif grep -qiE 'DISABLED|DESTROYED' <<<"$err"; then
+              RULE="latest version is disabled or destroyed"
+              HINT="$(value_hint "$s")"
+            elif grep -qiE 'NOT_FOUND|not found' <<<"$err"; then
+              RULE="secret missing or has no versions"
+              HINT="gcloud secrets create $s --project=$project; then $(value_hint "$s")"
+            else
+              RULE="access failed"
+              HINT="$(value_hint "$s")"
+            fi
+            return 1
+          }
+
+          # Rule order per secret; stop at the first failing rule.
+          check_secret() {
+            local s=$1
+            RULE="" HINT="" ACCESS_ERR=""
+            check_access "$s" || return 1
+            HINT="$(value_hint "$s")"
+            if [ "$(payload_bytes "$s")" -eq 0 ]; then RULE="empty payload"; return 1; fi
+            case "$multiline_ok" in
+              *" $s "*) ;;
+              *)
+                if [ "$(payload_lines "$s")" -ne 0 ]; then RULE="contains a newline"; return 1; fi
+                if payload_grep "$s" -E $'^[[:space:]]|[[:space:]]$|\r'; then RULE="leading or trailing whitespace or CR"; return 1; fi
+                ;;
+            esac
+            case "$key_secrets" in
+              *" $s "*)
+                payload_grep "$s" -Ex '(0x)?[0-9a-fA-F]{64}' || { RULE="not a 32-byte hex private key"; return 1; }
+                ;;
+            esac
+            if [ "$s" = OU_DATABASE_URL ]; then
+              payload_grep "$s" -E '^postgresql\+asyncpg://' || { RULE="must start with postgresql+asyncpg://"; return 1; }
+              payload_grep "$s" -i 'sqlite' && { RULE="must not be sqlite"; return 1; }
+            fi
+            case "$url_secrets" in
+              *" $s "*)
+                payload_grep "$s" -E '^https?://' || { RULE="must start with http:// or https://"; return 1; }
+                ;;
+            esac
+            return 0
+          }
+
+          join_map() {
+            local out="" pair
+            IFS=',' read -ra pairs <<<"$1"
+            for pair in "${pairs[@]}"; do out+="${out:+,}${pair}:latest"; done
+            if [ -n "${2:-}" ]; then
+              IFS=',' read -ra pairs <<<"$2"
+              for pair in "${pairs[@]}"; do
+                if [ "${state[${pair#*=}]:-}" = ok ]; then out+="${out:+,}${pair}:latest"; fi
+              done
+            fi
+            printf '%s' "$out"
+          }
+
+          check_map "$API_SECRETS_REQUIRED"; check_map "$API_SECRETS_OPTIONAL"
+          check_map "$ORACLE_SECRETS_REQUIRED"; check_map "$ORACLE_SECRETS_OPTIONAL"
+
+          # RELAYER_ENABLED (pydantic bool: true/1/yes/on) moves the relayer key from optional to required.
+          relayer_pair="RELAYER_PRIVATE_KEY=OU_RELAYER_PRIVATE_KEY"
+          api_req="$API_SECRETS_REQUIRED"; api_opt="$API_SECRETS_OPTIONAL"
+          relayer_on=${RELAYER_ENABLED:-false}; worker_on=${RELAYER_WORKER_ENABLED:-false}
+          case "${relayer_on,,}" in
+            true|1|yes|on)
+              api_req+=",$relayer_pair"
+              api_opt=$(tr ',' '\n' <<<"$api_opt" | grep -vx "$relayer_pair" | paste -sd, -)
+              echo "RELAYER_ENABLED=$relayer_on: OU_RELAYER_PRIVATE_KEY is required."
+              ;;
+            *)
+              case "${worker_on,,}" in
+                true|1|yes|on) echo "::warning::RELAYER_WORKER_ENABLED=$worker_on has no effect while RELAYER_ENABLED=$relayer_on (the worker needs both)." ;;
+              esac
+              ;;
+          esac
+
+          failed=0
+          for s in $(secret_names "$api_req" "$ORACLE_SECRETS_REQUIRED"); do
+            if check_secret "$s"; then
+              state[$s]=ok; echo "OK: $s"
+            else
+              state[$s]=bad; failed=$((failed + 1))
+              echo "ERROR: $s: $RULE. Fix: $HINT"
+              if [ -n "$ACCESS_ERR" ]; then printf '%s\n' "$ACCESS_ERR" | head -n 3 | sed -e 's/^ERROR: //' -e 's/^/  gcloud: /'; fi
             fi
           done
-          echo "CDP preflight checks passed."
-      
-      - name: Preflight Cursor oracle secrets
-        run: |
-          echo "Checking Cursor oracle Secret Manager secrets..."
-          for SECRET in OU_CURSOR_API_KEY OU_CURSOR_SEARCH_MCP_URL OU_AGENT_ALPHA_KEY OU_AGENT_BETA_KEY OU_AGENT_GAMMA_KEY; do
-            if ! gcloud secrets versions list "$SECRET" --project=${{ env.GCP_PROJECT_ID }} --limit=1 --format="value(name)" 2>/dev/null | grep -q .; then
-              echo "ERROR: Secret $SECRET has no versions. Create it before deploying the oracle job."
-              echo "gcloud secrets create $SECRET --project=${{ env.GCP_PROJECT_ID }}"
-              echo "Then add a version. Deploy fails closed and does not invent keys."
-              exit 1
+          for s in $(secret_names "$api_opt" "$ORACLE_SECRETS_OPTIONAL"); do
+            [ -z "${state[$s]:-}" ] || continue  # already checked as required
+            if check_secret "$s"; then
+              state[$s]=ok; echo "OK (optional): $s"
+            else
+              state[$s]=skip; echo "Skipping optional $s: $RULE"
+              if [ "$RULE" != "secret missing or has no versions" ]; then
+                echo "::warning::Optional secret $s exists but failed preflight ($RULE), so it is not mapped this deploy. Fix: $HINT"
+              fi
             fi
           done
-          echo "Cursor oracle preflight checks passed."
-      
+
+          api_secrets="$(join_map "$api_req" "$api_opt")"
+          oracle_secrets="$(join_map "$ORACLE_SECRETS_REQUIRED" "$ORACLE_SECRETS_OPTIONAL")"
+          {
+            echo "api_secrets=$api_secrets"
+            echo "oracle_secrets=$oracle_secrets"
+          } >> "$GITHUB_OUTPUT"
+          echo "API maps: $api_secrets"
+          echo "Oracle job maps: $oracle_secrets"
+          if [ "$failed" -gt 0 ]; then
+            echo "$failed required secret(s) failed preflight. See infra/gcp/README.md (Preflight and deploy errors)."
+            exit 1
+          fi
+          echo "Secret preflight passed."
+
+      # Runs before any build so a bad repo variable fails fast. Tunables are passed to the job only
+      # when their repo variable is set; otherwise the oracles code default applies (infra/gcp/README.md).
+      - name: Resolve oracle job settings
+        id: oracle_env
+        shell: bash
+        env:
+          ORACLE_ADDRESS: ${{ vars.ORACLE_ADDRESS }}
+          # Always passed (defaults below): local cursor-sdk agents restricted to MCP tools, the ADR-0002
+          # attest fallback, and the tick budget the task timeout is derived from (oracles/budget.py: 780).
+          OU_CURSOR_RUNTIME: ${{ vars.OU_CURSOR_RUNTIME }}
+          OU_FALLBACK_POLICY: ${{ vars.OU_FALLBACK_POLICY }}
+          OU_TICK_BUDGET_SECONDS: ${{ vars.OU_TICK_BUDGET_SECONDS }}
+          # Passed only when set; otherwise the oracles code default applies.
+          OU_SEED_USDC: ${{ vars.OU_SEED_USDC }}
+          OU_SCOUT_MAX_MARKETS: ${{ vars.OU_SCOUT_MAX_MARKETS }}
+          OU_SCOUT_STALE_SECONDS: ${{ vars.OU_SCOUT_STALE_SECONDS }}
+          OU_SCOUT_RECENT_SECONDS: ${{ vars.OU_SCOUT_RECENT_SECONDS }}
+          OU_SCOUT_MAX_AGE_SECONDS: ${{ vars.OU_SCOUT_MAX_AGE_SECONDS }}
+          OU_RESOLVE_MAX_MARKETS: ${{ vars.OU_RESOLVE_MAX_MARKETS }}
+          OU_RESEARCH_RETRY_SECONDS: ${{ vars.OU_RESEARCH_RETRY_SECONDS }}
+          OU_GENERAL_RESOLVE_MAX_MARKETS: ${{ vars.OU_GENERAL_RESOLVE_MAX_MARKETS }}
+          OU_GENERAL_RESOLVE_DELAY_SECONDS: ${{ vars.OU_GENERAL_RESOLVE_DELAY_SECONDS }}
+          OU_GENERAL_RESOLVE_GATED_DELAY_SECONDS: ${{ vars.OU_GENERAL_RESOLVE_GATED_DELAY_SECONDS }}
+          OU_GENERAL_RESOLVE_MIN_CONFIDENCE: ${{ vars.OU_GENERAL_RESOLVE_MIN_CONFIDENCE }}
+          OU_LISTING_STALE_GRACE_SECONDS: ${{ vars.OU_LISTING_STALE_GRACE_SECONDS }}
+          OU_TICK_SINGLE_FLIGHT: ${{ vars.OU_TICK_SINGLE_FLIGHT }}
+          OU_CURSOR_MODEL_ALPHA: ${{ vars.OU_CURSOR_MODEL_ALPHA }}
+          OU_CURSOR_MODEL_BETA: ${{ vars.OU_CURSOR_MODEL_BETA }}
+          OU_CURSOR_MODEL_GAMMA: ${{ vars.OU_CURSOR_MODEL_GAMMA }}
+        run: |
+          set -uo pipefail
+          # The scheduler fires */15. The task timeout is the tick budget plus MARGIN_S for in-flight work
+          # (a research run or a receipt wait started before the budget ran out), and it ends at least
+          # MARGIN_S before the next tick, so a killed tick never overlaps the next one.
+          SCHEDULE_S=900 MARGIN_S=60
+          max_budget=$((SCHEDULE_S - 2 * MARGIN_S))
+          fail=0 pairs=()
+          bad() { echo "ERROR: repo variable $1='$2' $3. Fix: gh variable set $1 --body <value> (or delete it to use the default)."; fail=1; }
+          add() { pairs+=("$1=$2"); }
+
+          add CHAIN_ID 84532
+          ORACLE_ADDRESS=${ORACLE_ADDRESS:-}
+          if [ -z "$ORACLE_ADDRESS" ]; then
+            echo "::warning::ORACLE_ADDRESS is not set; every oracle resolve stage will fail until it is."
+            add ORACLE_ADDRESS ""
+          elif [[ $ORACLE_ADDRESS =~ ^0x[0-9a-fA-F]{40}$ ]]; then
+            add ORACLE_ADDRESS "$ORACLE_ADDRESS"
+          else
+            bad ORACLE_ADDRESS "$ORACLE_ADDRESS" "is not a 0x address"
+          fi
+
+          raw=${OU_CURSOR_RUNTIME:-local}; v=${raw,,}
+          case "$v" in local|cloud) add OU_CURSOR_RUNTIME "$v" ;; *) bad OU_CURSOR_RUNTIME "$raw" "must be local or cloud" ;; esac
+          raw=${OU_FALLBACK_POLICY:-attest}; v=${raw,,}
+          case "$v" in attest|arbitrate|manual) add OU_FALLBACK_POLICY "$v" ;; *) bad OU_FALLBACK_POLICY "$raw" "must be attest, arbitrate or manual" ;; esac
+
+          task_timeout=""
+          v=${OU_TICK_BUDGET_SECONDS:-780}
+          if [[ $v =~ ^[0-9]{1,6}$ ]] && [ $((10#$v)) -ge 1 ] && [ $((10#$v)) -le "$max_budget" ]; then
+            v=$((10#$v))
+            add OU_TICK_BUDGET_SECONDS "$v"
+            task_timeout="$((v + MARGIN_S))s"
+          else
+            bad OU_TICK_BUDGET_SECONDS "$v" "must be an integer from 1 to $max_budget (task timeout = budget + ${MARGIN_S}s, ending ${MARGIN_S}s before the next */15 tick)"
+          fi
+
+          # Optional pass-through, validated like the oracles code parses them.
+          for name in OU_SEED_USDC OU_SCOUT_MAX_MARKETS OU_RESOLVE_MAX_MARKETS OU_GENERAL_RESOLVE_MAX_MARKETS; do
+            v=${!name:-}; [ -n "$v" ] || continue
+            if [[ $v =~ ^[0-9]{1,15}$ ]] && [ $((10#$v)) -ge 1 ]; then add "$name" "$((10#$v))"; else bad "$name" "$v" "must be an integer >= 1"; fi
+          done
+          for name in OU_SCOUT_STALE_SECONDS OU_SCOUT_RECENT_SECONDS OU_SCOUT_MAX_AGE_SECONDS OU_RESEARCH_RETRY_SECONDS \
+            OU_GENERAL_RESOLVE_DELAY_SECONDS OU_GENERAL_RESOLVE_GATED_DELAY_SECONDS OU_LISTING_STALE_GRACE_SECONDS; do
+            v=${!name:-}; [ -n "$v" ] || continue
+            if [[ $v =~ ^[0-9]{1,9}$ ]]; then add "$name" "$((10#$v))"; else bad "$name" "$v" "must be a whole number of seconds (>= 0)"; fi
+          done
+          v=${OU_GENERAL_RESOLVE_MIN_CONFIDENCE:-}
+          if [ -n "$v" ]; then
+            if [[ $v =~ ^(0(\.[0-9]+)?|\.[0-9]+|1(\.0+)?)$ ]]; then add OU_GENERAL_RESOLVE_MIN_CONFIDENCE "$v"; else bad OU_GENERAL_RESOLVE_MIN_CONFIDENCE "$v" "must be a number from 0 to 1"; fi
+          fi
+          v=${OU_TICK_SINGLE_FLIGHT:-}
+          if [ -n "$v" ]; then
+            case "$v" in 0|1) add OU_TICK_SINGLE_FLIGHT "$v" ;; *) bad OU_TICK_SINGLE_FLIGHT "$v" "must be 0 (off) or 1 (on)" ;; esac
+          fi
+          for name in OU_CURSOR_MODEL_ALPHA OU_CURSOR_MODEL_BETA OU_CURSOR_MODEL_GAMMA; do
+            v=${!name:-}; [ -n "$v" ] || continue
+            if [[ $v =~ ^[A-Za-z0-9._:/-]{1,100}$ ]]; then add "$name" "$v"; else bad "$name" "$v" "must be a model id (letters, digits, . _ : / -)"; fi
+          done
+
+          [ "$fail" -eq 0 ] || { echo "Oracle job settings are invalid; nothing was built or deployed."; exit 1; }
+          env_vars=$(IFS=,; printf '%s' "${pairs[*]}")
+          {
+            echo "env_vars=$env_vars"
+            echo "task_timeout=$task_timeout"
+          } >> "$GITHUB_OUTPUT"
+          echo "Oracle job env (non-secret): $env_vars"
+          echo "Oracle job task timeout: $task_timeout (schedule */15)"
+
+      - name: Probe Cloud Run Jobs and Cloud Scheduler access
+        shell: bash
+        timeout-minutes: 10
+        run: |
+          set +e -uo pipefail
+          project="$GCP_PROJECT_ID"
+          deployer="github-deploy@$project.iam.gserviceaccount.com"
+          gcloud services enable cloudscheduler.googleapis.com --project="$project" --quiet >/dev/null 2>&1 || true
+          fail=0
+          probe() {
+            local label=$1 hint=$2 err; shift 2
+            if err=$(gcloud "$@" 2>&1 >/dev/null); then echo "OK: $label"; return 0; fi
+            if ! grep -q 'PERMISSION_DENIED' <<<"$err" && grep -qiE 'NOT_FOUND|cannot find|not found' <<<"$err"; then
+              echo "OK: $label (not created yet; this deploy creates it)"; return 0
+            fi
+            echo "ERROR: $label: no access. Fix: $hint"
+            printf '%s\n' "$err" | head -n 3 | sed -e 's/^ERROR: //' -e 's/^/  gcloud: /'
+            fail=1
+          }
+          probe "Cloud Run Jobs ($ORACLE_JOB_NAME)" \
+            "gcloud projects add-iam-policy-binding $project --member=serviceAccount:$deployer --role=roles/run.admin" \
+            run jobs describe "$ORACLE_JOB_NAME" --region="$GCP_REGION" --project="$project"
+          probe "Cloud Scheduler ($SCHEDULER_JOB_NAME)" \
+            "gcloud services enable cloudscheduler.googleapis.com --project=$project && gcloud projects add-iam-policy-binding $project --member=serviceAccount:$deployer --role=roles/cloudscheduler.admin" \
+            scheduler jobs describe "$SCHEDULER_JOB_NAME" --location="$GCP_REGION" --project="$project"
+
+          # Warn only: project-level grants of the write permissions the deploy needs.
+          want='["run.services.update","run.services.setIamPolicy","run.jobs.create","run.jobs.update","run.jobs.run","cloudscheduler.jobs.create","cloudscheduler.jobs.update","iam.serviceAccounts.actAs"]'
+          resp=$(curl -sS --max-time 20 -X POST \
+            -H "Authorization: Bearer $(gcloud auth print-access-token 2>/dev/null)" \
+            -H 'Content-Type: application/json' \
+            -d "{\"permissions\": $want}" \
+            "https://cloudresourcemanager.googleapis.com/v1/projects/$project:testIamPermissions")
+          if [ $? -ne 0 ] || ! jq -e 'type == "object" and (has("error") | not)' >/dev/null 2>&1 <<<"$resp"; then
+            echo "::warning::Could not run testIamPermissions (Cloud Resource Manager API disabled?); skipping write-permission check."
+          else
+            for p in $(jq -r '.[]' <<<"$want"); do
+              jq -e --arg p "$p" '(.permissions // []) | index($p) != null' >/dev/null <<<"$resp" \
+                || echo "::warning::$deployer lacks project-level $p (fine if granted on the resource itself)."
+            done
+          fi
+          [ "$fail" -eq 0 ] || exit 1
+
+      - name: Check runtime service account secret access (warn only)
+        shell: bash
+        timeout-minutes: 10
+        env:
+          GCP_PROJECT_NUMBER: ${{ secrets.GCP_PROJECT_NUMBER }}
+          RUNTIME_SA_OVERRIDE: ${{ vars.RUNTIME_SERVICE_ACCOUNT }}
+          MAPPED: ${{ steps.secrets.outputs.api_secrets }},${{ steps.secrets.outputs.oracle_secrets }}
+        run: |
+          set +e -uo pipefail
+          sa="${RUNTIME_SA_OVERRIDE:-${GCP_PROJECT_NUMBER}-compute@developer.gserviceaccount.com}"
+          member="serviceAccount:$sa"
+          policy_ok=1
+          project_policy=$(gcloud projects get-iam-policy "$GCP_PROJECT_ID" --format=json 2>/dev/null) || { project_policy='{}'; policy_ok=0; }
+          # $2: jq array of role names that grant the permission.
+          has_any() { jq -e --arg m "$member" --argjson r "$2" '[.bindings[]? | select(.role as $x | any($r[]; . == $x)) | .members[]?] | index($m) != null' >/dev/null 2>&1 <<<"$1"; }
+          has_role() { has_any "$1" '["roles/secretmanager.secretAccessor","roles/owner"]'; }
+
+          # The oracle tick's single-flight guard (oracles/tick_lease.py) lists the job's executions as the
+          # runtime SA. Without run.executions.get/list it fails open (summary.lease.error) and ticks can overlap.
+          lease_roles='["roles/owner","roles/editor","roles/viewer","roles/run.viewer","roles/run.developer","roles/run.admin"]'
+          if [ "$policy_ok" -eq 0 ]; then
+            echo "::warning::Cannot read the project IAM policy; runtime SA roles not verified."
+          elif has_any "$project_policy" "$lease_roles"; then
+            echo "Runtime SA can read $ORACLE_JOB_NAME executions (tick single-flight guard)."
+          else
+            job_policy=$(gcloud run jobs get-iam-policy "$ORACLE_JOB_NAME" --region="$GCP_REGION" --project="$GCP_PROJECT_ID" --format=json 2>/dev/null) || job_policy='{}'
+            has_any "$job_policy" "$lease_roles" \
+              || echo "::warning::Runtime SA may lack run.executions.get/list on $ORACLE_JOB_NAME, so the tick single-flight guard fails open. Fix: gcloud run jobs add-iam-policy-binding $ORACLE_JOB_NAME --member=$member --role=roles/run.viewer --region=$GCP_REGION --project=$GCP_PROJECT_ID"
+          fi
+
+          if has_role "$project_policy"; then echo "Runtime SA has project-level secretAccessor."; exit 0; fi
+          for s in $(tr ',' '\n' <<<"$MAPPED" | sed -e 's/^[^=]*=//' -e 's/:latest$//' | awk 'NF && !seen[$0]++'); do
+            policy=$(gcloud secrets get-iam-policy "$s" --project="$GCP_PROJECT_ID" --format=json 2>/dev/null)
+            if [ $? -ne 0 ]; then
+              echo "::warning::Cannot read IAM policy of $s (github-deploy needs secretmanager.secrets.getIamPolicy); runtime SA access not verified."
+              continue
+            fi
+            has_role "$policy" || echo "::warning::Runtime SA may lack access to $s. Fix: gcloud secrets add-iam-policy-binding $s --member=$member --role=roles/secretmanager.secretAccessor --project=$GCP_PROJECT_ID"
+          done
+          exit 0
+
       - name: Build and push API image
         run: |
           docker build -t ${{ env.ARTIFACT_REGISTRY }}/api:${{ github.sha }} -t ${{ env.ARTIFACT_REGISTRY }}/api:latest ./backend
           docker push ${{ env.ARTIFACT_REGISTRY }}/api:${{ github.sha }}
           docker push ${{ env.ARTIFACT_REGISTRY }}/api:latest
-      
+
       - name: Deploy API to Cloud Run
+        shell: bash
         run: |
-          gcloud run deploy ${{ env.API_SERVICE_NAME }} \
+          bash infra/gcp/deploy_wait.sh ${{ env.API_SERVICE_NAME }} \
             --image=${{ env.ARTIFACT_REGISTRY }}/api:${{ github.sha }} \
             --platform=managed \
             --region=${{ env.GCP_REGION }} \
             --allow-unauthenticated \
             --add-cloudsql-instances=overunder-509107:us-central1:overunder-pg \
-            --set-secrets=JWT_SECRET=OU_JWT_SECRET:latest,DATABASE_URL=OU_DATABASE_URL:latest,ANVIL_RPC_URL=OU_ANVIL_RPC_URL:latest,CDP_API_KEY_ID=OU_CDP_API_KEY_ID:latest,CDP_API_KEY_SECRET=OU_CDP_API_KEY_SECRET:latest,MOONPAY_SECRET=OU_MOONPAY_SECRET:latest,OPERATOR_PRIVATE_KEY=OU_OPERATOR_PRIVATE_KEY:latest,RELAYER_PRIVATE_KEY=OU_RELAYER_PRIVATE_KEY:latest \
-            --set-env-vars="CHAIN_ID=84532,CDP_PROJECT_ID=${{ vars.CDP_PROJECT_ID || '' }},USDC_ADDRESS=${{ vars.USDC_ADDRESS || '' }},CTF_ADDRESS=${{ vars.CTF_ADDRESS || '' }},FACTORY_ADDRESS=${{ vars.FACTORY_ADDRESS || '' }},EXCHANGE_ADDRESS=${{ vars.EXCHANGE_ADDRESS || '' }},AMM_ADDRESS=${{ vars.AMM_ADDRESS || '' }},ORACLE_ADDRESS=${{ vars.ORACLE_ADDRESS || '' }},FEE_VAULT_ADDRESS=${{ vars.FEE_VAULT_ADDRESS || '' }},OU_TOKEN_ADDRESS=${{ vars.OU_TOKEN_ADDRESS || '' }},PAYMASTER_ADDRESS=${{ vars.PAYMASTER_ADDRESS || '' }},ENTRYPOINT_ADDRESS=${{ vars.ENTRYPOINT_ADDRESS || '' }},ACCOUNT_FACTORY_ADDRESS=${{ vars.ACCOUNT_FACTORY_ADDRESS || '' }},COINBASE_ONRAMP_APP_ID=${{ vars.COINBASE_ONRAMP_APP_ID || '' }}" \
+            --set-secrets="${{ steps.secrets.outputs.api_secrets }}" \
+            --set-env-vars="CHAIN_ID=84532,CDP_PROJECT_ID=${{ vars.CDP_PROJECT_ID || '' }},USDC_ADDRESS=${{ vars.USDC_ADDRESS || '' }},CTF_ADDRESS=${{ vars.CTF_ADDRESS || '' }},FACTORY_ADDRESS=${{ vars.FACTORY_ADDRESS || '' }},EXCHANGE_ADDRESS=${{ vars.EXCHANGE_ADDRESS || '' }},AMM_ADDRESS=${{ vars.AMM_ADDRESS || '' }},ORACLE_ADDRESS=${{ vars.ORACLE_ADDRESS || '' }},FEE_VAULT_ADDRESS=${{ vars.FEE_VAULT_ADDRESS || '' }},OU_TOKEN_ADDRESS=${{ vars.OU_TOKEN_ADDRESS || '' }},PAYMASTER_ADDRESS=${{ vars.PAYMASTER_ADDRESS || '' }},ENTRYPOINT_ADDRESS=${{ vars.ENTRYPOINT_ADDRESS || '' }},ACCOUNT_FACTORY_ADDRESS=${{ vars.ACCOUNT_FACTORY_ADDRESS || '' }},COINBASE_ONRAMP_APP_ID=${{ vars.COINBASE_ONRAMP_APP_ID || '' }},INDEXER_START_BLOCK=${{ vars.INDEXER_START_BLOCK || '0' }},TRADING_HALT_AT_CLOSE=${{ vars.TRADING_HALT_AT_CLOSE || 'true' }},RELAYER_ENABLED=${{ vars.RELAYER_ENABLED || 'false' }},RELAYER_WORKER_ENABLED=${{ vars.RELAYER_WORKER_ENABLED || 'false' }}" \
             --project=${{ env.GCP_PROJECT_ID }}
-      
+
       - name: Capture API URL
         id: api_url
         run: |
           API_URL=$(gcloud run services describe ${{ env.API_SERVICE_NAME }} --platform=managed --region=${{ env.GCP_REGION }} --format='value(status.url)' --project=${{ env.GCP_PROJECT_ID }})
           echo "url=$API_URL" >> $GITHUB_OUTPUT
           echo "API deployed at: $API_URL"
-      
+
+      - name: Smoke test API
+        shell: bash
+        timeout-minutes: 10
+        env:
+          API_URL: ${{ steps.api_url.outputs.url }}
+        run: |
+          set +e -uo pipefail
+          [ -n "$API_URL" ] || { echo "ERROR: API URL is empty. Fix: see the Diagnose step."; exit 1; }
+          body=$(curl -fsS --retry 6 --retry-delay 10 --retry-all-errors --max-time 20 "$API_URL/health")
+          if [ $? -ne 0 ] || ! grep -q '"ok":true' <<<"$body"; then
+            echo "ERROR: GET $API_URL/health did not return {\"ok\":true}. Fix: see the Diagnose step and infra/gcp/README.md (Smoke checks)."
+            exit 1
+          fi
+          echo "OK: API /health"
+          code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 30 "$API_URL/api/v1/markets")
+          [ "$code" = 200 ] && echo "OK: API /api/v1/markets" || echo "::warning::GET /api/v1/markets returned $code (database or RPC problem?)."
+
       - name: Build and push Web image with real API URL
         run: |
           docker build \
@@ -142,42 +452,66 @@ jobs:
             --build-arg NEXT_PUBLIC_CTF_ADDRESS=${{ vars.CTF_ADDRESS }} \
             --build-arg NEXT_PUBLIC_RPC_URL=https://sepolia.base.org \
             --build-arg NEXT_PUBLIC_CDP_PROJECT_ID=${{ vars.CDP_PROJECT_ID }} \
+            --build-arg NEXT_PUBLIC_TRADING_HALT_AT_CLOSE=${{ vars.TRADING_HALT_AT_CLOSE || 'true' }} \
             -t ${{ env.ARTIFACT_REGISTRY }}/web:${{ github.sha }} \
             -t ${{ env.ARTIFACT_REGISTRY }}/web:latest \
             ./web
           docker push ${{ env.ARTIFACT_REGISTRY }}/web:${{ github.sha }}
           docker push ${{ env.ARTIFACT_REGISTRY }}/web:latest
-      
+
       - name: Deploy Web to Cloud Run
+        shell: bash
         run: |
-          gcloud run deploy ${{ env.WEB_SERVICE_NAME }} \
+          bash infra/gcp/deploy_wait.sh ${{ env.WEB_SERVICE_NAME }} \
             --image=${{ env.ARTIFACT_REGISTRY }}/web:${{ github.sha }} \
             --platform=managed \
             --region=${{ env.GCP_REGION }} \
             --allow-unauthenticated \
             --project=${{ env.GCP_PROJECT_ID }}
-      
+
+      - name: Smoke test Web
+        shell: bash
+        timeout-minutes: 10
+        run: |
+          set +e -uo pipefail
+          WEB_URL=$(gcloud run services describe "$WEB_SERVICE_NAME" --platform=managed --region="$GCP_REGION" --format='value(status.url)' --project="$GCP_PROJECT_ID")
+          [ -n "$WEB_URL" ] || { echo "ERROR: Web URL is empty. Fix: see the Diagnose step."; exit 1; }
+          code=$(curl -sS -o /dev/null -w '%{http_code}' -L --retry 6 --retry-delay 10 --retry-all-errors --max-time 30 "$WEB_URL/")
+          if [ "$code" != 200 ]; then
+            echo "ERROR: GET $WEB_URL/ returned $code. Fix: see the Diagnose step and infra/gcp/README.md (Smoke checks)."
+            exit 1
+          fi
+          echo "OK: web root"
+
       - name: Build and push oracle image
         run: |
           docker build -t ${{ env.ARTIFACT_REGISTRY }}/oracle:${{ github.sha }} -t ${{ env.ARTIFACT_REGISTRY }}/oracle:latest ./oracles
           docker push ${{ env.ARTIFACT_REGISTRY }}/oracle:${{ github.sha }}
           docker push ${{ env.ARTIFACT_REGISTRY }}/oracle:latest
-      
+
       - name: Deploy oracle Cloud Run Job
+        shell: bash
+        env:
+          API_URL: ${{ steps.api_url.outputs.url }}
+          ORACLE_ENV: ${{ steps.oracle_env.outputs.env_vars }}
+          TASK_TIMEOUT: ${{ steps.oracle_env.outputs.task_timeout }}
         run: |
-          API_URL=${{ steps.api_url.outputs.url }}
-          gcloud run jobs deploy ${{ env.ORACLE_JOB_NAME }} \
+          set -euo pipefail
+          [ -n "$API_URL" ] || { echo "ERROR: API URL is empty; the oracle job needs OU_API_URL."; exit 1; }
+          [ -n "$ORACLE_ENV" ] && [ -n "$TASK_TIMEOUT" ] || { echo "ERROR: Resolve oracle job settings produced no output."; exit 1; }
+          # --set-env-vars replaces the job's whole env list: unset tunables fall back to the code defaults.
+          gcloud run jobs deploy "$ORACLE_JOB_NAME" \
             --image=${{ env.ARTIFACT_REGISTRY }}/oracle:${{ github.sha }} \
-            --region=${{ env.GCP_REGION }} \
-            --task-timeout=30m \
+            --region="$GCP_REGION" \
+            --task-timeout="$TASK_TIMEOUT" \
             --max-retries=0 \
-            --set-env-vars="OU_API_URL=${API_URL},OU_CURSOR_RUNTIME=cloud,OU_SCOUT_MAX_MARKETS=5,CHAIN_ID=84532,ORACLE_ADDRESS=${{ vars.ORACLE_ADDRESS || '' }},OU_SEED_USDC=${{ vars.OU_SEED_USDC || '200000000' }},OU_RESOLVE_MAX_MARKETS=3" \
-            --set-secrets="CURSOR_API_KEY=OU_CURSOR_API_KEY:latest,CURSOR_SEARCH_MCP_URL=OU_CURSOR_SEARCH_MCP_URL:latest,JWT_SECRET=OU_JWT_SECRET:latest,OPERATOR_PRIVATE_KEY=OU_OPERATOR_PRIVATE_KEY:latest,AGENT_ALPHA_KEY=OU_AGENT_ALPHA_KEY:latest,AGENT_BETA_KEY=OU_AGENT_BETA_KEY:latest,AGENT_GAMMA_KEY=OU_AGENT_GAMMA_KEY:latest,ANVIL_RPC_URL=OU_ANVIL_RPC_URL:latest" \
-            --project=${{ env.GCP_PROJECT_ID }}
-      
+            --set-env-vars="OU_API_URL=$API_URL,$ORACLE_ENV" \
+            --set-secrets="${{ steps.secrets.outputs.oracle_secrets }}" \
+            --project="$GCP_PROJECT_ID"
+
       - name: Schedule oracle job every 15 minutes
         run: |
-          SCHEDULER_NAME=overunder-oracle-tick
+          SCHEDULER_NAME=${{ env.SCHEDULER_JOB_NAME }}
           URI="https://${{ env.GCP_REGION }}-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/${{ env.GCP_PROJECT_ID }}/jobs/${{ env.ORACLE_JOB_NAME }}:run"
           SA=github-deploy@${{ env.GCP_PROJECT_ID }}.iam.gserviceaccount.com
           gcloud services enable cloudscheduler.googleapis.com --project=${{ env.GCP_PROJECT_ID }} --quiet || true
@@ -202,12 +536,70 @@ jobs:
               --project=${{ env.GCP_PROJECT_ID }} \
               --quiet
           fi
-      
+
       - name: Output Service URLs
+        shell: bash
+        env:
+          ORACLE_ENV: ${{ steps.oracle_env.outputs.env_vars }}
+          TASK_TIMEOUT: ${{ steps.oracle_env.outputs.task_timeout }}
         run: |
           API_URL=$(gcloud run services describe ${{ env.API_SERVICE_NAME }} --platform=managed --region=${{ env.GCP_REGION }} --format='value(status.url)' --project=${{ env.GCP_PROJECT_ID }})
           WEB_URL=$(gcloud run services describe ${{ env.WEB_SERVICE_NAME }} --platform=managed --region=${{ env.GCP_REGION }} --format='value(status.url)' --project=${{ env.GCP_PROJECT_ID }})
           echo "API Service: $API_URL"
           echo "Web Service: $WEB_URL"
           echo "Oracle Job: ${{ env.ORACLE_JOB_NAME }}"
-          echo "Oracle Scheduler: overunder-oracle-tick (*/15 * * * *)"
+          echo "Oracle Scheduler: ${{ env.SCHEDULER_JOB_NAME }} (*/15 * * * *)"
+          {
+            echo "### Deployed"
+            echo "- API: $API_URL"
+            echo "- Web: $WEB_URL"
+            echo "- Oracle job: ${{ env.ORACLE_JOB_NAME }} (scheduler ${{ env.SCHEDULER_JOB_NAME }}, */15)"
+            echo ""
+            echo "| setting | value |"
+            echo "|---|---|"
+            echo "| TRADING_HALT_AT_CLOSE (API + web) | ${{ vars.TRADING_HALT_AT_CLOSE || 'true' }} |"
+            echo "| INDEXER_START_BLOCK | ${{ vars.INDEXER_START_BLOCK || '0' }} |"
+            echo "| RELAYER_ENABLED / RELAYER_WORKER_ENABLED | ${{ vars.RELAYER_ENABLED || 'false' }} / ${{ vars.RELAYER_WORKER_ENABLED || 'false' }} |"
+            echo "| AMM_ADDRESS / FACTORY_ADDRESS | ${{ vars.AMM_ADDRESS || '-' }} / ${{ vars.FACTORY_ADDRESS || '-' }} |"
+            echo "| oracle job task timeout | $TASK_TIMEOUT |"
+            tr ',' '\n' <<<"$ORACLE_ENV" | while IFS='=' read -r key value; do
+              if [ -n "$key" ]; then echo "| $key (oracle job) | ${value:-(empty)} |"; fi
+            done
+            echo "| other OU_* oracle tunables | code defaults (infra/gcp/README.md) |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Diagnose failed deploy (conditions only)
+        if: failure()
+        shell: bash
+        timeout-minutes: 10
+        run: |
+          set +e -uo pipefail
+          loc=(--region="$GCP_REGION" --project="$GCP_PROJECT_ID")
+          out="$RUNNER_TEMP/conditions.txt"; : > "$out"
+          cond='[.status.conditions[]? | "  \(.type)=\(.status) \(.reason // "") \(.message // "")"] | .[]'
+          for svc in "$API_SERVICE_NAME" "$WEB_SERVICE_NAME"; do
+            echo "== service $svc" | tee -a "$out"
+            json=$(gcloud run services describe "$svc" "${loc[@]}" --format=json 2>/dev/null) || { echo "  describe failed (service missing or no access)" | tee -a "$out"; continue; }
+            jq -r '"  latestCreated=\(.status.latestCreatedRevisionName // "-") latestReady=\(.status.latestReadyRevisionName // "-")"' <<<"$json" | tee -a "$out"
+            jq -r "$cond" <<<"$json" | tee -a "$out"
+            rev=$(jq -r '.status.latestCreatedRevisionName // empty' <<<"$json")
+            if [ -n "$rev" ]; then
+              echo "  revision $rev:" | tee -a "$out"
+              gcloud run revisions describe "$rev" "${loc[@]}" --format=json 2>/dev/null | jq -r "$cond" | tee -a "$out"
+            fi
+          done
+          echo "== job $ORACLE_JOB_NAME" | tee -a "$out"
+          gcloud run jobs describe "$ORACLE_JOB_NAME" "${loc[@]}" --format=json 2>/dev/null | jq -r "$cond" | tee -a "$out"
+          gcloud run jobs executions list --job="$ORACLE_JOB_NAME" "${loc[@]}" --limit=3 --format=json 2>/dev/null \
+            | jq -r '.[]? | "  execution \(.metadata.name): " + ([.status.conditions[]? | "\(.type)=\(.status) \(.reason // "")"] | join("; "))' | tee -a "$out"
+          echo "== scheduler $SCHEDULER_JOB_NAME" | tee -a "$out"
+          gcloud scheduler jobs describe "$SCHEDULER_JOB_NAME" --location="$GCP_REGION" --project="$GCP_PROJECT_ID" --format='value(state,status.code,lastAttemptTime)' 2>&1 | head -n 2 | sed 's/^/  /' | tee -a "$out"
+          echo "== hints"
+          hint() { grep -qiE "$1" "$out" && echo "- $2"; }
+          hint 'readiness deadline' "Instance start was delayed past Cloud Run's deadline. Re-run with a larger ready_timeout_minutes; check https://status.cloud.google.com for Cloud Run us-central1; see README 'Readiness deadline exceeded'."
+          hint 'failed to start and listen|container failed to start' "Container crashed on boot: check DATABASE_URL (postgresql+asyncpg://), runtime SA roles/cloudsql.client, then read logs with the README command."
+          hint 'secret' "Secret problem: re-run to see the preflight; grant the runtime SA roles/secretmanager.secretAccessor (README)."
+          hint 'cloudsql|cloud sql' "Cloud SQL: instance overunder-pg must be RUNNABLE; runtime SA needs roles/cloudsql.client; sqladmin.googleapis.com enabled."
+          hint 'image.*not found|manifest unknown' "Image missing: the build/push step failed or Artifact Registry permissions are wrong."
+          hint 'quota' "Quota: check Cloud Run CPU/memory quotas for us-central1 in the console."
+          exit 0

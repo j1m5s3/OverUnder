@@ -1,6 +1,8 @@
 import json
 import os
+import sys
 from pathlib import Path
+from urllib.parse import urlparse
 
 import boa
 from dotenv import load_dotenv
@@ -22,13 +24,113 @@ ANVIL_KEYS = {
     "treasury": "0x8b3a350cf5c34c9194ca85829a2df0ec3153be0318b5e2d3348eac14685e0ba0",
     "generator": "0x92db14e403b83dfe3df233f83dfa3a0d7096f21ca9b0d6d6b8d88b2b4ec1564e",
 }
+LOCAL_CHAIN = 31337
+_PUBLIC_KEYS = {k.lower().removeprefix("0x") for k in ANVIL_KEYS.values()}
 
 
-def _load(name: str, *args):
-    return boa.load(str(SRC / name), *args)
+def local_listing_config(fee_recipient: str) -> tuple:
+    """MarketFactory.setListingConfig args for 31337: 10 USDC min seed, no fee, 1h lead, 90d horizon, no cooldown."""
+    return (10_000_000, 0, fee_recipient, 3600, 7_776_000, 0)
 
 
-def deploy(operator: str, treasury: str, generator: str, agents: list[str], cooldown: int = COOLDOWN, chain: int = 31337):
+def redact(text: str, rpc: str) -> str:
+    """Replace the RPC URL and its host, path and query in `text` (exception messages echo the full URL)."""
+    if not rpc:
+        return text
+    parts = {rpc}
+    parsed = urlparse(rpc)
+    if parsed.netloc:
+        parts.add(parsed.netloc)
+    if parsed.path and len(parsed.path) > 1:
+        parts.add(parsed.path)
+    if parsed.query:
+        parts.add(parsed.query)
+    for part in sorted(parts, key=len, reverse=True):
+        text = text.replace(part, "<rpc>")
+    return text
+
+
+def answers(fn) -> bool:
+    """True when a getter answers; False only for a genuine EVM revert (e.g. a v1 contract without the selector).
+
+    Transport and node errors (HTTP 429/5xx, timeouts, rate-limit RPC codes) propagate, so a v1/v2 probe
+    fails closed instead of reading "selector missing". A return value that does not decode also counts
+    as "does not answer" (not the expected getter)."""
+    from boa.contracts.base_evm_contract import BoaError
+    from boa.rpc import RPCError
+    from boa.util.abi import ABIError
+
+    try:
+        fn()
+        return True
+    except (BoaError, ABIError):  # local EVM revert or undecodable return (in-process, boa.fork, NetworkEnv)
+        return False
+    except RPCError as exc:  # eth_call revert reported by a node
+        if "revert" in str(exc).lower():
+            return False
+        raise
+
+
+def use_memory_fork_cache(env) -> bool:
+    """Local chains only: re-fork a NetworkEnv with an in-memory RPC cache.
+
+    titanoboa caches fork reads on disk keyed by chain id and block number. Every anvil is chain 31337 and
+    starts at block 0, so a second anvil would be served the previous chain's code and storage. Public
+    chains keep the disk cache (their history is immutable). Returns False when `env` is not a fork env."""
+    rpc = getattr(env, "_rpc", None)
+    if rpc is None or not callable(getattr(env, "_reset_fork", None)):
+        return False
+
+    def _reset_fork(block_identifier="latest"):
+        env.fork_rpc(rpc, reset_traces=False, block_identifier=block_identifier, cache_dir=None)
+
+    env._reset_fork = _reset_fork
+    _reset_fork()
+    return True
+
+
+def rpc_label(url: str) -> str:
+    """scheme://host only: provider URLs often carry an API key in the path, query or credentials."""
+    parsed = urlparse(url or "")
+    if not parsed.scheme or not parsed.hostname:
+        return "<rpc>"
+    return f"{parsed.scheme}://{parsed.hostname}"
+
+
+def is_public_key(key: str) -> bool:
+    return (key or "").strip().lower().removeprefix("0x") in _PUBLIC_KEYS
+
+
+def role_key(var: str, default_role: str, chain: int) -> str:
+    """Env key for a role. Only chain 31337 may fall back to (or use) the public anvil keys."""
+    raw = (os.getenv(var) or "").strip()
+    if chain == LOCAL_CHAIN:
+        return raw or ANVIL_KEYS[default_role]
+    if not raw:
+        raise SystemExit(f"ERROR: {var} is required when CHAIN_ID={chain} (anvil defaults are local-only)")
+    if is_public_key(raw):
+        raise SystemExit(f"ERROR: {var} is a public anvil key; refusing to deploy to CHAIN_ID={chain}")
+    return raw
+
+
+def deploy(
+    operator: str,
+    treasury: str,
+    generator: str,
+    agents: list[str],
+    cooldown: int = COOLDOWN,
+    chain: int = 31337,
+    progress: dict | None = None,
+):
+    """Deploy and wire the full stack. `progress` (optional) receives name -> address as each contract
+    lands, so a caller can report what is already on chain if a later transaction fails."""
+    progress = {} if progress is None else progress
+
+    def _load(name: str, *args):
+        contract = boa.load(str(SRC / name), *args)
+        progress[name.removesuffix(".vy")] = str(contract.address)
+        return contract
+
     usdc = _load("MockUSDC.vy")
     ou = _load("RevenueToken.vy", treasury)
     ctf = _load("ConditionalTokens.vy", usdc.address)
@@ -69,6 +171,10 @@ def deploy(operator: str, treasury: str, generator: str, agents: list[str], cool
     with boa.env.prank(operator):
         oracle.setFactory(factory.address)
         amm.setFactory(factory.address)
+        if chain == LOCAL_CHAIN:
+            # Local dev can list user markets right away; public chains keep the constructor's closed allowlist mode.
+            factory.setListingConfig(*local_listing_config(vault.address))
+            factory.setPermissionless(True)
         paymaster.addFactory(account_factory.address)
         paymaster.setWeiPerUsdc(10**15)
         paymaster.deposit(value=deposit_wei)
@@ -106,37 +212,64 @@ def dump_addresses(contracts: dict, chain: int, extra=None) -> Path:
 def main():
     load_dotenv(ROOT.parent / ".env")
     rpc = os.getenv("ANVIL_RPC_URL", "http://127.0.0.1:8545")
-    chain = int(os.getenv("CHAIN_ID", "31337"))
+    chain = int(os.getenv("CHAIN_ID", str(LOCAL_CHAIN)))
     usdc_override = os.getenv("USDC_ADDRESS", "").strip()
 
-    operator = Account.from_key(os.getenv("OPERATOR_PRIVATE_KEY", ANVIL_KEYS["operator"]))
-    treasury = Account.from_key(os.getenv("TREASURY_PRIVATE_KEY", ANVIL_KEYS["treasury"]))
-    generator = Account.from_key(os.getenv("OPERATOR_PRIVATE_KEY", ANVIL_KEYS["generator"]))
-    alpha = Account.from_key(os.getenv("AGENT_ALPHA_KEY", ANVIL_KEYS["alpha"]))
-    beta = Account.from_key(os.getenv("AGENT_BETA_KEY", ANVIL_KEYS["beta"]))
-    gamma = Account.from_key(os.getenv("AGENT_GAMMA_KEY", ANVIL_KEYS["gamma"]))
+    # Off 31337 every role needs an explicit, non-public key (role_key raises otherwise).
+    operator = Account.from_key(role_key("OPERATOR_PRIVATE_KEY", "operator", chain))
+    treasury = Account.from_key(role_key("TREASURY_PRIVATE_KEY", "treasury", chain))
+    generator = Account.from_key(role_key("OPERATOR_PRIVATE_KEY", "generator", chain))
+    alpha = Account.from_key(role_key("AGENT_ALPHA_KEY", "alpha", chain))
+    beta = Account.from_key(role_key("AGENT_BETA_KEY", "beta", chain))
+    gamma = Account.from_key(role_key("AGENT_GAMMA_KEY", "gamma", chain))
 
+    label = rpc_label(rpc)
     try:
         boa.set_network_env(rpc)
+        rpc_chain = boa.env.get_chain_id()
+        # Also guards CHAIN_ID left at 31337 (anvil keys allowed) while the RPC points at a public chain.
+        if rpc_chain != chain:
+            raise SystemExit(f"ERROR: RPC at {label} reports chain id {rpc_chain}, expected CHAIN_ID={chain}")
+        if chain == LOCAL_CHAIN:
+            use_memory_fork_cache(boa.env)  # a restarted anvil must not see the last one's cached state
         boa.env.add_account(operator)
-        print(f"deploying via {rpc}")
+        print(f"deploying via {label}")
+    except SystemExit:
+        raise
     except Exception as exc:
-        print(f"no rpc ({exc}); deploying in-process boa EVM")
+        # Exception text can echo the full URL (and its API key), so only the type is printed.
+        if chain != LOCAL_CHAIN:
+            raise SystemExit(
+                f"ERROR: cannot use RPC at {label} ({type(exc).__name__}); "
+                f"the in-process fallback is local-only (CHAIN_ID={chain})"
+            ) from None
+        print(f"no rpc at {label} ({type(exc).__name__}); deploying in-process boa EVM")
+        boa.reset_env()
         boa.env.set_balance(operator.address, 10**18)
 
     agents = [alpha.address, beta.address, gamma.address]
-    contracts = deploy(operator.address, treasury.address, generator.address, agents, chain=chain)
+    progress: dict = {}
+    try:
+        contracts = deploy(operator.address, treasury.address, generator.address, agents, chain=chain, progress=progress)
 
-    extra = {
-        "operator": operator.address,
-        "treasury": treasury.address,
-        "wildcardGenerator": generator.address,
-        "agents": agents,
-    }
-    if usdc_override and chain != 31337:
-        extra["MockUSDC"] = usdc_override
-        extra["canonicalUSDC"] = usdc_override
-    path = dump_addresses(contracts, chain, extra)
+        extra = {
+            "operator": operator.address,
+            "treasury": treasury.address,
+            "wildcardGenerator": generator.address,
+            "agents": agents,
+        }
+        if usdc_override and chain != 31337:
+            extra["MockUSDC"] = usdc_override
+            extra["canonicalUSDC"] = usdc_override
+        path = dump_addresses(contracts, chain, extra)
+    except Exception as exc:
+        # A traceback (e.g. requests' "429 ... for url: <full url>") would print the provider key.
+        print(f"ERROR: deploy failed: {type(exc).__name__}: {redact(str(exc), rpc)[:300]}", file=sys.stderr)
+        if progress:
+            print("Already deployed on chain (not wired unless listed in order):", file=sys.stderr)
+            for name, addr in progress.items():
+                print(f"  {name}: {addr}", file=sys.stderr)
+        raise SystemExit(1) from None
     print(f"wrote {path}")
     for k, v in json.loads(path.read_text()).items():
         print(f"  {k}: {v}")
