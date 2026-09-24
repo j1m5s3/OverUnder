@@ -1,6 +1,7 @@
 import json
 import os
 import sys
+import time
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -26,6 +27,40 @@ ANVIL_KEYS = {
 }
 LOCAL_CHAIN = 31337
 _PUBLIC_KEYS = {k.lower().removeprefix("0x") for k in ANVIL_KEYS.values()}
+CANONICAL_RECEIPT_TIMEOUT = 180.0
+
+
+def _is_canonical(rpc, receipt) -> bool:
+    """A receipt names a sealed block: non-zero blockHash equal to the canonical block at its height."""
+    block_hash = (receipt or {}).get("blockHash") or "0x0"
+    block_number = (receipt or {}).get("blockNumber")
+    if not block_number or int(block_hash, 16) == 0:
+        return False
+    block = rpc.fetch_uncached("eth_getBlockByNumber", [block_number, False])
+    return bool(block) and str(block.get("hash") or "").lower() == block_hash.lower()
+
+
+def require_canonical_receipts(env=None, timeout: float = CANONICAL_RECEIPT_TIMEOUT, poll: float = 1.0) -> None:
+    """Base Sepolia serves Flashblocks pre-confirmation receipts (blockHash 0x0, block not sealed yet).
+    titanoboa takes the first non-null receipt, resets its fork to that block and reads contractAddress,
+    which crashes part-way through a broadcast. Keep polling until the receipt is canonical."""
+    rpc = getattr(env or boa.env, "_rpc", None)
+    if rpc is None or not hasattr(rpc, "fetch_uncached") or getattr(rpc, "_ou_canonical_receipts", False):
+        return
+    first_receipt = rpc.wait_for_tx_receipt
+
+    def wait_for_tx_receipt(tx_hash, timeout_s, poll_latency=0.25):
+        deadline = time.time() + max(float(timeout_s), timeout)
+        receipt = first_receipt(tx_hash, timeout_s, poll_latency)
+        while not _is_canonical(rpc, receipt):
+            if time.time() + poll > deadline:
+                raise ValueError(f"Timed out waiting for a canonical receipt ({tx_hash})")
+            time.sleep(poll)
+            receipt = rpc.fetch_uncached("eth_getTransactionReceipt", [tx_hash]) or receipt
+        return receipt
+
+    rpc.wait_for_tx_receipt = wait_for_tx_receipt
+    rpc._ou_canonical_receipts = True
 
 
 def local_listing_config(fee_recipient: str) -> tuple:
@@ -232,6 +267,7 @@ def main():
             raise SystemExit(f"ERROR: RPC at {label} reports chain id {rpc_chain}, expected CHAIN_ID={chain}")
         if chain == LOCAL_CHAIN:
             use_memory_fork_cache(boa.env)  # a restarted anvil must not see the last one's cached state
+        require_canonical_receipts(boa.env)
         boa.env.add_account(operator)
         print(f"deploying via {label}")
     except SystemExit:

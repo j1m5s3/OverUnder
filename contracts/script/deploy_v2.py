@@ -381,6 +381,7 @@ def main(argv: list[str] | None = None) -> int:
             boa.set_network_env(rpc)
             if local:
                 base.use_memory_fork_cache(boa.env)
+            base.require_canonical_receipts(boa.env)
             boa.env.add_account(operator, force_eoa=True)
             boa.env.suppress_debug_tt(True)  # a trace failure must not abort after a tx has mined
         rpc_chain = boa.env.get_chain_id() if not args.dry_run else int(boa.env.evm.patch.chain_id)
