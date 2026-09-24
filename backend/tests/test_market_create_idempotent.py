@@ -32,6 +32,10 @@ CID = _cid(QID)
 CID_OTHER = _cid(QID_OTHER)
 SEED_CIDS = (CID, CID_OTHER)
 
+# A receipt in a sealed, canonical block: app/chain_tx.py keeps waiting past Flashblocks pre-confirmations.
+BLOCK_HASH = bytes.fromhex("bb" * 32)
+RECEIPT_OK = {"status": 1, "blockNumber": 100, "blockHash": BLOCK_HASH}
+
 
 async def _reset(session) -> None:
     for cid in SEED_CIDS:
@@ -68,6 +72,7 @@ def _chain(*, exists: bool, struct=None, outcome_slots: int = 0) -> FactoryChain
     ctf.functions.outcomeSlots.return_value.call.return_value = outcome_slots
     usdc = MagicMock()
     w3 = MagicMock()
+    w3.eth.get_block.return_value = {"number": 100, "hash": BLOCK_HASH}
     return FactoryChain(w3=w3, factory=factory, usdc=usdc, ctf=ctf, operator=Account.create())
 
 
@@ -187,7 +192,7 @@ async def test_new_market_sends_create_tx(op_client):
     chain.usdc.functions.allowance.return_value.call.return_value = 10**12
     chain.w3.eth.get_transaction_count.return_value = 7
     chain.w3.eth.gas_price = 1_000_000_000
-    chain.w3.eth.wait_for_transaction_receipt.return_value = {"status": 1}
+    chain.w3.eth.wait_for_transaction_receipt.return_value = RECEIPT_OK
     chain.factory.functions.createPrimaryMarket.return_value.build_transaction.return_value = {
         "to": chain.factory.address,
         "data": "0x",
@@ -271,7 +276,7 @@ def _new_market_chain():
     chain.usdc.functions.allowance.return_value.call.return_value = 10**12
     chain.w3.eth.get_transaction_count.return_value = 7
     chain.w3.eth.gas_price = 1_000_000_000
-    chain.w3.eth.wait_for_transaction_receipt.return_value = {"status": 1}
+    chain.w3.eth.wait_for_transaction_receipt.return_value = RECEIPT_OK
     chain.factory.functions.createPrimaryMarket.return_value.build_transaction.return_value = {
         "to": chain.factory.address,
         "data": "0x",
@@ -324,7 +329,7 @@ async def test_slow_create_does_not_block_the_event_loop(op_client):
 
     def slow_receipt(*_a, **_k):
         _time.sleep(0.6)
-        return {"status": 1}
+        return RECEIPT_OK
 
     chain.w3.eth.wait_for_transaction_receipt.side_effect = slow_receipt
     with patch("app.markets.router.get_settings", return_value=_op_settings()), patch(
@@ -483,7 +488,7 @@ def _racing_chain():
     def mined(*_a, **_k):
         _time.sleep(0.3)
         state["created"] = True
-        return {"status": 1}
+        return RECEIPT_OK
 
     chain.w3.eth.wait_for_transaction_receipt.side_effect = mined
     return chain
@@ -527,7 +532,7 @@ async def test_create_mirror_tolerates_a_row_the_indexer_inserted(op_client):
     def indexer_wins(*_a, **_k):
         # Runs in the create's worker thread; the insert goes through the app's own engine (any dialect).
         asyncio.run_coroutine_threadsafe(indexer_insert(), loop).result(timeout=10)
-        return {"status": 1}
+        return RECEIPT_OK
 
     chain.w3.eth.wait_for_transaction_receipt.side_effect = indexer_wins
     r = await _post(op_client, chain, _body(question_id=QID_OTHER))
@@ -623,3 +628,233 @@ async def test_archive_unlinks_schedule_rows_pointing_at_the_orphan(op_client):
             for g in (await session.execute(select(NflScheduleGame).where(NflScheduleGame.season == 2031))).scalars().all():
                 await session.delete(g)
             await session.commit()
+
+
+# --- Flashblocks (Base): pre-confirmation receipts, 'latest' lagging 'pending' ----------------
+
+
+class _FlashFn:
+    """One contract call on the fake chain: .call() reads it, build_transaction queues the send."""
+
+    def __init__(self, fake, name, args):
+        self.fake, self.name, self.args = fake, name, args
+
+    def call(self, *_a, block_identifier="latest"):
+        return self.fake.read(self.name, self.args, block_identifier)
+
+    def build_transaction(self, tx):
+        self.fake.built = (self.name, self.args)
+        return {**tx, "to": FlashblocksFake.FACTORY, "data": "0x", "value": 0}
+
+
+class _FlashFunctions:
+    def __init__(self, fake):
+        self._fake = fake
+
+    def __getattr__(self, name):
+        return lambda *args: _FlashFn(self._fake, name, args)
+
+
+class FlashblocksFake:
+    """Base Sepolia as the operator sees it (also the fake `w3`, with eth = self).
+
+    Every tx executes at once against 'pending'; 'latest' (the eth_call default) reads sealed
+    blocks only. A tx's receipt is a Flashblocks pre-confirmation (status known, blockHash zero,
+    eth_getBlockByNumber not found) until its block seals. The sequencer has sealed the previous
+    tx's block by the time the next tx arrives, and seals one more block per poll interval.
+    """
+
+    FACTORY = Web3.to_checksum_address("0x" + "fa" * 20)
+    BASE_BLOCK = 1_000
+    gas_price = 1_000_000_000
+
+    def __init__(self):
+        self.eth = self
+        self.states = [{"balance": 10**12, "allowance": 0, "markets": {}}]  # states[i]: after i txs
+        self.sealed = 0
+        self.txs: list[tuple] = []  # (name, args, status, events)
+        self.built = None
+        self.reads: list[tuple[str, str]] = []
+
+    def chain(self) -> FactoryChain:
+        from types import SimpleNamespace
+
+        fns = _FlashFunctions(self)
+        events = SimpleNamespace(MarketCreated=lambda: SimpleNamespace(process_receipt=self._events))
+        factory = SimpleNamespace(address=self.FACTORY, functions=fns, events=events)
+        return FactoryChain(
+            w3=self, factory=factory, usdc=SimpleNamespace(functions=fns), ctf=SimpleNamespace(functions=fns),
+            operator=Account.create(),
+        )
+
+    # reads
+    def read(self, name, args, block):
+        self.reads.append((name, block))
+        st = self.states[-1] if block == "pending" else self.states[self.sealed]
+        if name == "oracle":
+            return Web3.to_checksum_address(ORACLE)
+        if name == "balanceOf":
+            return st["balance"]
+        if name == "allowance":
+            return st["allowance"]
+        if name == "marketExists":
+            return bytes(args[0]) in st["markets"]
+        if name == "markets":
+            return st["markets"][bytes(args[0])]
+        if name == "outcomeSlots":
+            return 2 if bytes(args[0]) in st["markets"] else 0
+        raise AssertionError(f"unexpected read {name}")
+
+    # sends
+    def get_transaction_count(self, _addr, _block="latest"):
+        return len(self.txs)
+
+    def send_raw_transaction(self, _raw):
+        import copy
+
+        from app.markets.chain import condition_id_for
+
+        (name, args), self.built = self.built, None
+        st, status, events = copy.deepcopy(self.states[-1]), 1, []
+        if name == "faucet":
+            st["balance"] += args[0]
+        elif name == "approve":
+            st["allowance"] = args[1]
+        elif name == "createPrimaryMarket":
+            qid, close, question, seed = args
+            cid = bytes.fromhex(condition_id_for(ORACLE, qid)[2:])
+            if st["allowance"] < seed or st["balance"] < seed or cid in st["markets"]:
+                st, status = self.states[-1], 0  # reverted: state unchanged
+            else:
+                st["allowance"] -= seed
+                st["balance"] -= seed
+                st["markets"][cid] = (cid, b"\x00" * 32, close, 0, False, question)
+                events = [{"args": {"conditionId": cid, "parentConditionId": b"\x00" * 32, "closeTime": close,
+                                    "marketType": 0, "question": question}}]
+        else:
+            raise AssertionError(f"unexpected send {name}")
+        self.states.append(st)
+        self.txs.append((name, args, status, events))
+        self.sealed = max(self.sealed, len(self.txs) - 1)
+        return len(self.txs).to_bytes(32, "big")
+
+    def seal_one(self):
+        self.sealed = min(len(self.txs), self.sealed + 1)
+
+    # receipts and blocks
+    @staticmethod
+    def _block_hash(i: int) -> bytes:
+        return b"\xb1" + i.to_bytes(31, "big")
+
+    def get_transaction_receipt(self, tx_hash):
+        i = int.from_bytes(bytes(tx_hash), "big")
+        _name, _args, status, _events = self.txs[i - 1]
+        return {
+            "transactionHash": bytes(tx_hash),
+            "status": status,
+            "blockNumber": self.BASE_BLOCK + i,
+            "blockHash": self._block_hash(i) if i <= self.sealed else b"\x00" * 32,
+        }
+
+    def wait_for_transaction_receipt(self, tx_hash, timeout):
+        return self.get_transaction_receipt(tx_hash)  # web3 hands back the pre-confirmation at once
+
+    def get_block(self, number):
+        from web3.exceptions import BlockNotFound
+
+        i = int(number) - self.BASE_BLOCK
+        if i < 1 or i > self.sealed:
+            raise BlockNotFound(f"block {number} not found")
+        return {"number": int(number), "hash": self._block_hash(i)}
+
+    def _events(self, receipt):
+        return self.txs[int.from_bytes(bytes(receipt["transactionHash"]), "big") - 1][3]
+
+
+def _seal_on_poll(monkeypatch, fake: FlashblocksFake) -> None:
+    """Each poll interval of app.chain_tx seals one more block (no real sleeping)."""
+    import time as _time
+    from types import SimpleNamespace
+
+    from app import chain_tx
+
+    monkeypatch.setattr(chain_tx, "time", SimpleNamespace(monotonic=_time.monotonic, sleep=lambda _s: fake.seal_one()))
+
+
+@pytest.mark.asyncio
+async def test_flashblocks_pre_fix_flow_fails_the_second_back_to_back_create(op_client, monkeypatch):
+    """The production bug, reproduced on the fake: with the pre-fix flow (pre-confirmation receipt taken
+    as final, reads at 'latest', approve exactly the seed) the second create sees the first create's
+    approve sealed but not its create, skips the approve, and its own create reverts."""
+    from app.markets import router as markets_router
+
+    fake = FlashblocksFake()
+    monkeypatch.setattr(
+        markets_router, "wait_canonical_receipt", lambda w3, h, t: w3.eth.wait_for_transaction_receipt(h, timeout=t)
+    )
+    monkeypatch.setattr(markets_router, "PENDING", "latest")
+    monkeypatch.setattr(markets_router, "_approve_amount", lambda seed: seed)
+    chain = fake.chain()
+    first = await _post(op_client, chain, _body(question_id=QID))
+    second = await _post(op_client, chain, _body(question_id=QID_OTHER))
+    assert first.status_code == 200, first.text
+    assert second.status_code == 500 and second.json()["detail"] == "market creation transaction failed"
+    assert [(name, status) for name, _a, status, _e in fake.txs] == [
+        ("approve", 1), ("createPrimaryMarket", 1), ("createPrimaryMarket", 0),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_flashblocks_back_to_back_creates_succeed(op_client, monkeypatch):
+    fake = FlashblocksFake()
+    _seal_on_poll(monkeypatch, fake)
+    chain = fake.chain()
+    seed = _body()["seed_usdc"]
+    first = await _post(op_client, chain, _body(question_id=QID))
+    second = await _post(op_client, chain, _body(question_id=QID_OTHER))
+    assert first.status_code == 200, first.text
+    assert second.status_code == 200, second.text
+    assert (first.json()["conditionId"], second.json()["conditionId"]) == (CID, CID_OTHER)
+    # One approve with headroom covers both creates; neither create reverted.
+    assert [(name, status) for name, _a, status, _e in fake.txs] == [
+        ("approve", 1), ("createPrimaryMarket", 1), ("createPrimaryMarket", 1),
+    ]
+    assert fake.txs[0][1] == (FlashblocksFake.FACTORY, 100 * seed)
+    # Every read that decides a send is at the pending block, and every create returned only once
+    # its receipt was in a sealed, canonical block.
+    assert {block for name, block in fake.reads if name != "oracle"} == {"pending"}
+    assert fake.sealed == len(fake.txs)
+    async with SessionLocal() as session:
+        assert await session.get(Market, CID) is not None and await session.get(Market, CID_OTHER) is not None
+
+
+@pytest.mark.asyncio
+async def test_flashblocks_second_create_approves_when_headroom_is_spent(op_client, monkeypatch):
+    """Pending reads keep the approve decision right when the allowance is used up: with headroom of
+    one seed the second create approves again, and both creates succeed."""
+    from app.markets import router as markets_router
+
+    fake = FlashblocksFake()
+    _seal_on_poll(monkeypatch, fake)
+    monkeypatch.setattr(markets_router, "_approve_amount", lambda seed: seed)
+    chain = fake.chain()
+    assert (await _post(op_client, chain, _body(question_id=QID))).status_code == 200
+    assert (await _post(op_client, chain, _body(question_id=QID_OTHER))).status_code == 200
+    assert [name for name, *_ in fake.txs] == ["approve", "createPrimaryMarket", "approve", "createPrimaryMarket"]
+    assert all(status == 1 for _n, _a, status, _e in fake.txs)
+
+
+@pytest.mark.asyncio
+async def test_reverted_approve_stops_before_create(op_client):
+    chain = _new_market_chain()
+    chain.usdc.functions.allowance.return_value.call.return_value = 0
+    chain.usdc.functions.approve.return_value.build_transaction.return_value = (
+        chain.factory.functions.createPrimaryMarket.return_value.build_transaction.return_value
+    )
+    chain.w3.eth.wait_for_transaction_receipt.return_value = {**RECEIPT_OK, "status": 0}
+    r = await _post(op_client, chain, _body(question_id=QID_OTHER))
+    assert r.status_code == 500 and r.json()["detail"] == "failed to approve USDC: approve transaction failed"
+    chain.factory.functions.createPrimaryMarket.assert_not_called()
+    chain.w3.eth.send_raw_transaction.assert_called_once()
+    _args, kwargs = chain.usdc.functions.allowance.return_value.call.call_args
+    assert kwargs == {"block_identifier": "pending"}

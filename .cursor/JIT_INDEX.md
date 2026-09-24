@@ -165,4 +165,5 @@ last_verified: 2026-09-23
 - [.cursor/jit_history/2026-09-20-cursor-runtime-scouts.md] — archived Cursor-runtime scouts plan
 - [.cursor/jit_history/2026-09-21-ai-resolve-nfl-listing.md] — archived AI resolve + NFL listing plan
 - [.cursor/jit_history/2026-09-21-ou-t001-paymaster.md] — archived T001 paymaster closeout
-- [.cursor/JIT_PLAN.md] — ACTIVE: lifecycle hardening + Phase 2 completion (2026-09-23); steps 15 ship and 16 ops pending
+- [.cursor/jit_history/2026-09-24-lifecycle-phase2-completion.md] — shipped lifecycle hardening + Phase 2 (T003, T008–T010); v2 contracts live on 84532 (MarketAMM 0xc2cA…CC77, MarketFactory 0x9396…4a6E)
+- [.cursor/JIT_PLAN.md] — SHIPPED 2026-09-24 (archived copy in jit_history); next slice starts here

@@ -52,12 +52,21 @@ def require_canonical_receipts(env=None, timeout: float = CANONICAL_RECEIPT_TIME
     def wait_for_tx_receipt(tx_hash, timeout_s, poll_latency=0.25):
         deadline = time.time() + max(float(timeout_s), timeout)
         receipt = first_receipt(tx_hash, timeout_s, poll_latency)
-        while not _is_canonical(rpc, receipt):
+        while True:
+            try:
+                if _is_canonical(rpc, receipt):
+                    return receipt
+            except Exception:  # a transient RPC error (e.g. 429) after the tx mined must not end the run
+                if time.time() + poll > deadline:
+                    raise
             if time.time() + poll > deadline:
                 raise ValueError(f"Timed out waiting for a canonical receipt ({tx_hash})")
             time.sleep(poll)
-            receipt = rpc.fetch_uncached("eth_getTransactionReceipt", [tx_hash]) or receipt
-        return receipt
+            try:
+                receipt = rpc.fetch_uncached("eth_getTransactionReceipt", [tx_hash]) or receipt
+            except Exception:
+                if time.time() + poll > deadline:
+                    raise
 
     rpc.wait_for_tx_receipt = wait_for_tx_receipt
     rpc._ou_canonical_receipts = True

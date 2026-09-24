@@ -14,6 +14,7 @@ from sqlalchemy import and_, func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.router import get_current_user, require_operator
+from app.chain_tx import wait_canonical_receipt
 from app.config import get_settings
 from app.db import get_db, insert_ignore, session_dialect
 from app.markets import chain as market_chain
@@ -33,6 +34,10 @@ logger = logging.getLogger(__name__)
 INT4_MAX = 2**31 - 1
 # MarketAMM.MIN_LP (contracts/src/MarketAMM.vy): smallest seed, in USDC base units, the AMM accepts.
 AMM_MIN_LP = 10**4
+# Operator create approves the factory for this many seeds at once (see _approve_amount).
+APPROVE_HEADROOM = 100
+# Block tag for reads that decide whether the operator sends a follow-up tx (Flashblocks, app/chain_tx.py).
+PENDING = "pending"
 
 # One operator EOA signs every create/pause: serialize them per process so two
 # requests running in worker threads never read the same pending nonce.
@@ -414,7 +419,9 @@ async def create_market(
 
 
 def _operator_tx(w3, operator_acct, fn, settings, gas: int):
-    """Build, sign, send and wait for one operator tx (bounded wait). Caller holds _OPERATOR_TX_LOCK."""
+    """Build, sign, send and wait for one operator tx (bounded wait). Caller holds _OPERATOR_TX_LOCK.
+
+    Waits for a canonical receipt, not a Flashblocks pre-confirmation (app/chain_tx.py)."""
     tx = fn.build_transaction({
         "from": operator_acct.address,
         "nonce": w3.eth.get_transaction_count(operator_acct.address, "pending"),
@@ -424,7 +431,13 @@ def _operator_tx(w3, operator_acct, fn, settings, gas: int):
     })
     signed = operator_acct.sign_transaction(tx)
     txh = w3.eth.send_raw_transaction(signed.raw_transaction)
-    return w3.eth.wait_for_transaction_receipt(txh, timeout=settings.operator_tx_timeout_seconds)
+    return wait_canonical_receipt(w3, txh, settings.operator_tx_timeout_seconds)
+
+
+def _approve_amount(seed: int) -> int:
+    """Allowance to set when it is below `seed`: APPROVE_HEADROOM creates' worth, so back-to-back
+    creates do not each need an approve. Bounded (not max uint) and only ever granted to our factory."""
+    return seed * APPROVE_HEADROOM
 
 
 def _create_on_chain(settings, body: CreateMarketIn, question_id_bytes: bytes, parent_bytes: bytes | None) -> tuple[str, dict[str, Any]]:
@@ -441,11 +454,16 @@ def _create_on_chain(settings, body: CreateMarketIn, question_id_bytes: bytes, p
         # so a replay finds the market on chain and mirrors it without sending a tx. Read under
         # the operator lock (and the caller's per-questionId lock) so a racing replay sees the
         # first create's receipt instead of a stale "not created".
+        # Every read that decides whether to send (or skip) a tx is taken at the pending block: on
+        # Base, 'latest' lags the previous create's faucet/approve/create until its block is sealed.
         try:
             condition_id = market_chain.condition_id_for(factory.functions.oracle().call(), question_id_bytes)
             cid_bytes = bytes.fromhex(condition_id[2:])
-            onchain = market_chain.read_factory_market(factory, cid_bytes)
-            prepared_elsewhere = onchain is None and int(chain.ctf.functions.outcomeSlots(cid_bytes).call()) != 0
+            onchain = market_chain.read_factory_market(factory, cid_bytes, block_identifier=PENDING)
+            prepared_elsewhere = (
+                onchain is None
+                and int(chain.ctf.functions.outcomeSlots(cid_bytes).call(block_identifier=PENDING)) != 0
+            )
         except HTTPException:
             raise
         except Exception as e:
@@ -456,19 +474,27 @@ def _create_on_chain(settings, body: CreateMarketIn, question_id_bytes: bytes, p
             # Squatted questionId (anyone can prepareCondition) or a legacy market not imported into this factory.
             raise HTTPException(409, "condition prepared outside this factory")
 
-        balance = usdc.functions.balanceOf(operator_acct.address).call()
+        try:
+            balance = int(usdc.functions.balanceOf(operator_acct.address).call(block_identifier=PENDING))
+            allowance = int(usdc.functions.allowance(operator_acct.address, factory.address).call(block_identifier=PENDING))
+        except Exception as e:
+            raise HTTPException(500, f"failed to read operator USDC state: {type(e).__name__}")
         if balance < body.seed_usdc:
             try:
-                _operator_tx(w3, operator_acct, usdc.functions.faucet(body.seed_usdc), settings, 100_000)
+                receipt = _operator_tx(w3, operator_acct, usdc.functions.faucet(body.seed_usdc), settings, 100_000)
             except Exception as e:
                 raise HTTPException(500, f"failed to fund operator: {type(e).__name__}")
+            if receipt["status"] != 1:
+                raise HTTPException(500, "failed to fund operator: faucet transaction failed")
 
-        allowance = usdc.functions.allowance(operator_acct.address, factory.address).call()
         if allowance < body.seed_usdc:
+            approve_fn = usdc.functions.approve(factory.address, _approve_amount(body.seed_usdc))
             try:
-                _operator_tx(w3, operator_acct, usdc.functions.approve(factory.address, body.seed_usdc), settings, 100_000)
+                receipt = _operator_tx(w3, operator_acct, approve_fn, settings, 100_000)
             except Exception as e:
                 raise HTTPException(500, f"failed to approve USDC: {type(e).__name__}")
+            if receipt["status"] != 1:
+                raise HTTPException(500, "failed to approve USDC: approve transaction failed")
 
         try:
             if body.market_type == 0:
