@@ -3,7 +3,7 @@ title: Web and mobile
 status: MIXED
 area: web
 summary: Next.js feature modules for markets, AMM swaps with the trading-closed state, user listing at /list, CDP wallets and oracle status, plus the Flutter app that mirrors them.
-last_verified: 2026-09-23
+last_verified: 2026-09-24
 pointers:
   - "[web/src/app/providers.tsx : L21-45]"
   - "[web/src/features/wallet/ConnectBar.tsx : L36-89]"
@@ -85,5 +85,5 @@ Next.js App Router under `web/`. Feature folders are the Flutter carryover map; 
 - [SHIPPED] Quotes send `buy_yes`/`usdc_in` or `sell_yes`/`token_amount` in base units; a 409 from the quote or `/aa/cdp-send` becomes `TradingClosedException`. [mobile/lib/services/api_client.dart : L98-119] [mobile/lib/services/api_client.dart : L197-213]
 - [SHIPPED] The swap widget shows a closed banner, disables its controls, flips at `tradingHaltsAt` with a timer and surfaces a failed address load on execute. [mobile/lib/features/trade/amm_swap_widget.dart : L81-144]
 - [SHIPPED] Oracle status reads `attestations` (dropping `kind: research` rows) and `votes`.
-- [STUB] `mobile/assets/deployments/84532.json` is untracked and stale; it must be regenerated after the v2 redeploy.
+- [SHIPPED] `mobile/assets/deployments/84532.json` is tracked and was regenerated with the v2 MarketAMM and MarketFactory on 2026-09-24.
 - [PHASE2] No `android/` or `ios/` folders yet; `flutter create .` comes first for store builds.

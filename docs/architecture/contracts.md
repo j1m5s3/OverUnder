@@ -3,7 +3,7 @@ title: Contracts
 status: MIXED
 area: contracts
 summary: Vyper contract graph for CTF, leftover CLOB, MarketAMM v2 (static pm-AMM with close gate), MarketFactory v2 (user listing), oracle, OU NAV, emissions, and the leftover ERC-4337 paymaster.
-last_verified: 2026-09-23
+last_verified: 2026-09-24
 pointers:
   - "[contracts/src/ConditionalTokens.vy : L52-60]"
   - "[contracts/src/ConditionalTokens.vy : L62-72]"
@@ -37,13 +37,13 @@ pointers:
   - "[contracts/src/SimpleAccount.vy : L40-49]"
   - "[contracts/src/SimpleAccountFactory.vy : L46-53]"
   - "[contracts/src/MockEntryPoint.vy : L94-120]"
-  - "[contracts/script/deploy.py : L116-198]"
+  - "[contracts/script/deploy.py : L160-242]"
   - "[contracts/script/deploy_v2.py : L178-268]"
 ---
 
 # Contracts
 
-All production logic is Vyper 0.4.3 under `contracts/src/`. Tests live in `contracts/tests/`. Full-graph deploy: [contracts/script/deploy.py : L116-198]. AMM + Factory swap on an existing stack: [contracts/script/deploy_v2.py : L178-268].
+All production logic is Vyper 0.4.3 under `contracts/src/`. Tests live in `contracts/tests/`. Full-graph deploy: [contracts/script/deploy.py : L160-242]. AMM + Factory swap on an existing stack: [contracts/script/deploy_v2.py : L178-268].
 
 ## ConditionalTokens
 

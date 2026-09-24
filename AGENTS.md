@@ -3,7 +3,7 @@ title: Agent entrypoint
 status: SHIPPED
 area: cross
 summary: Read this first. Routes agents into docs, pointer rules, the TODO registry, and the local and production runbooks.
-last_verified: 2026-09-23
+last_verified: 2026-09-24
 pointers: []
 ---
 
@@ -11,7 +11,7 @@ pointers: []
 
 Prediction markets on Base, settled in USDC.
 
-- Operator primaries, wildcard children and user-listed markets trade on `MarketAMM`, a seeded static pm-AMM, and trading halts at `closeTime`. The Base Sepolia deployment stays on the v1 CPMM until the ops redeploy in [docs/runbooks/operations.md](docs/runbooks/operations.md).
+- Operator primaries, wildcard children and user-listed markets trade on `MarketAMM`, a seeded static pm-AMM, and trading halts at `closeTime`. Base Sepolia runs MarketAMM v2 and MarketFactory v2 since 2026-09-24; the live addresses are in [docs/runbooks/operations.md](docs/runbooks/operations.md).
 - Resolution: three AI oracles must agree. Otherwise, after 24 h, agent majority plus participant votes decide.
 - Protocol fees accrue to a vault, and OU redeems for USDC at NAV.
 

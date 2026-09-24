@@ -3,7 +3,7 @@ title: Local development runbook
 status: SHIPPED
 area: cross
 summary: Commands to install, run, test, and stop the Anvil + API + web stack on Windows, plus test isolation, the local relayer, the mock oracle tick, fork-cache and Postgres notes, and the local env vars.
-last_verified: 2026-09-23
+last_verified: 2026-09-24
 pointers:
   - "[scripts/run_stack.cmd : L1-57]"
   - "[scripts/stop_stack.cmd : L1-25]"
@@ -17,8 +17,8 @@ pointers:
   - "[backend/app/config.py : L107-130]"
   - "[backend/app/relayer/queue.py : L30-38]"
   - "[backend/app/relayer/router.py : L92-106]"
-  - "[contracts/script/deploy.py : L74-89]"
-  - "[contracts/script/deploy.py : L233-234]"
+  - "[contracts/script/deploy.py : L118-133]"
+  - "[contracts/script/deploy.py : L277-278]"
   - "[oracles/schedule/scout.py : L123-126]"
   - "[.env.example : L39-52]"
   - "[.env.example : L66-79]"
@@ -164,7 +164,7 @@ The other `RELAYER_*` gas, nonce and poll settings keep their code defaults [bac
 
 titanoboa caches fork reads on disk by chain id and block. Every anvil is chain 31337 and starts at block 0, so a second or restarted anvil could be served the previous chain's state. The symptom is `RuntimeError: uh oh! <addr> != <addr>` on deploy.
 
-`deploy.py` now re-forks 31337 with an in-memory cache [contracts/script/deploy.py : L74-89], [contracts/script/deploy.py : L233-234]. Other scripts that fork anvil can still hit the disk cache. Clear `~/.cache/titanoboa/fork`, or run them with `USERPROFILE`/`HOME` pointed at a scratch directory.
+`deploy.py` now re-forks 31337 with an in-memory cache [contracts/script/deploy.py : L118-133], [contracts/script/deploy.py : L277-278]. Other scripts that fork anvil can still hit the disk cache. Clear `~/.cache/titanoboa/fork`, or run them with `USERPROFILE`/`HOME` pointed at a scratch directory.
 
 ## Env vars
 
