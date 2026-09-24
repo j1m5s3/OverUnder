@@ -4,6 +4,7 @@ import { useCurrentUser, useIsSignedIn } from "@coinbase/cdp-hooks";
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { api } from "@/shared/api/client";
+import { smartAccountOf } from "@/features/wallet/account";
 
 interface Position {
   question: string;
@@ -23,7 +24,8 @@ interface PortfolioData {
 export default function PortfolioPage() {
   const { isSignedIn } = useIsSignedIn();
   const { currentUser } = useCurrentUser();
-  const address = currentUser?.evmSmartAccounts?.[0];
+  // evmSmartAccounts entries are strings or {address} depending on the SDK version.
+  const address = smartAccountOf(currentUser);
   const [data, setData] = useState<PortfolioData | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(false);

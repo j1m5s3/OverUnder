@@ -1,6 +1,6 @@
 "use client";
 
-import { CDPHooksProvider } from "@coinbase/cdp-hooks";
+import { CDPContext, CDPHooksProvider, type CDPContextValue } from "@coinbase/cdp-hooks";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useState, type ReactNode } from "react";
 import { WagmiProvider, createConfig, http, injected } from "wagmi";
@@ -25,13 +25,32 @@ const cdpConfig = {
   },
 };
 
+// Without a project id CDPHooksProvider takes the whole tree down: initialize()
+// rejects and the provider's onOAuthStateChange then throws "SDK not initialized".
+// An inert signed-out context keeps every CDP hook usable, so the app renders and
+// ConnectBar shows "sign-in isn't configured".
+const signedOutContext: CDPContextValue = {
+  isInitialized: false,
+  currentUser: null,
+  isSignedIn: false,
+  config: cdpConfig,
+  oauthState: null,
+};
+
+function WalletProvider({ children }: { children: ReactNode }) {
+  if (!cdpConfig.projectId) {
+    return <CDPContext.Provider value={signedOutContext}>{children}</CDPContext.Provider>;
+  }
+  return <CDPHooksProvider config={cdpConfig}>{children}</CDPHooksProvider>;
+}
+
 export function Providers({ children }: { children: ReactNode }) {
   const [client] = useState(() => new QueryClient());
   return (
-    <CDPHooksProvider config={cdpConfig}>
+    <WalletProvider>
       <WagmiProvider config={config}>
         <QueryClientProvider client={client}>{children}</QueryClientProvider>
       </WagmiProvider>
-    </CDPHooksProvider>
+    </WalletProvider>
   );
 }

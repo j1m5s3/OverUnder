@@ -9,7 +9,7 @@ import {
   useVerifyEmailOTP,
 } from "@coinbase/cdp-hooks";
 import { useEffect, useState } from "react";
-import { api } from "@/shared/api/client";
+import { api, notifyAuthChanged } from "@/shared/api/client";
 
 function smartAccountOf(user: { evmSmartAccounts?: Array<string | { address?: string }> } | null | undefined): string | null {
   const account = user?.evmSmartAccounts?.[0];
@@ -47,6 +47,7 @@ export function ConnectBar() {
         if (cancelled) return;
         localStorage.setItem("ou_token", authResp.token);
         localStorage.setItem("ou_address", authResp.address);
+        notifyAuthChanged();
         setAuthStatus("Authenticated");
       } catch (e: any) {
         if (!cancelled) setAuthStatus(`Auth failed: ${e.message}`);
@@ -91,6 +92,7 @@ export function ConnectBar() {
     await signOut();
     localStorage.removeItem("ou_token");
     localStorage.removeItem("ou_address");
+    notifyAuthChanged();
     setFlowId(null);
     setOtp("");
     setAuthStatus("");

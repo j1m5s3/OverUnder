@@ -9,7 +9,32 @@ export type Market = {
   paused: boolean;
   resolved: boolean;
   suggestedProbability: number;
+  // Latest indexed AMM YES price in micros (1e6 = 100%); null until the pool trades or is seeded.
+  yesPriceMicros?: number | null;
+  // Unix seconds when trading halts; null when the deploy does not halt at close.
+  tradingHaltsAt?: number | null;
+  tradingOpen?: boolean;
+  resolutionCriteria?: string;
+  // Lister address for user-listed markets (marketType 2).
+  creator?: string | null;
 };
+
+// 0 = operator primary, 1 = wildcard child, 2 = user-listed. The API lists type 2
+// as a primary card; nothing here filters on type, so it renders like type 0.
+export const MARKET_TYPE_USER = 2;
+
+export function isUserListed(market: Pick<Market, "marketType">): boolean {
+  return market.marketType === MARKET_TYPE_USER;
+}
+
+// Live AMM price wins over the static listing hint when it is a usable probability.
+export function yesProbability(market: Pick<Market, "yesPriceMicros" | "suggestedProbability">): number {
+  const micros = market.yesPriceMicros;
+  if (typeof micros === "number" && Number.isFinite(micros) && micros > 0 && micros < 1_000_000) {
+    return micros / 1_000_000;
+  }
+  return market.suggestedProbability || 0.5;
+}
 
 export type EventCard = {
   primary: Market;
@@ -30,11 +55,37 @@ export type LiveScore = {
   facts?: Record<string, unknown> | null;
 };
 
+// MarketDetail.listing (ListingPublic) for user-listed markets. Public detail
+// only serves confirmed listings; unconfirmed or rejected ones are 404.
+export type MarketListingInfo = {
+  creator: string;
+  status: string;
+  seedUsdc: number;
+  criteriaHash: string;
+};
+
 export type MarketDetailData = Market & {
   children: Market[];
   score?: LiveScore | null;
   facts?: Record<string, unknown> | null;
+  listing?: MarketListingInfo | null;
 };
+
+// What MarketDetail shows when GET /markets/{id} fails. No HTTP status means
+// the API is unreachable (local dev without a backend): keep the demo data.
+// A 404 is a real answer (unknown id, or a user listing that is not confirmed
+// yet or was rejected) and must never be papered over with demo markets.
+export type DetailFailure = "demo" | "not-found" | "error";
+
+export function detailFailureKind(status: number | null): DetailFailure {
+  if (status === null) return "demo";
+  if (status === 404) return "not-found";
+  return "error";
+}
+
+export function listedBy(market: Pick<MarketDetailData, "creator" | "listing">): string | null {
+  return market.creator || market.listing?.creator || null;
+}
 
 export function matchesSearch(market: Market, searchQuery: string): boolean {
   if (!searchQuery) return true;

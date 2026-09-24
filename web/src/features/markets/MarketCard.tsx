@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { parseMatchup } from "@/shared/utils/categorize";
-import type { Market } from "./eventHub";
+import { isUserListed, yesProbability, type Market } from "./eventHub";
 
 function formatCloseTime(unixSeconds: number): string {
   const date = new Date(unixSeconds * 1000);
@@ -26,12 +26,17 @@ function formatMultiplier(probability: number): string {
 }
 
 export function MarketCard({ market, childCount }: { market: Market; childCount?: number }) {
-  const yesPct = Math.round((market.suggestedProbability || 0.5) * 100);
+  const yesProb = yesProbability(market);
+  const yesPct = Math.round(yesProb * 100);
   const noPct = 100 - yesPct;
   const isLeading = (side: "yes" | "no") => side === "yes" ? yesPct > noPct : noPct > yesPct;
-  
-  const yesProb = market.suggestedProbability || 0.5;
+
   const noProb = 1 - yesProb;
+  // formatCloseTime already says "Closed" once the halt time passes; only resolution adds a tag.
+  const tags = [
+    ...(isUserListed(market) ? ["User listed"] : []),
+    ...(market.resolved ? ["Resolved"] : []),
+  ];
   const yesMultiplier = formatMultiplier(yesProb);
   const noMultiplier = formatMultiplier(noProb);
   
@@ -46,7 +51,12 @@ export function MarketCard({ market, childCount }: { market: Market; childCount?
           </div>
         )}
         <h3 style={{ marginBottom: 4, fontSize: 16, lineHeight: 1.3 }}>{market.question}</h3>
-        <div className="muted" style={{ fontSize: 11 }}>{formatCloseTime(market.closeTime)}</div>
+        <div className="muted" style={{ fontSize: 11 }}>
+          {formatCloseTime(market.closeTime)}
+          {tags.map((tag) => (
+            <span key={tag} className="tag">{tag}</span>
+          ))}
+        </div>
       </Link>
       
       <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 8 }}>

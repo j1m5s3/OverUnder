@@ -3,8 +3,10 @@ import { describe, it } from "node:test";
 import {
   applyActiveMarketQuery,
   hubRoster,
+  isUserListed,
   resolveActiveConditionId,
   selectHubs,
+  yesProbability,
   type EventCard,
   type Market,
   type MarketDetailData,
@@ -150,5 +152,40 @@ describe("applyActiveMarketQuery", () => {
     const next = applyActiveMarketQuery(new URLSearchParams("m=0xchild&side=yes"), "0xprimary", "0xprimary");
     assert.equal(next.get("m"), null);
     assert.equal(next.get("side"), "yes");
+  });
+});
+
+describe("yesProbability", () => {
+  it("prefers the live AMM price over the static hint", () => {
+    assert.equal(yesProbability({ yesPriceMicros: 640_000, suggestedProbability: 0.5 }), 0.64);
+  });
+
+  it("falls back to suggestedProbability without a usable price", () => {
+    assert.equal(yesProbability({ suggestedProbability: 0.3 }), 0.3);
+    assert.equal(yesProbability({ yesPriceMicros: null, suggestedProbability: 0.3 }), 0.3);
+    assert.equal(yesProbability({ yesPriceMicros: 0, suggestedProbability: 0.3 }), 0.3);
+    assert.equal(yesProbability({ yesPriceMicros: 1_000_000, suggestedProbability: 0.3 }), 0.3);
+    assert.equal(yesProbability({ yesPriceMicros: Number.NaN, suggestedProbability: 0.3 }), 0.3);
+  });
+
+  it("defaults to even odds when neither is set", () => {
+    assert.equal(yesProbability({ suggestedProbability: 0 }), 0.5);
+  });
+});
+
+describe("user-listed markets", () => {
+  it("flags marketType 2 only", () => {
+    assert.equal(isUserListed({ marketType: 2 }), true);
+    assert.equal(isUserListed({ marketType: 0 }), false);
+    assert.equal(isUserListed({ marketType: 1 }), false);
+  });
+
+  it("keeps a user-listed primary card under its category with search", () => {
+    const userCard: EventCard = {
+      primary: market({ conditionId: "0xuser", question: "Will the stadium budget pass?", marketType: 2 }),
+      children: [],
+    };
+    const hubs = selectHubs([userCard], { searchQuery: "stadium", category: "other" });
+    assert.deepEqual(hubs.map((card) => card.primary.conditionId), ["0xuser"]);
   });
 });
