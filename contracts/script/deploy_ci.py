@@ -178,6 +178,7 @@ def connect(rpc: str, broadcast: bool, in_process: bool, operator) -> int | None
     balance = int(w3.eth.get_balance(operator.address))
     if broadcast:
         boa.set_network_env(rpc)
+        base.require_canonical_receipts(boa.env)
         boa.env.add_account(operator, force_eoa=True)
         # A failed debug_traceTransaction (flaky or load-balanced provider) must not abort a multi-tx
         # migration after a tx has already mined; receipt status is still checked.
