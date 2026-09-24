@@ -1,14 +1,26 @@
 """Oracle tick: single-flight lease, auth preflight, then scores, resolve, resolve_general, schedule, listing.
 
 A tick that finds an older execution still running exits 0 with {"skipped": "running"}.
-OU_TICK_BUDGET_SECONDS bounds one tick: once spent, remaining stages and markets are
-recorded as skipped (ok) and the next tick picks them up.
+
+OU_TICK_BUDGET_SECONDS bounds one tick, and every stage runs under budget.stage():
+- a share of the total budget, OU_STAGE_SHARE_<STAGE> in (0, 1] (scores defaults to
+  0.4, the others to 1.0), so the agent-heavy score scout cannot use the whole tick;
+- every stage before listing also stops OU_LISTING_RESERVE_SECONDS (default 120,
+  at most a quarter of the budget) before the tick deadline, so the cheap,
+  time-critical listing always gets to run.
+Work a stage leaves for the next tick because its budget ran out is "deferred":
+- a whole stage skipped for budget is {"ok": False, "skipped": "budget"} for the
+  critical stages (resolve, listing), so the tick exits 1, and
+  {"ok": True, "skipped": "budget", "deferred": True} for the others;
+- summary["deferred"] counts, per stage, whole-stage skips and markets or games a
+  stage deferred for budget (results with reason/skipped "budget" or a "deferred" key).
 """
 
 from __future__ import annotations
 
 import importlib
 import json
+import os
 from typing import Any, Callable
 
 import budget
@@ -17,6 +29,43 @@ from redact import SECRET_ENV, log_error, redact  # noqa: F401  (SECRET_ENV re-e
 STAGES = ("scores", "resolve", "resolve_general", "schedule", "listing")
 # Stages that only write through the operator JWT; skipped when the preflight fails.
 AUTH_STAGES = frozenset({"scores", "schedule", "listing"})
+# A budget skip of these stages fails the tick (exit 1) instead of being a quiet deferral.
+CRITICAL_STAGES = frozenset({"resolve", "listing"})
+DEFAULT_SHARES = {"scores": 0.4, "resolve": 1.0, "resolve_general": 1.0, "schedule": 1.0, "listing": 1.0}
+DEFAULT_LISTING_RESERVE_SECONDS = 120
+MAX_RESERVE_FRACTION = 0.25
+
+
+def stage_share(name: str) -> float:
+    env = f"OU_STAGE_SHARE_{name.upper()}"
+    raw = os.getenv(env, "").strip()
+    if not raw:
+        return DEFAULT_SHARES[name]
+    try:
+        value = float(raw)
+    except ValueError as exc:
+        raise RuntimeError(f"{env} must be a number") from exc
+    if not 0.0 < value <= 1.0:
+        raise RuntimeError(f"{env} must be in (0, 1]")
+    return value
+
+
+def listing_reserve_seconds() -> int:
+    raw = os.getenv("OU_LISTING_RESERVE_SECONDS", str(DEFAULT_LISTING_RESERVE_SECONDS)).strip()
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise RuntimeError("OU_LISTING_RESERVE_SECONDS must be an integer") from exc
+    if value < 0:
+        raise RuntimeError("OU_LISTING_RESERVE_SECONDS must be >= 0")
+    return value
+
+
+def _reserve() -> float:
+    """Seconds kept free for listing: the env value, capped at a quarter of the tick budget."""
+    value = float(listing_reserve_seconds())
+    total = budget.total_seconds()
+    return min(value, total * MAX_RESERVE_FRACTION) if total else value
 
 
 # Stage modules load lazily so one broken import fails only its own stage.
@@ -51,10 +100,37 @@ def _default_listing(**kwargs):
 
 def _run_stage(summary: dict[str, Any], name: str, call: Callable[[], Any]) -> None:
     try:
-        summary[name] = call()
+        reserve = 0.0 if name == "listing" else _reserve()
+        with budget.stage(stage_share(name), reserve):
+            summary[name] = call()
     except Exception as exc:
         log_error(f"tick {name} failed: {exc}")
         summary[name] = {"ok": False, "error": str(exc)}
+
+
+def _is_deferred(item: Any) -> bool:
+    if not isinstance(item, dict):
+        return False
+    return item.get("reason") == "budget" or item.get("skipped") == "budget" or bool(item.get("deferred"))
+
+
+def deferred_counts(summary: dict[str, Any]) -> dict[str, int]:
+    """Per stage: 1 for a whole-stage budget skip, else the results/entries deferred for budget."""
+    out: dict[str, int] = {}
+    for name in STAGES:
+        stage = summary.get(name)
+        if not isinstance(stage, dict):
+            continue
+        if stage.get("skipped") == "budget":
+            out[name] = 1
+            continue
+        count = sum(1 for item in stage.get("results") or [] if _is_deferred(item))
+        extra = stage.get("deferred")
+        if isinstance(extra, list):
+            count += len(extra)
+        if count:
+            out[name] = count
+    return out
 
 
 def run_tick(
@@ -136,10 +212,31 @@ def _run_stages(
         if name in AUTH_STAGES and not auth_ok:
             summary[name] = {"ok": False, "skipped": "preflight"}
             continue
-        if budget.exhausted():
-            summary[name] = {"ok": True, "skipped": "budget"}
+        if _stage_starved(name):
+            log_error(f"tick {name} skipped: tick budget spent")
+            if name in CRITICAL_STAGES:
+                summary[name] = {"ok": False, "skipped": "budget"}
+            else:
+                summary[name] = {"ok": True, "skipped": "budget", "deferred": True}
             continue
         _run_stage(summary, name, runners[name])
+    deferred = deferred_counts(summary)
+    if deferred:
+        summary["deferred"] = deferred
+
+
+def _stage_starved(name: str) -> bool:
+    """No time left for this stage: the tick deadline passed, or (before listing) only the reserve is left."""
+    if budget.total_exhausted():
+        return True
+    left = budget.total_remaining()
+    if left is None or name == "listing":
+        return False
+    try:
+        reserve = _reserve()
+    except RuntimeError:
+        return False  # _run_stage reports the bad env as this stage's error
+    return left <= reserve
 
 
 def exit_code(summary: dict) -> int:

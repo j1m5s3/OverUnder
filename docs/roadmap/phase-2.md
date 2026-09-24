@@ -9,15 +9,15 @@ pointers:
   - "[web/src/app/providers.tsx : L21-45]"
   - "[backend/app/auth/router.py : L144-173]"
   - "[backend/app/cdp.py : L116-134]"
-  - "[backend/app/ramps/router.py : L136-159]"
+  - "[backend/app/ramps/router.py : L140-163]"
   - "[contracts/src/RevenueToken.vy : L13-32]"
   - "[contracts/src/FeeVault.vy : L44-50]"
   - "[contracts/src/OverUnderPaymaster.vy : L322-355]"
   - "[contracts/src/MarketAMM.vy : L1-12]"
   - "[contracts/src/MarketFactory.vy : L177-199]"
-  - "[backend/app/relayer/worker.py : L1-24]"
-  - "[backend/app/markets/trading.py : L42-58]"
-  - "[oracles/resolve/fallback.py : L47-151]"
+  - "[backend/app/relayer/worker.py : L1-21]"
+  - "[backend/app/markets/trading.py : L47-67]"
+  - "[oracles/resolve/fallback.py : L48-156]"
 ---
 
 # Phase 2
@@ -122,8 +122,8 @@ The MVP proves AMM settlement. A CLOB overlay may be scheduled later; it is **no
 
 ### App path
 
-- [SHIPPED] Web: `useSendUserOperation` on `base-sepolia` with `useCdpPaymaster: true`. Never a paymaster URL in client code. [web/src/features/trade/AmmSwap.tsx : L264-297]
-- [SHIPPED] Flutter: `POST /aa/cdp-send`; backend `POST /v2/embedded-wallet-api/end-users/{userId}/evm/smart-accounts/{address}/send` with `useCdpPaymaster: true`. [backend/app/cdp.py : L169-179]
+- [SHIPPED] Web: `useSendUserOperation` on `base-sepolia` with `useCdpPaymaster: true`. Never a paymaster URL in client code. [web/src/features/trade/AmmSwap.tsx : L244-299]
+- [SHIPPED] Flutter: `POST /aa/cdp-send`; backend `POST /v2/embedded-wallet-api/end-users/{userId}/evm/smart-accounts/{address}/send` with `useCdpPaymaster: true`. [backend/app/cdp.py : L169-180]
 - [SHIPPED] Allowlist: USDC approve with spender MarketAMM or MarketFactory, CTF setApprovalForAll for MarketAMM, buyWithUSDC, sellToUSDC, factory `createPermissionlessMarket` (must match a prepared listing); `value` 0. Trades on halted markets are 409. [backend/app/aa/router.py : L75-104]
 - [SHIPPED] `POST /aa/userop` returns 410. [backend/app/aa/router.py : L163-165]
 - [PHASE2] Ops: the CDP Portal paymaster policy must allowlist the v2 AMM and Factory addresses and `createPermissionlessMarket` (about 800k gas per op) after the redeploy.
@@ -159,7 +159,7 @@ The MVP proves AMM settlement. A CLOB overlay may be scheduled later; it is **no
 
 ## 7. MoonPay / KYC
 
-[SHIPPED] Coinbase URL builder remains as a fallback. [backend/app/ramps/router.py : L136-159]
+[SHIPPED] Coinbase URL builder remains as a fallback. [backend/app/ramps/router.py : L140-163]
 
 ### On-ramp
 
@@ -209,10 +209,10 @@ FeeVault must stay a **fee sink**, not a minter ([ADR-0003](../adr/0003-ou-nav-t
 
 ## 9. Lifecycle hardening (shipped in code 2026-09-23)
 
-- [SHIPPED] Trading halt at closeTime: on chain in MarketAMM v2 (`closeGate`), and in the API behind `TRADING_HALT_AT_CLOSE` (default true): quotes, `/aa/cdp-send` trades and CLOB orders get 409; web and mobile disable the ticket. [backend/app/markets/trading.py : L42-58]
-- [SHIPPED] ADR-0002 fallback in the oracle job: `OU_FALLBACK_POLICY=attest` (default), `arbitrate` or `manual`. [oracles/resolve/fallback.py : L47-151]
-- [SHIPPED] General resolver for wildcards, user markets and non-sports primaries (3/3 plus a confidence floor; confident 2/3 fallback after 24 h). [oracles/resolve/general.py : L211-409]
-- [SHIPPED] Job hardening: auth preflight with SIWE bootstrap, exit 1 on any failed stage, redacted output, single-flight lease, tick budget, research cooldown. [oracles/job.py : L60-163]
+- [SHIPPED] Trading halt at closeTime: on chain in MarketAMM v2 (`closeGate`), and in the API behind `TRADING_HALT_AT_CLOSE` (default true): quotes, `/aa/cdp-send` trades and CLOB orders get 409; web and mobile disable the ticket. [backend/app/markets/trading.py : L47-67]
+- [SHIPPED] ADR-0002 fallback in the oracle job: `OU_FALLBACK_POLICY=attest` (default), `arbitrate` or `manual`. [oracles/resolve/fallback.py : L48-156]
+- [SHIPPED] General resolver for wildcards, user markets and non-sports primaries (3/3 plus a confidence floor; confident 2/3 fallback after 24 h). [oracles/resolve/general.py : L219-438]
+- [SHIPPED] Job hardening: auth preflight with SIWE bootstrap, exit 1 on any failed stage, redacted output, single-flight lease, tick budget, research cooldown. [oracles/job.py : L136-260]
 - [SHIPPED] Redeploy procedure (ops, after merge): run `deploy-contracts.yml` with target `verify`, then `v2` simulate, then `v2` broadcast (pauses the oracle scheduler); set the repo vars `AMM_ADDRESS` and `FACTORY_ADDRESS` (and `INDEXER_START_BLOCK` from `deployBlock`); regenerate the mobile asset; run `deploy-gcp.yml`; resume the scheduler; audit. Addresses are not recorded here until that run. Step by step: [runbooks/operations.md](../runbooks/operations.md).
 - [STUB] Imported legacy markets keep their pools on `MarketAMMLegacy`; the API, web, mobile and indexer only know `AMM_ADDRESS`, so still-open legacy markets are not tradable from the app after the swap.
 

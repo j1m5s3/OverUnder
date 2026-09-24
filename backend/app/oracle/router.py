@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.router import get_current_user, require_operator
 from app.config import get_settings
-from app.db import get_db
+from app.db import get_db, insert_ignore, session_dialect
 from app.markets.trading import norm_cid
 from app.models import Attestation, Market, User, Vote
 
@@ -39,7 +39,7 @@ class VoteIn(BaseModel):
 
 
 class ResolvedIn(BaseModel):
-    conditionId: str
+    conditionId: str = Field(max_length=66)
     outcome: int
 
 
@@ -205,6 +205,17 @@ async def vote(
     if weight <= 0:
         raise HTTPException(403, "only holders of this market can vote")
     weight = min(weight, 2**63 - 1)  # votes.weight is BIGINT
-    db.add(Vote(condition_id=cid, voter=voter, outcome=body.outcome, weight=weight))
+    # The SELECT above is only a fast path: concurrent requests can all pass it while the balance read
+    # is in flight. uq_vote_condition_voter + ON CONFLICT DO NOTHING lets exactly one insert win.
+    result = await db.execute(
+        insert_ignore(
+            session_dialect(db),
+            Vote,
+            {"condition_id": cid, "voter": voter, "outcome": body.outcome, "weight": weight},
+            ["condition_id", "voter"],
+        )
+    )
     await db.commit()
+    if not result.rowcount:
+        raise HTTPException(409, "already voted")
     return {"ok": True, "voter": voter, "weight": weight}

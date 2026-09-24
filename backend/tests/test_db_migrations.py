@@ -332,3 +332,114 @@ async def test_postgres_concurrent_startups_all_migrate():
         assert set(Base.metadata.tables) <= tables
 
     await _with_scratch_schema("ou_mig_race", body)
+
+
+# --- review fixes: vote key, live-emission key, keyed indexer checkpoint --------------------
+
+_EMISSIONS_DDL = (
+    "CREATE TABLE emission_distributions (id INTEGER PRIMARY KEY, program INTEGER NOT NULL, "
+    "payload_hash VARCHAR(66) NOT NULL, idempotency_key VARCHAR(128) NOT NULL, sender VARCHAR(42) NOT NULL, "
+    "nonce BIGINT, raw_tx TEXT NOT NULL, tx_hash VARCHAR(66) NOT NULL, status VARCHAR(16) NOT NULL, "
+    "recipient_count INTEGER NOT NULL, total_amount VARCHAR(80) NOT NULL, block_number BIGINT, "
+    "last_error TEXT NOT NULL, sent_at BIGINT, created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL)"
+)
+
+
+def _emission_row(payload: str, status: str, key: str = "") -> str:
+    return (
+        "INSERT INTO emission_distributions (program, payload_hash, idempotency_key, sender, raw_tx, tx_hash, status, "
+        f"recipient_count, total_amount, last_error) VALUES (1, '{payload}', '{key}', '0xs', '', '', '{status}', 1, '1', '')"
+    )
+
+
+def test_run_migrations_dedupes_votes_and_adds_the_vote_key(tmp_path):
+    from sqlalchemy.exc import IntegrityError
+
+    from app.db import VOTE_UNIQUE
+
+    eng = create_engine(f"sqlite:///{(tmp_path / 'votes.db').as_posix()}")
+    try:
+        with eng.begin() as conn:
+            conn.execute(text(
+                "CREATE TABLE votes (id INTEGER PRIMARY KEY, condition_id VARCHAR(66) NOT NULL, "
+                "voter VARCHAR(42) NOT NULL, outcome INTEGER NOT NULL, weight BIGINT NOT NULL)"
+            ))
+            for outcome, voter in ((1, "0xa1"), (0, "0xa1"), (0, "0xa1"), (1, "0xb2")):
+                conn.execute(text(
+                    f"INSERT INTO votes (condition_id, voter, outcome, weight) VALUES ('0x11', '{voter}', {outcome}, 5)"
+                ))
+        for _ in range(2):
+            with eng.begin() as conn:
+                run_migrations(conn)
+        with eng.connect() as conn:
+            rows = conn.execute(text("SELECT voter, outcome FROM votes ORDER BY id")).all()
+            assert [tuple(r) for r in rows] == [("0xa1", 1), ("0xb2", 1)]  # the first vote cast survives
+            assert VOTE_UNIQUE in {i["name"] for i in inspect(conn).get_indexes("votes")}
+        with pytest.raises(IntegrityError):
+            with eng.begin() as conn:
+                conn.execute(text("INSERT INTO votes (condition_id, voter, outcome, weight) VALUES ('0x11', '0xa1', 0, 1)"))
+    finally:
+        eng.dispose()
+
+
+def test_run_migrations_adds_the_live_emission_key_when_clean(tmp_path):
+    from sqlalchemy.exc import IntegrityError
+
+    from app.db import EMISSION_LIVE_UNIQUE
+
+    eng = create_engine(f"sqlite:///{(tmp_path / 'em_clean.db').as_posix()}")
+    try:
+        with eng.begin() as conn:
+            conn.execute(text(_EMISSIONS_DDL))
+            conn.execute(text(_emission_row("0xp1", "failed")))
+            conn.execute(text(_emission_row("0xp1", "failed")))  # failed duplicates do not count
+            conn.execute(text(_emission_row("0xp1", "sent")))
+        for _ in range(2):
+            with eng.begin() as conn:
+                run_migrations(conn)
+        with eng.connect() as conn:
+            assert EMISSION_LIVE_UNIQUE in {i["name"] for i in inspect(conn).get_indexes("emission_distributions")}
+        with eng.begin() as conn:
+            conn.execute(text(_emission_row("0xp1", "failed")))  # outside the partial index
+            conn.execute(text(_emission_row("0xp1", "sent", key="second-run")))  # a new key is a new distribution
+        with pytest.raises(IntegrityError):
+            with eng.begin() as conn:
+                conn.execute(text(_emission_row("0xp1", "sending")))
+    finally:
+        eng.dispose()
+
+
+def test_run_migrations_keeps_live_emission_duplicates_and_skips_the_key(tmp_path, caplog):
+    from app.db import EMISSION_LIVE_UNIQUE
+
+    eng = create_engine(f"sqlite:///{(tmp_path / 'em_dupes.db').as_posix()}")
+    try:
+        with eng.begin() as conn:
+            conn.execute(text(_EMISSIONS_DDL))
+            conn.execute(text(_emission_row("0xp2", "confirmed")))
+            conn.execute(text(_emission_row("0xp2", "sent")))
+        with caplog.at_level("WARNING"), eng.begin() as conn:
+            run_migrations(conn)
+        with eng.connect() as conn:
+            assert conn.execute(text("SELECT COUNT(*) FROM emission_distributions")).scalar() == 2  # real txs kept
+            assert EMISSION_LIVE_UNIQUE not in {i["name"] for i in inspect(conn).get_indexes("emission_distributions")}
+        assert "live duplicate" in caplog.text
+    finally:
+        eng.dispose()
+
+
+def test_run_migrations_keeps_the_legacy_checkpoint_and_adds_keyed_checkpoints(tmp_path):
+    eng = create_engine(f"sqlite:///{(tmp_path / 'checkpoint.db').as_posix()}")
+    try:
+        with eng.begin() as conn:
+            conn.execute(text("CREATE TABLE checkpoints (id INTEGER PRIMARY KEY, last_block INTEGER NOT NULL)"))
+            conn.execute(text("INSERT INTO checkpoints (id, last_block) VALUES (1, 36000000)"))
+        for _ in range(2):
+            with eng.begin() as conn:
+                run_migrations(conn)
+        with eng.connect() as conn:
+            assert conn.execute(text("SELECT last_block FROM checkpoints WHERE id = 1")).scalar() == 36_000_000
+            assert {"factory_address", "amm_address", "last_block"} <= _columns(conn, "indexer_checkpoints")
+            assert conn.execute(text("SELECT COUNT(*) FROM indexer_checkpoints")).scalar() == 0
+    finally:
+        eng.dispose()

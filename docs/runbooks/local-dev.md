@@ -24,7 +24,7 @@ pointers:
   - "[.env.example : L66-79]"
   - "[.github/workflows/ci.yml : L17-128]"
   - "[.github/workflows/deploy-gcp.yml : L26-31]"
-  - "[.github/workflows/deploy-gcp.yml : L446-460]"
+  - "[.github/workflows/deploy-gcp.yml : L472-486]"
 ---
 
 # Local development
@@ -239,7 +239,7 @@ On Cloud Run:
 
 - `CDP_PROJECT_ID` comes from the GitHub variable `vars.CDP_PROJECT_ID`.
 - `CDP_API_KEY_ID` and `CDP_API_KEY_SECRET` come from the Secret Manager secrets `OU_CDP_API_KEY_ID` and `OU_CDP_API_KEY_SECRET`.
-- The web image gets the build arg `NEXT_PUBLIC_CDP_PROJECT_ID` [.github/workflows/deploy-gcp.yml : L446-460].
+- The web image gets the build arg `NEXT_PUBLIC_CDP_PROJECT_ID` [.github/workflows/deploy-gcp.yml : L472-486].
 
 ## Leftover OverUnderPaymaster tank
 

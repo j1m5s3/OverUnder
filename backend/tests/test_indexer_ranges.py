@@ -2,14 +2,17 @@ import asyncio
 from types import SimpleNamespace
 
 import pytest
+from sqlalchemy import select
 from web3 import Web3
 
 from app.config import Settings
 from app.db import Base, SessionLocal, engine
 from app.indexer import listener
 from app.indexer.listener import index_once, index_range, next_delay, plan_ranges, resolve_start_block, run_indexer_loop
-from app.models import Checkpoint, Market, MarketListing
+from app.models import Checkpoint, IndexerCheckpoint, Market, MarketListing
 
+FACTORY = "0x" + "11" * 20
+KEY = (FACTORY, "")
 CREATED_CID = "0x" + "c1" * 32
 USER_CID = "0x" + "c2" * 32
 CREATOR = "0x" + "c3" * 20
@@ -101,43 +104,53 @@ async def indexer_env(monkeypatch):
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
-    async def reset(last_block):
+    async def _clear_rows(db):
+        for row in (await db.execute(select(IndexerCheckpoint))).scalars().all():
+            await db.delete(row)
+        legacy = await db.get(Checkpoint, 1)
+        if legacy is not None:
+            await db.delete(legacy)
+        row = await db.get(Market, CREATED_CID)
+        if row is not None:
+            await db.delete(row)
+
+    async def reset(last_block, key=KEY):
+        """Give the address set `key` a checkpoint at last_block (None: no row, a fresh set)."""
         async with SessionLocal() as db:
-            cp = await db.get(Checkpoint, 1)
-            if cp is None:
-                db.add(Checkpoint(id=1, last_block=last_block))
-            else:
-                cp.last_block = last_block
-            row = await db.get(Market, CREATED_CID)
-            if row is not None:
-                await db.delete(row)
+            await _clear_rows(db)
+            await db.flush()
+            if last_block is not None:
+                db.add(IndexerCheckpoint(factory_address=key[0], amm_address=key[1], last_block=last_block))
             await db.commit()
 
-    async def last_block():
+    async def set_legacy(last_block):
         async with SessionLocal() as db:
-            return (await db.get(Checkpoint, 1)).last_block
+            db.add(Checkpoint(id=1, last_block=last_block))
+            await db.commit()
 
-    def configure(head, factory, **overrides):
+    async def last_block(key=KEY):
+        async with SessionLocal() as db:
+            row = await db.get(IndexerCheckpoint, key)
+            return None if row is None else row.last_block
+
+    async def legacy_block():
+        async with SessionLocal() as db:
+            row = await db.get(Checkpoint, 1)
+            return None if row is None else row.last_block
+
+    def configure(head, factory, addresses=None, **overrides):
         settings = Settings(**{"chain_id": 84532, **overrides})
         monkeypatch.setattr(listener, "get_settings", lambda: settings)
-        monkeypatch.setattr(listener, "get_contract_addresses", lambda: {"MarketFactory": "0x" + "11" * 20})
+        monkeypatch.setattr(listener, "get_contract_addresses", lambda: dict(addresses or {"MarketFactory": FACTORY}))
         monkeypatch.setattr(listener, "_web3", lambda url, timeout: SimpleNamespace(eth=SimpleNamespace(block_number=head)))
         monkeypatch.setattr(listener, "_build_contracts", lambda w3, addresses: (factory, None))
         monkeypatch.setattr(listener, "_STATE", listener._IndexerState())
 
+    yield SimpleNamespace(
+        reset=reset, last_block=last_block, configure=configure, set_legacy=set_legacy, legacy_block=legacy_block
+    )
     async with SessionLocal() as db:
-        saved = await db.get(Checkpoint, 1)
-        saved_block = saved.last_block if saved is not None else None
-    yield SimpleNamespace(reset=reset, last_block=last_block, configure=configure)
-    async with SessionLocal() as db:
-        cp = await db.get(Checkpoint, 1)
-        if saved_block is None and cp is not None:
-            await db.delete(cp)
-        elif cp is not None:
-            cp.last_block = saved_block
-        row = await db.get(Market, CREATED_CID)
-        if row is not None:
-            await db.delete(row)
+        await _clear_rows(db)
         await db.commit()
 
 
@@ -429,8 +442,8 @@ async def test_advance_checkpoint_never_moves_backward(indexer_env):
 
     await indexer_env.reset(9_999)
     async with SessionLocal() as db:
-        assert await advance_checkpoint(db, 1_500) == 9_999
-        assert await advance_checkpoint(db, 10_050) == 10_050
+        assert await advance_checkpoint(db, KEY, 1_500) == 9_999
+        assert await advance_checkpoint(db, KEY, 10_050) == 10_050
     assert await indexer_env.last_block() == 10_050
 
 
@@ -445,7 +458,11 @@ async def test_stale_tick_does_not_rewind_checkpoint(indexer_env, monkeypatch):
     async def other_instance_advances_first(w3, factory, amm, db, lo, hi):
         if lo == 1000:
             async with SessionLocal() as other:
-                await other.execute(update(Checkpoint).where(Checkpoint.id == 1).values(last_block=50_000))
+                await other.execute(
+                    update(IndexerCheckpoint)
+                    .where(IndexerCheckpoint.factory_address == KEY[0], IndexerCheckpoint.amm_address == KEY[1])
+                    .values(last_block=50_000)
+                )
                 await other.commit()
         return await real_index_range(w3, factory, amm, db, lo, hi)
 
@@ -521,3 +538,148 @@ def test_indexer_lock_key_is_distinct():
     settings = Settings(_env_file=None)
     keys = {settings.indexer_leader_lock_key, settings.relayer_leader_lock_key, MIGRATION_LOCK_KEY}
     assert len(keys) == 3
+
+
+# --- checkpoint keyed by contract addresses (v2 cutover) --------------------------
+
+NEW_FACTORY = "0x" + "AB" * 20
+NEW_AMM = "0x" + "CD" * 20
+NEW_KEY = (NEW_FACTORY.lower(), NEW_AMM.lower())
+
+
+def test_checkpoint_key_is_lowercase_and_amm_optional():
+    assert listener.checkpoint_key({"MarketFactory": NEW_FACTORY, "MarketAMM": NEW_AMM}) == NEW_KEY
+    assert listener.checkpoint_key({"MarketFactory": FACTORY}) == KEY
+
+
+@pytest.mark.asyncio
+async def test_new_address_set_starts_at_start_block_not_old_checkpoint(indexer_env):
+    """Cutover: the old revision advanced the old set (and the legacy row) past the v2 deploy block."""
+    await indexer_env.reset(60_000)
+    await indexer_env.set_legacy(60_000)
+    created = _Events()
+    indexer_env.configure(
+        1500, _fake_factory(created), addresses={"MarketFactory": NEW_FACTORY, "MarketAMM": NEW_AMM},
+        indexer_start_block=1000, indexer_max_block_range=1000,
+    )
+    assert await index_once() is True
+    assert created.calls == [(1000, 1500)]
+    assert await indexer_env.last_block(NEW_KEY) == 1500
+    assert await indexer_env.last_block() == 60_000  # the old set's checkpoint is untouched
+    assert await indexer_env.legacy_block() == 60_000
+
+
+@pytest.mark.asyncio
+async def test_existing_address_set_is_never_rewound_by_start_block(indexer_env):
+    await indexer_env.reset(1_400)
+    created = _Events()
+    indexer_env.configure(1500, _fake_factory(created), indexer_start_block=1000)
+    assert await index_once() is True
+    assert created.calls == [(1401, 1500)]
+
+
+@pytest.mark.asyncio
+async def test_fresh_set_without_start_block_never_starts_past_the_legacy_checkpoint(indexer_env):
+    await indexer_env.reset(None)
+    await indexer_env.set_legacy(40_000)
+    created = _Events()
+    indexer_env.configure(50_000, _fake_factory(created), indexer_lookback_blocks=1_000, indexer_max_block_range=100_000)
+    assert await index_once() is True
+    assert created.calls == [(40_001, 50_000)]
+
+
+@pytest.mark.asyncio
+async def test_fresh_set_without_start_block_rescans_lookback_when_legacy_is_ahead(indexer_env):
+    await indexer_env.reset(None)
+    await indexer_env.set_legacy(49_990)
+    created = _Events()
+    indexer_env.configure(50_000, _fake_factory(created), indexer_lookback_blocks=1_000, indexer_max_block_range=100_000)
+    assert await index_once() is True
+    assert created.calls == [(49_001, 50_000)]
+
+
+@pytest.mark.asyncio
+async def test_fresh_set_defaults_lookback_or_anvil_block_one(indexer_env):
+    await indexer_env.reset(None)
+    created = _Events()
+    indexer_env.configure(50_000, _fake_factory(created), indexer_lookback_blocks=1_000, indexer_max_block_range=100_000)
+    assert await index_once() is True
+    assert created.calls == [(49_001, 50_000)]
+
+    await indexer_env.reset(None)
+    anvil = _Events()
+    indexer_env.configure(300, _fake_factory(anvil), chain_id=31337, indexer_max_block_range=1_000)
+    assert await index_once() is True
+    assert anvil.calls == [(1, 300)]
+
+
+# --- leader connection is invalidated, not pooled, when dropped on an error -------
+
+
+class _FlakyPgConn(_FakePgConn):
+    def __init__(self, got, fail_on=()):
+        super().__init__(got)
+        self.fail_on, self.invalidated = fail_on, False
+
+    async def execute(self, stmt, params=None):
+        sql = str(stmt)
+        if any(f in sql for f in self.fail_on):
+            self.sql.append((sql, params))
+            raise RuntimeError("server closed the connection unexpectedly")
+        return await super().execute(stmt, params)
+
+    async def invalidate(self):
+        self.invalidated = True
+
+
+class _FlakyPgEngine(_FakePgEngine):
+    def __init__(self, got, fail_on=()):
+        super().__init__(got)
+        self.fail_on = fail_on
+
+    async def connect(self):
+        conn = _FlakyPgConn(self._got, self.fail_on)
+        self.conns.append(conn)
+        return conn
+
+
+@pytest.mark.asyncio
+async def test_failed_leader_ping_invalidates_the_lock_connection(monkeypatch):
+    fake = _FlakyPgEngine(got=True)
+    monkeypatch.setattr(listener, "engine", fake)
+    monkeypatch.setattr(listener, "_LEADER", listener._LeaderState())
+    settings = Settings(chain_id=84532)
+    assert await listener.ensure_indexer_leader(settings) is True
+    first = fake.conns[0]
+    first.fail_on = ("SELECT 1",)
+    assert await listener.ensure_indexer_leader(settings) is True  # re-elected on a fresh connection
+    assert first.invalidated is True and first.closed is True
+    assert len(fake.conns) == 2 and listener._LEADER.conn is fake.conns[1]
+
+
+@pytest.mark.asyncio
+async def test_failed_try_lock_and_failed_unlock_invalidate(monkeypatch):
+    fake = _FlakyPgEngine(got=True, fail_on=("pg_try_advisory_lock",))
+    monkeypatch.setattr(listener, "engine", fake)
+    monkeypatch.setattr(listener, "_LEADER", listener._LeaderState())
+    settings = Settings(chain_id=84532)
+    with pytest.raises(RuntimeError):
+        await listener.ensure_indexer_leader(settings)
+    assert fake.conns[0].invalidated is True and fake.conns[0].closed is True
+
+    fake.fail_on = ()
+    assert await listener.ensure_indexer_leader(settings) is True
+    leader = fake.conns[1]
+    leader.fail_on = ("pg_advisory_unlock",)
+    await listener.release_indexer_leadership()
+    assert leader.invalidated is True and leader.closed is True and listener._LEADER.conn is None
+
+
+@pytest.mark.asyncio
+async def test_clean_release_does_not_invalidate(monkeypatch):
+    fake = _FlakyPgEngine(got=True)
+    monkeypatch.setattr(listener, "engine", fake)
+    monkeypatch.setattr(listener, "_LEADER", listener._LeaderState())
+    assert await listener.ensure_indexer_leader(Settings(chain_id=84532)) is True
+    await listener.release_indexer_leadership()
+    assert fake.conns[0].invalidated is False and fake.conns[0].closed is True

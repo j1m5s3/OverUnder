@@ -11,8 +11,8 @@ pointers:
   - "[contracts/src/MarketFactory.vy : L177-199]"
   - "[contracts/src/Exchange.vy : L128-159]"
   - "[contracts/tests/fixtures/MarketAMMV1.vy : L121-201]"
-  - "[docs/adr/0011-pm-amm-v2-close-gate.md : L40-73]"
-  - "[docs/adr/0012-loosely-gated-user-listing.md : L42-112]"
+  - "[docs/adr/0011-pm-amm-v2-close-gate.md : L42-74]"
+  - "[docs/adr/0012-loosely-gated-user-listing.md : L44-113]"
 ---
 
 ## Status

@@ -466,3 +466,160 @@ async def test_seed_at_amm_min_lp_is_accepted(op_client):
     chain = _chain(exists=True, struct=_struct(CID))
     r = await _post(op_client, chain, _body(seed_usdc=10_000))
     assert r.status_code == 200, r.text
+
+
+# --- racing replays: one create tx, the replay mirrors it -------------------------------------
+
+
+def _racing_chain():
+    """New market whose create takes a while to mine; marketExists turns true once it has."""
+    import time as _time
+
+    chain = _new_market_chain()
+    state = {"created": False}
+    chain.factory.functions.marketExists.return_value.call.side_effect = lambda *a, **k: state["created"]
+    chain.factory.functions.markets.return_value.call.side_effect = lambda *a, **k: _struct(CID_OTHER)
+
+    def mined(*_a, **_k):
+        _time.sleep(0.3)
+        state["created"] = True
+        return {"status": 1}
+
+    chain.w3.eth.wait_for_transaction_receipt.side_effect = mined
+    return chain
+
+
+@pytest.mark.asyncio
+async def test_racing_create_replays_send_one_tx(op_client):
+    import asyncio
+
+    chain = _racing_chain()
+    with patch("app.markets.router.get_settings", return_value=_op_settings()), patch(
+        "app.markets.chain.load_factory_chain", return_value=chain
+    ):
+        first, second = await asyncio.gather(
+            op_client.post("/api/v1/markets", headers=_headers(), json=_body(question_id=QID_OTHER)),
+            op_client.post("/api/v1/markets", headers=_headers(), json=_body(question_id=QID_OTHER)),
+        )
+    assert first.status_code == second.status_code == 200, (first.text, second.text)
+    assert first.json()["conditionId"] == second.json()["conditionId"] == CID_OTHER
+    chain.factory.functions.createPrimaryMarket.assert_called_once()
+    chain.w3.eth.send_raw_transaction.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_create_mirror_tolerates_a_row_the_indexer_inserted(op_client):
+    """The indexer inserts the MarketCreated row before the mirror runs: the mirror's INSERT ... ON CONFLICT
+    DO NOTHING leaves it and fills in the off-chain fields instead of raising an IntegrityError."""
+    import asyncio
+
+    chain = _new_market_chain()
+    loop = asyncio.get_running_loop()
+
+    async def indexer_insert():
+        async with SessionLocal() as session:
+            session.add(Market(
+                condition_id=CID_OTHER, parent_condition_id="", question="Chiefs vs Broncos: Chiefs win?",
+                resolution_criteria="", market_type=0, close_time=2_000_000_100, suggested_probability=0.5,
+            ))
+            await session.commit()
+
+    def indexer_wins(*_a, **_k):
+        # Runs in the create's worker thread; the insert goes through the app's own engine (any dialect).
+        asyncio.run_coroutine_threadsafe(indexer_insert(), loop).result(timeout=10)
+        return {"status": 1}
+
+    chain.w3.eth.wait_for_transaction_receipt.side_effect = indexer_wins
+    r = await _post(op_client, chain, _body(question_id=QID_OTHER))
+    assert r.status_code == 200, r.text
+    async with SessionLocal() as session:
+        row = await session.get(Market, CID_OTHER)
+        assert row.resolution_criteria == "Official final score."
+        assert row.suggested_probability == pytest.approx(0.6)
+
+
+def test_create_lock_key_is_stable_signed_int64_and_distinct():
+    from app.db import MIGRATION_LOCK_KEY
+    from app.markets.router import create_lock_key
+
+    a, b = create_lock_key(bytes.fromhex(QID[2:])), create_lock_key(bytes.fromhex(QID_OTHER[2:]))
+    assert a == create_lock_key(bytes.fromhex(QID[2:])) and a != b
+    assert all(-(2**63) <= k < 2**63 for k in (a, b))
+    assert MIGRATION_LOCK_KEY not in (a, b)
+
+
+@pytest.mark.asyncio
+async def test_create_takes_the_postgres_advisory_xact_lock(monkeypatch):
+    from types import SimpleNamespace
+
+    from app import db as db_mod
+    from app.markets import router as markets_router
+
+    sql = []
+
+    class _Conn:
+        async def execute(self, stmt, params=None):
+            sql.append((str(stmt), params))
+
+    class _Begin:
+        async def __aenter__(self):
+            sql.append(("BEGIN", None))
+            return _Conn()
+
+        async def __aexit__(self, *exc):
+            sql.append(("END", None))
+            return False
+
+    fake = SimpleNamespace(dialect=SimpleNamespace(name="postgresql"), begin=lambda: _Begin())
+    monkeypatch.setattr(db_mod, "engine", fake)
+    qid = bytes.fromhex(QID[2:])
+    async with markets_router._serialized_create(qid):
+        sql.append(("WORK", None))
+    assert [s for s, _ in sql] == ["BEGIN", "SELECT pg_advisory_xact_lock(:k)", "WORK", "END"]
+    assert sql[1][1] == {"k": markets_router.create_lock_key(qid)}
+
+
+# --- operator list of paused markets (oracle job) and archive unlinking the schedule ----------
+
+
+@pytest.mark.asyncio
+async def test_include_paused_is_operator_only_and_lists_paused_rows(op_client):
+    await _seed_row(paused=True)
+    public = await op_client.get("/api/v1/markets")
+    assert CID not in {c["primary"]["conditionId"] for c in public.json()}
+    # The flag is ignored for nobody: without an operator bearer it is refused, never silently public.
+    assert (await op_client.get("/api/v1/markets", params={"includePaused": 1})).status_code == 401
+    r = await op_client.get("/api/v1/markets", params={"includePaused": 1}, headers=_headers(NONOP, False))
+    assert r.status_code == 403
+    r = await op_client.get("/api/v1/markets", params={"includePaused": 1}, headers=_headers())
+    assert r.status_code == 200
+    cards = {c["primary"]["conditionId"]: c["primary"] for c in r.json()}
+    assert cards[CID]["paused"] is True and cards[CID]["tradingOpen"] is False
+    # A bearer alone never changes the public list.
+    r = await op_client.get("/api/v1/markets", headers=_headers())
+    assert CID not in {c["primary"]["conditionId"] for c in r.json()}
+
+
+@pytest.mark.asyncio
+async def test_archive_unlinks_schedule_rows_pointing_at_the_orphan(op_client):
+    from app.models import NflScheduleGame
+
+    await _seed_row()
+    async with SessionLocal() as session:
+        session.add_all([
+            NflScheduleGame(season=2031, week=1, home="A", away="B", kickoff_unix=1, listed_condition_id=CID),
+            NflScheduleGame(season=2031, week=1, home="C", away="D", kickoff_unix=1, listed_condition_id=CID_OTHER),
+        ])
+        await session.commit()
+    try:
+        with _oracle_close(0):
+            r = await op_client.post(f"/api/v1/markets/{CID}/archive", headers=_headers())
+        assert r.status_code == 200, r.text
+        async with SessionLocal() as session:
+            rows = (await session.execute(select(NflScheduleGame).where(NflScheduleGame.season == 2031))).scalars().all()
+            assert {(g.home, g.listed_condition_id) for g in rows} == {("A", ""), ("C", CID_OTHER)}
+    finally:
+        async with SessionLocal() as session:
+            for g in (await session.execute(select(NflScheduleGame).where(NflScheduleGame.season == 2031))).scalars().all():
+                await session.delete(g)
+            await session.commit()

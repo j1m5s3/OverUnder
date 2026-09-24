@@ -317,11 +317,10 @@ def sellToUSDC(conditionId: bytes32, sellYes: bool, tokenAmount: uint256, minUsd
     return usdc_out
 
 @external
-def addLiquidity(conditionId: bytes32, usdcAmount: uint256) -> uint256:
-    """
-    Proportional deposit at the current price: every pool component (YES, NO, lpFees, L, lpSupply)
-    grows by usdcAmount/(max(YES, NO) + lpFees). The unused short-side tokens are refunded.
-    """
+def addLiquidity(conditionId: bytes32, usdcAmount: uint256, minLpOut: uint256 = 0) -> uint256:
+    """Proportional deposit at the current price: YES, NO, lpFees, L and lpSupply all grow by
+    usdcAmount/(max(YES, NO) + lpFees); unused short-side tokens are refunded. Reverts "slippage" if fewer
+    than minLpOut shares are minted (sandwich bound); the default 0 keeps the v1 two-argument selector."""
     p: Pool = self.pools[conditionId]
     assert p.exists and p.liquidity > 0, "no pool"
     assert usdcAmount > 0
@@ -335,6 +334,7 @@ def addLiquidity(conditionId: bytes32, usdcAmount: uint256) -> uint256:
     dy: uint256 = (p.noReserve * usdcAmount + denom - 1) // denom
     minted: uint256 = p.lpSupply * usdcAmount // denom
     assert minted > 0, "dust"
+    assert minted >= minLpOut, "slippage"
     p.yesReserve += dx
     p.noReserve += dy
     p.liquidity += p.liquidity * usdcAmount // denom

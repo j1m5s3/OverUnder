@@ -3,6 +3,10 @@
 MarketAMM v2 also reverts buys/sells with "market closed" once closeTime
 passes (when its closeGate is on); this module stops quotes and the mobile
 cdp-send path earlier so users get a clean 409 instead of a failed user op.
+
+A paused market (factory setPaused, or an archived orphan) is halted here too:
+MarketAMM does not read the factory's paused flag, so this API gate is what
+stops app-sponsored quotes and trades. Direct AMM calls stay possible.
 """
 
 from __future__ import annotations
@@ -16,6 +20,7 @@ from app.models import Market, MarketListing
 REASON_CLOSED = "market closed"
 REASON_RESOLVED = "market resolved"
 REASON_UNLISTED = "listing not confirmed"
+REASON_PAUSED = "market paused"
 MARKET_TYPE_USER = 2
 
 
@@ -31,7 +36,7 @@ def halts_at(m: Market, settings) -> int | None:
 
 
 def trading_open(m: Market, settings, now: int | None = None) -> bool:
-    if m.resolved:
+    if m.resolved or m.paused:
         return False
     at = halts_at(m, settings)
     if at is None:
@@ -55,4 +60,8 @@ async def trading_halt_reason(db: AsyncSession, condition_id: str, settings, now
     at = halts_at(m, settings)
     if at is not None and int(time.time() if now is None else now) >= at:
         return REASON_CLOSED
+    if m.paused:
+        # After the closed check, so a paused market past closeTime still reports "market closed"
+        # (the relayer worker rolls back fills matched after close on that reason).
+        return REASON_PAUSED
     return None

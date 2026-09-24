@@ -11,12 +11,20 @@ deploy (the v2 AMM + Factory redeploy moves MarketAMM and MarketFactory):
   python scripts/sync_mobile_deployments.py 84532 --source path/to/84532.json
 
 The default source is contracts/deployments/<chainId>.json (gitignored). Pass
---source for the deploy-contracts.yml upload. Every contract address comes from
-the source, so stale keys (MockEntryPoint, an old USDC) are dropped; operator,
-treasury, wildcardGenerator and agents fall back to the current asset when the
-source omits them. Only public contract addresses are read and printed.
+--source for the deploy-contracts.yml broadcast upload. Every contract address
+comes from the source, so stale keys (MockEntryPoint, an old USDC) are dropped;
+operator, treasury, wildcardGenerator and agents fall back to the current asset
+when the source omits them. Only public contract addresses are read and printed.
 
-Exit codes: 0 ok / in sync, 1 drift (--check), 2 usage or input error.
+The script refuses (exit 1, nothing written) a source that is not a real
+deployment: a simulation (`simulated`, `dryRun`, `fork` markers), a failed or
+partial v2 migration (`migrationFailed`, `orphans`, `completedSteps`), or a v2
+payload (it names MarketAMMLegacy / MarketFactoryLegacy) without every v2 key
+or whose new MarketAMM / MarketFactory still equals the legacy address.
+--force skips that check for a file you have verified by hand.
+
+Exit codes: 0 ok / in sync, 1 drift (--check) or unsafe source refused,
+2 usage or input error.
 """
 
 from __future__ import annotations
@@ -51,9 +59,46 @@ META_KEYS = ("operator", "treasury", "wildcardGenerator", "agents")
 
 _ADDR = re.compile(r"^0x[0-9a-fA-F]{40}$")
 
+# deploy_ci.py writes `simulated` into every upload; the others cover hand-made or older payloads.
+SIMULATION_MARKERS = ("simulated", "dryRun", "dry_run", "fork", "forked")
+# deploy_ci.partial_v2_payload marks a v2 migration that stopped part-way.
+FAILURE_MARKERS = ("migrationFailed", "orphans", "completedSteps")
+LEGACY_KEYS = ("MarketAMMLegacy", "MarketFactoryLegacy")
+V2_KEYS = ("MarketAMM", "MarketFactory", "MarketAMMLegacy", "MarketFactoryLegacy", "deployBlock")
+
 
 class SyncError(ValueError):
     """Input that cannot produce a correct asset (exit 2)."""
+
+
+class UnsafeSource(ValueError):
+    """A source that parses but is not a finished real deployment (exit 1 unless --force)."""
+
+
+def _truthy(value) -> bool:
+    if isinstance(value, str):
+        return value.strip().lower() not in ("", "0", "false", "no", "off")
+    return bool(value)
+
+
+def unsafe_reasons(source: dict) -> list[str]:
+    """Why source must not become the mobile asset (empty when it looks like a finished deployment)."""
+    reasons = []
+    for key in SIMULATION_MARKERS:
+        if _truthy(source.get(key)):
+            reasons.append(f"{key}={source[key]!r} (a simulation on a fork, nothing was deployed)")
+    for key in FAILURE_MARKERS:
+        if key in source and (_truthy(source[key]) or key != "migrationFailed"):
+            reasons.append(f"has {key} (a failed or partial v2 migration)")
+    if any(key in source for key in LEGACY_KEYS):
+        missing = [key for key in V2_KEYS if source.get(key) in (None, "")]
+        if missing:
+            reasons.append(f"v2 payload lacks {', '.join(missing)}")
+        for new, old in (("MarketAMM", "MarketAMMLegacy"), ("MarketFactory", "MarketFactoryLegacy")):
+            a, b = source.get(new), source.get(old)
+            if isinstance(a, str) and isinstance(b, str) and a.lower() == b.lower():
+                reasons.append(f"{new} equals {old} (the new contract was never deployed)")
+    return reasons
 
 
 def contracts_path(chain_id: int, root: Path = ROOT) -> Path:
@@ -133,6 +178,11 @@ def main(argv: list[str] | None = None, root: Path = ROOT, out=sys.stdout, err=s
     parser.add_argument("chain_id", type=int, nargs="?", default=84532)
     parser.add_argument("--source", type=Path, help="deployments JSON (default contracts/deployments/<chainId>.json)")
     parser.add_argument("--check", action="store_true", help="report drift and exit 1 instead of writing")
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="accept a source flagged as simulated, failed or incomplete (only after checking it by hand)",
+    )
     args = parser.parse_args(argv)
 
     source_path = args.source or contracts_path(args.chain_id, root)
@@ -140,6 +190,11 @@ def main(argv: list[str] | None = None, root: Path = ROOT, out=sys.stdout, err=s
     try:
         source = _read(source_path, "source")
         _check_chain(source, args.chain_id, "source")
+        reasons = unsafe_reasons(source)
+        if reasons and not args.force:
+            raise UnsafeSource("; ".join(reasons))
+        if reasons:
+            print(f"warning: --force: using {source_path.name} despite: {'; '.join(reasons)}", file=err)
         if args.check:
             mobile = _read(target, "mobile asset")
             _check_chain(mobile, args.chain_id, "mobile asset")
@@ -154,6 +209,13 @@ def main(argv: list[str] | None = None, root: Path = ROOT, out=sys.stdout, err=s
             return 1
         existing = _read(target, "mobile asset") if target.exists() else None
         asset = build_asset(source, args.chain_id, existing)
+    except UnsafeSource as exc:
+        print(
+            f"error: refusing {source_path}: {exc}. Use the contracts-<chain>-<target>-broadcast-<run> artifact of a "
+            "successful deploy-contracts run, or pass --force after checking every address on chain. Nothing written.",
+            file=err,
+        )
+        return 1
     except SyncError as exc:
         print(f"error: {exc}", file=err)
         return 2

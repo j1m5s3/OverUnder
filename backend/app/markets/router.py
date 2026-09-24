@@ -1,22 +1,25 @@
 import asyncio
+import hashlib
 import logging
 import threading
 import time
+import weakref
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Any, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from pydantic import BaseModel, Field
-from sqlalchemy import and_, func, select
+from sqlalchemy import and_, func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth.router import require_operator
+from app.auth.router import get_current_user, require_operator
 from app.config import get_settings
-from app.db import get_db
+from app.db import get_db, insert_ignore, session_dialect
 from app.markets import chain as market_chain
 from app.markets.sports import is_sports_market
 from app.markets.trading import halts_at, trading_open
-from app.markets.visibility import is_listed, visible_clause
+from app.markets.visibility import is_listed, listed_clause, visible_clause
 from app.models import LiveScore, Market, MarketListing, NflScheduleGame, PricePoint, User
 
 # Factory marketType values that render as event-card primaries (0 operator primary, 2 user-listed).
@@ -34,6 +37,39 @@ AMM_MIN_LP = 10**4
 # One operator EOA signs every create/pause: serialize them per process so two
 # requests running in worker threads never read the same pending nonce.
 _OPERATOR_TX_LOCK = threading.Lock()
+
+# POST /markets is check-then-create: one create at a time per process (per event loop, so a lock is
+# never shared across loops), plus a Postgres advisory xact lock per questionId across instances.
+_CREATE_LOCKS: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
+
+
+def _create_lock() -> asyncio.Lock:
+    loop = asyncio.get_running_loop()
+    lock = _CREATE_LOCKS.get(loop)
+    if lock is None:
+        lock = _CREATE_LOCKS[loop] = asyncio.Lock()
+    return lock
+
+
+def create_lock_key(question_id: bytes) -> int:
+    """Signed int64 advisory key for one questionId, namespaced so it cannot equal the fixed lock keys."""
+    return int.from_bytes(hashlib.sha256(b"OU:create-market:" + question_id).digest()[:8], "big", signed=True)
+
+
+@asynccontextmanager
+async def _serialized_create(question_id: bytes):
+    """Hold the process create lock and, on Postgres, pg_advisory_xact_lock(questionId) on a dedicated
+    connection until the create and its DB mirror finish. The xact lock ends with the transaction, so
+    it cannot leak into the pool even if the request fails."""
+    from app import db as db_mod
+
+    async with _create_lock():
+        if db_mod.engine.dialect.name != "postgresql":
+            yield
+            return
+        async with db_mod.engine.begin() as conn:
+            await conn.execute(text("SELECT pg_advisory_xact_lock(:k)"), {"k": create_lock_key(question_id)})
+            yield
 
 
 class CreateMarketIn(BaseModel):
@@ -106,7 +142,13 @@ class ScheduleGameIn(BaseModel):
     week: int = Field(ge=0, le=INT4_MAX)
     season: int = Field(ge=0, le=INT4_MAX)
     status: Literal["scheduled", "in_progress", "final", "postponed", "cancelled"] = "scheduled"
-    listedConditionId: str = ""
+    # Omitted: keep the stored link. A condition id: link it. An explicit "": unlink (e.g. to relist a
+    # game whose market was archived as an orphan).
+    listedConditionId: str = Field(
+        default="",
+        max_length=66,
+        description='Omit to keep the stored link; "" clears it (operator relist of an archived orphan).',
+    )
 
 
 class ScheduleGamePublic(ScheduleGameIn):
@@ -135,17 +177,30 @@ def _child_of(parent_condition_id: str):
 @router.get("")
 async def list_markets(
     parent_id: str | None = Query(default=None, alias="parentId"),
+    include_paused: bool = Query(
+        default=False,
+        alias="includePaused",
+        description="Operator bearer JWT required: also list paused (and archived) markets, so the oracle job "
+        "can still resolve a paused registered market.",
+    ),
+    authorization: str | None = Header(default=None, include_in_schema=False),
     db: AsyncSession = Depends(get_db),
 ) -> list[EventCard] | list[MarketPublic]:
     settings = get_settings()
     now = int(time.time())
+    shown = _visible()
+    if include_paused:
+        # Public requests are unchanged; only an operator may see paused rows (type-2 listings still
+        # need a confirmed listing: unlisted ones are on GET /markets/listing/review).
+        require_operator(await get_current_user(authorization, db))
+        shown = listed_clause()
     if parent_id:
-        stmt = select(Market).where(_visible(), Market.parent_condition_id == parent_id)
+        stmt = select(Market).where(shown, Market.parent_condition_id == parent_id)
         rows = (await db.execute(stmt)).scalars().all()
         prices = await _latest_prices(db, [m.condition_id for m in rows])
         return [_to_public(m, prices.get(m.condition_id), settings, now) for m in rows]
 
-    visible = list((await db.execute(select(Market).where(_visible()))).scalars().all())
+    visible = list((await db.execute(select(Market).where(shown))).scalars().all())
     prices = await _latest_prices(db, [m.condition_id for m in visible])
 
     def pub(m: Market) -> MarketPublic:
@@ -224,7 +279,8 @@ async def upsert_schedule(
         else:
             existing.kickoff_unix = game.kickoff_unix
             existing.status = game.status
-            if game.listedConditionId:
+            if game.listedConditionId or "listedConditionId" in game.model_fields_set:
+                # An explicit "" unlinks the row; an omitted field never touches the link.
                 existing.listed_condition_id = game.listedConditionId
     await db.commit()
     out: list[ScheduleGamePublic] = []
@@ -349,9 +405,11 @@ async def create_market(
 
     # Chain reads, the faucet/approve/create txs and their receipts run in a worker
     # thread so a slow RPC or a stuck tx never blocks the event loop; the DB session
-    # stays on the loop.
-    _kind, chain_row = await asyncio.to_thread(_create_on_chain, settings, body, question_id_bytes, parent_bytes)
-    row = await _upsert_market_row(db, chain_row, body)
+    # stays on the loop. Serialized per questionId: a replay racing a create re-reads
+    # marketExists after it and mirrors the market instead of sending a second create.
+    async with _serialized_create(question_id_bytes):
+        _kind, chain_row = await asyncio.to_thread(_create_on_chain, settings, body, question_id_bytes, parent_bytes)
+        row = await _upsert_market_row(db, chain_row, body)
     return _public(row)
 
 
@@ -378,24 +436,26 @@ def _create_on_chain(settings, body: CreateMarketIn, question_id_bytes: bytes, p
     chain = market_chain.load_factory_chain(settings)
     w3, factory, usdc, operator_acct = chain.w3, chain.factory, chain.usdc, chain.operator
 
-    # Idempotency (step 12): the condition id is a pure function of (oracle, questionId),
-    # so a replay finds the market on chain and mirrors it without sending a tx.
-    try:
-        condition_id = market_chain.condition_id_for(factory.functions.oracle().call(), question_id_bytes)
-        cid_bytes = bytes.fromhex(condition_id[2:])
-        onchain = market_chain.read_factory_market(factory, cid_bytes)
-        prepared_elsewhere = onchain is None and int(chain.ctf.functions.outcomeSlots(cid_bytes).call()) != 0
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(500, f"failed to read factory state: {type(e).__name__}")
-    if onchain is not None:
-        return "existing", onchain
-    if prepared_elsewhere:
-        # Squatted questionId (anyone can prepareCondition) or a legacy market not imported into this factory.
-        raise HTTPException(409, "condition prepared outside this factory")
-
     with _OPERATOR_TX_LOCK:
+        # Idempotency (step 12): the condition id is a pure function of (oracle, questionId),
+        # so a replay finds the market on chain and mirrors it without sending a tx. Read under
+        # the operator lock (and the caller's per-questionId lock) so a racing replay sees the
+        # first create's receipt instead of a stale "not created".
+        try:
+            condition_id = market_chain.condition_id_for(factory.functions.oracle().call(), question_id_bytes)
+            cid_bytes = bytes.fromhex(condition_id[2:])
+            onchain = market_chain.read_factory_market(factory, cid_bytes)
+            prepared_elsewhere = onchain is None and int(chain.ctf.functions.outcomeSlots(cid_bytes).call()) != 0
+        except HTTPException:
+            raise
+        except Exception as e:
+            raise HTTPException(500, f"failed to read factory state: {type(e).__name__}")
+        if onchain is not None:
+            return "existing", onchain
+        if prepared_elsewhere:
+            # Squatted questionId (anyone can prepareCondition) or a legacy market not imported into this factory.
+            raise HTTPException(409, "condition prepared outside this factory")
+
         balance = usdc.functions.balanceOf(operator_acct.address).call()
         if balance < body.seed_usdc:
             try:
@@ -453,22 +513,33 @@ def _create_on_chain(settings, body: CreateMarketIn, question_id_bytes: bytes, p
 
 
 async def _upsert_market_row(db: AsyncSession, chain_row: dict[str, Any], body: CreateMarketIn) -> Market:
-    """Mirror a factory market into the DB. Chain fields win; the body only supplies off-chain metadata."""
+    """Mirror a factory market into the DB. Chain fields win; the body only supplies off-chain metadata.
+
+    INSERT ... ON CONFLICT DO NOTHING first: the indexer may insert the same row from MarketCreated
+    at any moment, and a lost race must not turn a successful create into a 500."""
     cid = chain_row["conditionId"]
-    existing = await db.get(Market, cid)
-    if existing is None:
-        existing = Market(
-            condition_id=cid,
-            parent_condition_id=chain_row["parentConditionId"],
-            question=chain_row["question"],
-            resolution_criteria=body.resolution_criteria,
-            market_type=chain_row["marketType"],
-            close_time=chain_row["closeTime"],
-            paused=bool(chain_row.get("paused", False)),
-            suggested_probability=body.suggested_probability,
+    result = await db.execute(
+        insert_ignore(
+            session_dialect(db),
+            Market,
+            {
+                "condition_id": cid,
+                "parent_condition_id": chain_row["parentConditionId"],
+                "question": chain_row["question"],
+                "resolution_criteria": body.resolution_criteria,
+                "market_type": chain_row["marketType"],
+                "close_time": chain_row["closeTime"],
+                "paused": bool(chain_row.get("paused", False)),
+                "suggested_probability": body.suggested_probability,
+            },
+            ["condition_id"],
         )
-        db.add(existing)
-    else:
+    )
+    inserted = bool(result.rowcount)
+    existing = (
+        await db.execute(select(Market).where(Market.condition_id == cid).execution_options(populate_existing=True))
+    ).scalar_one()
+    if not inserted:
         existing.question = chain_row["question"]
         existing.market_type = chain_row["marketType"]
         existing.close_time = chain_row["closeTime"]
@@ -578,7 +649,14 @@ async def archive_market(
         raise HTTPException(409, "market is registered on the configured oracle; pause it on the factory instead")
     if not m.paused:
         m.paused = True
-        await db.commit()
+    # Unlink schedule rows that point at the orphan so the listing job can relist the game.
+    await db.execute(
+        update(NflScheduleGame)
+        .where(NflScheduleGame.listed_condition_id == cid)
+        .values(listed_condition_id="")
+        .execution_options(synchronize_session=False)
+    )
+    await db.commit()
     return _public(m)
 
 

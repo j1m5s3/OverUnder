@@ -49,6 +49,9 @@ BILLS_CID = "0x" + "b1" * 32
 def _listing_env(monkeypatch):
     monkeypatch.delenv("OU_LISTING_STALE_GRACE_SECONDS", raising=False)
     monkeypatch.delenv("OU_QUESTION_ID_KEY", raising=False)
+    # Link checks read the chain only when RPC + oracle config is present.
+    for name in ("ANVIL_RPC_URL", "OU_RPC_URL", "ORACLE_ADDRESS"):
+        monkeypatch.delenv(name, raising=False)
 
 
 def _operator_env(monkeypatch):
@@ -443,3 +446,111 @@ def test_question_id_hmac_with_operator_key(monkeypatch):
     assert keyed == question_id(2026, 4, "Chiefs", "Broncos", 1)
     assert question_id(2026, 4, "Chiefs", "Broncos", 1, key="other") != keyed
     assert question_id(2026, 4, "Chiefs", "Broncos", 1, key="") == legacy
+
+
+# --- orphaned links (PR #30 review) ------------------------------------------------
+
+ORPHAN_CID = "0x" + "0d" * 32
+PAUSED_CID = "0x" + "9a" * 32
+LIVE_CID = "0x" + "11" * 32
+
+
+class _Registry:
+    """Fake chain: onchain_close_time per cid (0 = created on another oracle)."""
+
+    def __init__(self, closes, fail=()):
+        self.closes = closes
+        self.fail = set(fail)
+        self.calls = []
+
+    def onchain_close_time(self, cid):
+        self.calls.append(cid)
+        if cid in self.fail:
+            raise RuntimeError("rpc timeout")
+        return self.closes.get(cid, 0)
+
+
+def _schedule_posts(posts):
+    return [body for url, body in posts if url.endswith("/markets/schedule")]
+
+
+def test_orphan_link_is_relisted_and_relinked(monkeypatch):
+    _operator_env(monkeypatch)
+    chiefs_q = winner_question("Broncos", "Chiefs")
+    # The orphan was archived, so the public list no longer shows it.
+    http_get, http_post, posts = _fake_api([W3_BILLS, dict(W4_CHIEFS, listedConditionId=ORPHAN_CID)])
+    chain = _Registry({})
+    summary = run(http_get=http_get, http_post=http_post, now=NOW, chain=chain)
+    assert [body["question"] for body in _market_posts(posts)] == [chiefs_q]
+    assert summary["orphaned"] == [{"question": chiefs_q, "conditionId": ORPHAN_CID, "season": 2026, "week": 4}]
+    assert summary["skipped"] == [] and summary["linkCheck"] == "on"
+    ((row,),) = _schedule_posts(posts)
+    assert row["listedConditionId"] == "0x" + "ee" * 32  # the new market replaces the orphan link
+    assert chain.calls == [ORPHAN_CID]
+
+
+def test_visible_unregistered_card_match_is_relisted(monkeypatch):
+    """A legacy row with no link matched by (question, kickoff) to an unarchived orphan card."""
+    _operator_env(monkeypatch)
+    chiefs_q = winner_question("Broncos", "Chiefs")
+    cards = [{"primary": {"conditionId": ORPHAN_CID, "question": chiefs_q, "marketType": 0, "closeTime": W4_CHIEFS["kickoff_unix"]}, "children": []}]
+    http_get, http_post, posts = _fake_api([W3_BILLS, W4_CHIEFS], cards=cards)
+    summary = run(http_get=http_get, http_post=http_post, now=NOW, chain=_Registry({}))
+    assert [body["question"] for body in _market_posts(posts)] == [chiefs_q]
+    assert summary["orphaned"][0]["conditionId"] == ORPHAN_CID
+    assert summary["collisions"] == [{"question": chiefs_q, "season": 2026, "week": 4}]
+
+
+def test_orphan_link_cleared_when_game_cannot_be_relisted(monkeypatch):
+    _operator_env(monkeypatch)
+    started = dict(W4_CHIEFS, listedConditionId=ORPHAN_CID, kickoff_unix=NOW + 60)
+    http_get, http_post, posts = _fake_api([W3_BILLS, started])
+    summary = run(http_get=http_get, http_post=http_post, now=NOW, chain=_Registry({}))
+    assert _market_posts(posts) == []
+    assert summary["tooLate"] == [winner_question("Broncos", "Chiefs")]
+    ((row,),) = _schedule_posts(posts)
+    assert row["listedConditionId"] == "" and row["away"] == "Chiefs" and row["week"] == 4
+    assert summary["ok"] is True
+
+
+def test_registered_links_are_trusted(monkeypatch):
+    _operator_env(monkeypatch)
+    chiefs_q, bills_q = winner_question("Broncos", "Chiefs"), winner_question("Jets", "Bills")
+    cards = [{"primary": {"conditionId": LIVE_CID, "question": chiefs_q, "marketType": 0, "closeTime": W4_CHIEFS["kickoff_unix"]}, "children": []}]
+    schedule = [W3_BILLS, dict(W4_CHIEFS, listedConditionId=LIVE_CID), dict(W4_BILLS, listedConditionId=PAUSED_CID)]
+    http_get, http_post, posts = _fake_api(schedule, cards=cards)
+    chain = _Registry({LIVE_CID: W4_CHIEFS["kickoff_unix"], PAUSED_CID: W4_BILLS["kickoff_unix"]})
+    summary = run(http_get=http_get, http_post=http_post, now=NOW, chain=chain)
+    assert posts == []
+    assert summary["skipped"] == [chiefs_q, bills_q] and summary["orphaned"] == []
+    # Registered but hidden from the public list: paused by an operator, keep the link.
+    assert summary["pausedLinks"] == [{"question": bills_q, "conditionId": PAUSED_CID}]
+
+
+def test_link_check_failure_or_no_chain_config_trusts_links(monkeypatch):
+    _operator_env(monkeypatch)
+    schedule = [W3_BILLS, dict(W4_CHIEFS, listedConditionId=ORPHAN_CID)]
+    http_get, http_post, posts = _fake_api(schedule)
+    summary = run(http_get=http_get, http_post=http_post, now=NOW, chain=_Registry({}, fail={ORPHAN_CID}))
+    assert posts == [] and summary["linkCheck"] == "errors"
+    assert summary["linkCheckErrors"][0]["conditionId"] == ORPHAN_CID
+    assert summary["ok"] is True
+    http_get, http_post, posts = _fake_api(schedule)
+    summary = run(http_get=http_get, http_post=http_post, now=NOW)  # no RPC / oracle env
+    assert posts == [] and summary["linkCheck"] == "off"
+
+
+def test_listing_defers_creates_once_budget_spent(monkeypatch):
+    import budget
+
+    _operator_env(monkeypatch)
+    http_get, http_post, posts = _fake_api([W3_BILLS, W4_CHIEFS, W4_BILLS])
+    budget.start(600)
+    budget._deadline[0] = 0
+    try:
+        summary = run(http_get=http_get, http_post=http_post, now=NOW)
+    finally:
+        budget.clear()
+    assert posts == []
+    assert summary["deferred"] == [winner_question("Broncos", "Chiefs"), winner_question("Jets", "Bills")]
+    assert summary["ok"] is True

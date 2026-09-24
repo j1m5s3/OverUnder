@@ -172,6 +172,14 @@ def select_targets(
     return selected
 
 
+def kickoff_iso(primary: dict) -> str | None:
+    """The game's kickoff (a primary's closeTime) as an ISO UTC stamp, or None when unknown."""
+    close = _close_time(primary)
+    if close <= 0:
+        return None
+    return datetime.fromtimestamp(close, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
 def _http_get_json(url: str) -> Any:
     with httpx.Client(timeout=30) as client:
         response = client.get(url)
@@ -202,16 +210,19 @@ def run_job(
 
     targets = select_targets(primaries, fetch_detail, clock, cap, window, max_age_seconds(), recent_seconds())
     factory = coordinator_factory or (lambda: ScoreCoordinator(publisher=publisher))
+    min_seconds = budget.research_min_seconds()
     results = []
     for primary in targets:
         cid = primary["conditionId"]
         question = primary.get("question") or ""
-        if budget.exhausted():
+        # Three sequential agent runs: do not start one the stage budget cannot finish.
+        if budget.exhausted() or not budget.can_start(min_seconds):
             results.append({"conditionId": cid, "ok": True, "skipped": "budget"})
             continue
         try:
             coord = factory()
-            outcome = coord.run(question, condition_id=cid)
+            # The kickoff pins the scout to this meeting of the two teams (not an earlier one).
+            outcome = coord.run(question, condition_id=cid, kickoff=kickoff_iso(primary))
             compact = [
                 {
                     "home": r.get("home_label"),
@@ -219,6 +230,7 @@ def run_job(
                     "homeScore": r.get("home_score"),
                     "awayScore": r.get("away_score"),
                     "status": r.get("status"),
+                    "gameDate": r.get("game_date"),
                     "facts": r.get("facts"),
                 }
                 for r in (outcome.get("reports") or [])

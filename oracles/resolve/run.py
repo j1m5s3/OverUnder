@@ -1,9 +1,20 @@
-"""Dual-gate sports auto-resolve plus the ADR-0002 24h fallback. Coordinator.run stays research-only."""
+"""Dual-gate sports auto-resolve plus the ADR-0002 24h fallback. Coordinator.run stays research-only.
+
+Research gets the kickoff (closeTime) so agents resolve on that game, not an earlier
+meeting of the same teams. Candidates come from the operator market view
+(resolve/markets.py), so paused registered markets still resolve. Per market:
+- research that runs and does not resolve is recorded (research cooldown);
+- research that raises records a failure marker (shorter cooldown) and does not use
+  a cap slot, so one failing market cannot starve newer ones;
+- a failed send is not recorded, so the next tick retries it;
+- a send the tick budget cannot cover is deferred (reason "budget") before broadcast.
+"""
 
 from __future__ import annotations
 
 import os
 import time
+from datetime import datetime, timezone
 from typing import Any, Callable
 
 import budget
@@ -11,6 +22,7 @@ from consensus.coordinator import Coordinator
 from resolve import chain as chain_mod
 from resolve import cooldown
 from resolve import fallback as fallback_mod
+from resolve import markets as markets_mod
 from redact import log_error
 from resolve import publish as publish_mod
 from resolve.winner import score_outcome, yes_team
@@ -43,6 +55,23 @@ def env_chain_id() -> int:
 def close_order(market: dict) -> tuple[int, str]:
     """Oldest closeTime first; ties by conditionId so ticks are deterministic."""
     return int(market.get("closeTime") or 0), market.get("conditionId") or ""
+
+
+def iso_utc(ts: int) -> str:
+    return datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def deferred_send(entry: dict) -> dict:
+    """Result for a send the tick budget could not cover: nothing broadcast, nothing recorded."""
+    return {**entry, "ok": True, "submitted": False, "reason": "budget", "deferred": "send"}
+
+
+def research_failed(entry: dict, persister, cid: str, exc: Exception) -> dict:
+    """Result for a research run that raised; records the failure marker (error cooldown)."""
+    log_error(f"research failed {cid}: {exc}")
+    fragment = {**entry, "ok": False, "submitted": False, "reason": cooldown.ERROR_REASON, "error": str(exc)}
+    error = cooldown.record_failure(persister, cid, exc)
+    return {**fragment, "persistError": error} if error else fragment
 
 
 def is_dual_gate_primary(card: dict) -> bool:
@@ -123,16 +152,21 @@ def run(
     publisher=None,
     now: float | None = None,
     fallback_policy: str | None = None,
+    operator_get: Callable[[str], Any] | None = None,
 ) -> dict:
+    """`operator_get` reads the operator market view; it defaults to the JWT GET only when
+    `http_get` is not injected (tests pass it explicitly)."""
     policy = fallback_mod.parse_policy(fallback_policy) if fallback_policy else fallback_mod.fallback_policy()
     base = _api_url()
     getter = http_get or _http_get_json
+    if operator_get is None and http_get is None:
+        operator_get = markets_mod.operator_get_json
     clock = now if now is not None else time.time()
     cap = max_markets()
     retry_window = cooldown.retry_seconds()
-    cards = getter(f"{base}/api/v1/markets")
-    if not isinstance(cards, list):
-        raise RuntimeError("markets list must be an array")
+    error_window = cooldown.error_retry_seconds()
+    min_seconds = budget.research_min_seconds()
+    cards, view = markets_mod.market_cards(base, getter, operator_get)
     primaries = dual_gate_primaries(cards)
     chain_api = chain or chain_mod
     persister = publisher or publish_mod
@@ -154,6 +188,7 @@ def run(
         return clock if now is not None else max(clock, chain_now())
 
     researched = 0
+    failed = 0
     results = []
     not_registered: list[str] = []
     for primary in primaries:
@@ -195,19 +230,29 @@ def run(
             if not can_submit:
                 results.append({"conditionId": cid, "ok": True, "submitted": False, "reason": "config mismatch"})
                 continue
-            retry = cooldown.retry_at(getter, base, cid, clock, retry_window)
+            retry = cooldown.retry_at(getter, base, cid, clock, retry_window, error_window)
             if retry is not None:
                 results.append({"conditionId": cid, "ok": True, "submitted": False, "reason": "research cooldown", "retryAt": retry})
                 continue
-            if budget.exhausted():
+            if budget.exhausted() or not budget.can_start(min_seconds):
                 results.append({"conditionId": cid, "ok": True, "submitted": False, "reason": "budget"})
                 continue
-            if researched >= cap:
+            # Failed runs do not use cap slots; attempts stop at 2 * cap so errors stay bounded.
+            if researched >= cap or researched + failed >= 2 * cap:
                 results.append({"conditionId": cid, "ok": True, "submitted": False, "reason": "capped"})
                 continue
-            researched += 1
             coord = factory()
-            research = coord.run(question)
+            try:
+                research = coord.run(question, kickoff=iso_utc(close_time))
+            except Exception as research_exc:
+                if budget.exhausted():
+                    # Cut off by the budget watchdog: not this market's fault, retry next tick.
+                    results.append({"conditionId": cid, "ok": True, "submitted": False, "reason": "budget"})
+                    continue
+                failed += 1
+                results.append(research_failed({"conditionId": cid}, persister, cid, research_exc))
+                continue
+            researched += 1
             reports = research.get("reports") or []
 
             def unresolved(fragment: dict, reports=reports, cid=cid) -> dict:
@@ -226,16 +271,18 @@ def run(
                 )
                 try:
                     chain_api.submit_consensus(cid, derived, evidence, deadline, sigs)
+                except budget.SendDeferred:
+                    results.append(deferred_send({"conditionId": cid}))
+                    continue
                 except Exception as send_exc:
                     raced = resolved_concurrently(cid, chain_api, persister)
                     if raced is not None:
                         results.append(raced)
                         continue
                     log_error(f"resolve submit failed {cid}: {send_exc}")
+                    # Not recorded as research: the next tick retries the send.
                     results.append(
-                        unresolved(
-                            {"conditionId": cid, "ok": False, "submitted": False, "txError": True, "error": str(send_exc), "reason": "tx error"}
-                        )
+                        {"conditionId": cid, "ok": False, "submitted": False, "txError": True, "error": str(send_exc), "reason": "tx error"}
                     )
                     continue
                 results.append(persist_resolution(persister, cid, reports, derived, {"path": "consensus"}))
@@ -262,20 +309,21 @@ def run(
                     oracle=oracle,
                     chain_id=chain_id,
                 )
+            except budget.SendDeferred:
+                results.append(deferred_send({"conditionId": cid}))
+                continue
             except fallback_mod.SendFailed as send_exc:
                 log_error(f"resolve fallback send failed {cid}: {send_exc}")
                 results.append(
-                    unresolved(
-                        {
-                            "conditionId": cid,
-                            "ok": False,
-                            "submitted": False,
-                            "txError": True,
-                            "error": str(send_exc),
-                            "attested": send_exc.attested,
-                            "reason": "tx error",
-                        }
-                    )
+                    {
+                        "conditionId": cid,
+                        "ok": False,
+                        "submitted": False,
+                        "txError": True,
+                        "error": str(send_exc),
+                        "attested": send_exc.attested,
+                        "reason": "tx error",
+                    }
                 )
                 continue
             if fragment.get("submitted"):
@@ -290,7 +338,9 @@ def run(
             results.append({"conditionId": cid, "ok": False, "submitted": False, "error": str(exc)})
     return {
         "ok": can_submit and not any(r.get("txError") for r in results),
-        "attempted": researched,
+        "attempted": researched + failed,
+        "researchErrors": failed,
+        "marketsView": view,
         "policy": policy,
         "config": config,
         "notRegistered": not_registered,

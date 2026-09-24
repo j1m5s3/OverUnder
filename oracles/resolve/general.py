@@ -17,6 +17,11 @@ its parent's kickoff). So nothing is researched before the event is over:
   closeTime + OU_GENERAL_RESOLVE_DELAY_SECONDS (default 24h).
 Agents may answer outcome 2 (undetermined); any such report blocks both
 consensus and the fallback for that tick.
+
+Like resolve/run.py: candidates come from the operator market view (paused
+registered markets included), a research run that raises records a failure marker
+and does not use a cap slot, a failed send is not recorded (the next tick retries),
+and a send the tick budget cannot cover is deferred before broadcast.
 """
 
 from __future__ import annotations
@@ -35,13 +40,16 @@ from redact import log_error
 from resolve import chain as chain_mod
 from resolve import cooldown
 from resolve import fallback as fallback_mod
+from resolve import markets as markets_mod
 from resolve import publish as publish_mod
 from resolve.run import (
     close_order,
+    deferred_send,
     env_chain_id,
     is_dual_gate_primary,
     mirror_chain_resolved,
     persist_resolution,
+    research_failed,
     resolved_concurrently,
     supporter_reports,
 )
@@ -216,19 +224,24 @@ def run(
     publisher=None,
     now: float | None = None,
     fallback_policy: str | None = None,
+    operator_get: Callable[[str], Any] | None = None,
 ) -> dict:
+    """`operator_get` reads the operator market view; it defaults to the JWT GET only when
+    `http_get` is not injected (tests pass it explicitly)."""
     policy = fallback_mod.parse_policy(fallback_policy) if fallback_policy else fallback_mod.fallback_policy()
     base = _api_url()
     getter = http_get or _http_get_json
+    if operator_get is None and http_get is None:
+        operator_get = markets_mod.operator_get_json
     clock = now if now is not None else time.time()
     cap = max_markets()
     delay = delay_seconds()
     gated_delay = gated_delay_seconds()
     floor = min_confidence()
     retry_window = cooldown.retry_seconds()
-    cards = getter(f"{base}/api/v1/markets")
-    if not isinstance(cards, list):
-        raise RuntimeError("markets list must be an array")
+    error_window = cooldown.error_retry_seconds()
+    min_seconds = budget.research_min_seconds()
+    cards, view = markets_mod.market_cards(base, getter, operator_get)
     items = candidates(cards)
     chain_api = chain or chain_mod
     persister = publisher or publish_mod
@@ -250,6 +263,7 @@ def run(
         return clock if now is not None else max(clock, chain_now())
 
     researched = 0
+    failed = 0
     results: list[dict] = []
     not_registered: list[str] = []
     for item in items:
@@ -290,22 +304,32 @@ def run(
             if not can_submit:
                 results.append({**entry, "ok": True, "submitted": False, "reason": "config mismatch"})
                 continue
-            retry = cooldown.retry_at(getter, base, cid, clock, retry_window)
+            retry = cooldown.retry_at(getter, base, cid, clock, retry_window, error_window)
             if retry is not None:
                 results.append({**entry, "ok": True, "submitted": False, "reason": "research cooldown", "retryAt": retry})
                 continue
-            if budget.exhausted():
+            if budget.exhausted() or not budget.can_start(min_seconds):
                 results.append({**entry, "ok": True, "submitted": False, "reason": "budget"})
                 continue
-            if researched >= cap:
+            # Failed runs do not use cap slots; attempts stop at 2 * cap so errors stay bounded.
+            if researched >= cap or researched + failed >= 2 * cap:
                 results.append({**entry, "ok": True, "submitted": False, "reason": "capped"})
                 continue
-            researched += 1
             known_parent = item["parentQuestion"]
             parent_detail = gate_detail if gate and gate[1] == "parent" else None
             parent_question = _parent_question(getter, base, market, known_parent, parent_detail)
             coord = factory()
-            research = coord.run(**research_input(market, parent_question, close_time))
+            try:
+                research = coord.run(**research_input(market, parent_question, close_time))
+            except Exception as research_exc:
+                if budget.exhausted():
+                    # Cut off by the budget watchdog: not this market's fault, retry next tick.
+                    results.append({**entry, "ok": True, "submitted": False, "reason": "budget"})
+                    continue
+                failed += 1
+                results.append(research_failed(entry, persister, cid, research_exc))
+                continue
+            researched += 1
             reports = research.get("reports") or []
             confidences = _confidences(reports)
             entry["confidence"] = confidences
@@ -332,16 +356,18 @@ def run(
                 )
                 try:
                     chain_api.submit_consensus(cid, outcome, evidence, deadline, sigs)
+                except budget.SendDeferred:
+                    results.append(deferred_send(entry))
+                    continue
                 except Exception as send_exc:
                     raced = resolved_concurrently(cid, chain_api, persister)
                     if raced is not None:
                         results.append({**entry, **raced})
                         continue
                     log_error(f"general submit failed {cid}: {send_exc}")
+                    # Not recorded as research: the next tick retries the send.
                     results.append(
-                        unresolved(
-                            {**entry, "ok": False, "submitted": False, "txError": True, "error": str(send_exc), "reason": "tx error"}
-                        )
+                        {**entry, "ok": False, "submitted": False, "txError": True, "error": str(send_exc), "reason": "tx error"}
                     )
                     continue
                 results.append({**entry, **persist_resolution(persister, cid, reports, outcome, {"path": "consensus"})})
@@ -372,20 +398,21 @@ def run(
                     allow_arbitrate=False,
                     basis="research",
                 )
+            except budget.SendDeferred:
+                results.append(deferred_send(entry))
+                continue
             except fallback_mod.SendFailed as send_exc:
                 log_error(f"general fallback send failed {cid}: {send_exc}")
                 results.append(
-                    unresolved(
-                        {
-                            **entry,
-                            "ok": False,
-                            "submitted": False,
-                            "txError": True,
-                            "error": str(send_exc),
-                            "attested": send_exc.attested,
-                            "reason": "tx error",
-                        }
-                    )
+                    {
+                        **entry,
+                        "ok": False,
+                        "submitted": False,
+                        "txError": True,
+                        "error": str(send_exc),
+                        "attested": send_exc.attested,
+                        "reason": "tx error",
+                    }
                 )
                 continue
             if fragment.get("submitted"):
@@ -401,7 +428,9 @@ def run(
             results.append({**entry, "ok": False, "submitted": False, "error": str(exc)})
     return {
         "ok": can_submit and not any(r.get("txError") for r in results),
-        "attempted": researched,
+        "attempted": researched + failed,
+        "researchErrors": failed,
+        "marketsView": view,
         "policy": policy,
         "config": config,
         "notRegistered": not_registered,

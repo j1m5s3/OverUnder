@@ -2,9 +2,12 @@ name: Contracts on Base Sepolia
 
 # Manual dispatch only. verify is read-only; v2 and core simulate on a fork unless broadcast is checked.
 # Order for the AMM + Factory redeploy: verify -> v2 (simulate) -> v2 (broadcast) -> gh variable set -> deploy-gcp.
+# Simulation runs from any branch. A broadcast runs only when dispatched from main AND the confirm input is
+# exactly "BROADCAST <target>" (e.g. "BROADCAST v2"); the first step refuses anything else before checkout.
 # A broadcast signs with the operator key that the oracle job and the API also use: it pauses the
 # overunder-oracle-tick scheduler, waits for running executions, and refuses while operator txs are pending.
-# The scheduler stays paused after a successful broadcast (resume it after deploy-gcp); it is resumed on failure.
+# The scheduler stays paused after a successful broadcast; deploy-gcp.yml resumes it at the end of its run
+# (unless repo variable OU_KEEP_SCHEDULER_PAUSED=true). It is resumed here if the broadcast fails.
 on:
   workflow_dispatch:
     inputs:
@@ -14,11 +17,15 @@ on:
         options: [verify, v2, core]
         default: verify
       broadcast:
-        description: "Send real transactions (unchecked = simulate on a fork, nothing sent)"
+        description: "Send real transactions (unchecked = simulate on a fork, nothing sent). Only from main, with confirm set"
         type: boolean
         default: false
+      confirm:
+        description: "Broadcast only: type exactly BROADCAST <target> (e.g. BROADCAST v2). Ignored for simulations"
+        type: string
+        default: ""
       permissionless:
-        description: "v2: open user listing to everyone (unchecked = allowlisted listers only)"
+        description: "v2: open user listing to everyone, rate-limited by listing_cooldown (ADR-0012: on for the Sepolia migration). Unchecked = allowlisted listers only"
         type: boolean
         default: true
       close_gate:
@@ -69,6 +76,41 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
+      # Runs before checkout, so an unmerged branch's deploy scripts never see the operator key in broadcast mode.
+      # Every later broadcast decision reads steps.guard.outputs.broadcast (the job and artifact names only label the request).
+      - name: Guard broadcast (main branch + confirm)
+        id: guard
+        shell: bash
+        env:
+          REF: ${{ github.ref }}
+          WANT_BROADCAST: ${{ inputs.broadcast }}
+          TARGET: ${{ inputs.target }}
+          CONFIRM: ${{ inputs.confirm }}
+        run: |
+          set -euo pipefail
+          if [ "$WANT_BROADCAST" != true ]; then
+            echo "broadcast=false" >> "$GITHUB_OUTPUT"
+            echo "Simulation (nothing sent) on $REF."
+            exit 0
+          fi
+          want="BROADCAST $TARGET"
+          fail=0
+          if [ "$REF" != refs/heads/main ]; then
+            echo "::error title=Broadcast refused::A broadcast runs only from main; this run is on $REF. Fix: merge first and dispatch from main (gh workflow run deploy-contracts.yml --ref main ...), or untick broadcast to simulate from this branch."
+            fail=1
+          fi
+          # The typed value is never echoed.
+          if [ "$CONFIRM" != "$want" ]; then
+            echo "::error title=Broadcast refused::The confirm input must be exactly '$want'. Fix: re-run with confirm set to '$want', or untick broadcast to simulate."
+            fail=1
+          fi
+          if [ "$fail" -ne 0 ]; then
+            echo "Nothing was sent."
+            exit 1
+          fi
+          echo "broadcast=true" >> "$GITHUB_OUTPUT"
+          echo "Broadcast of $TARGET confirmed on $REF."
+
       - name: Checkout code
         uses: actions/checkout@v5
 
@@ -111,7 +153,7 @@ jobs:
         run: python -m pip install -r contracts/requirements.txt
 
       - name: Contract tests (gate before broadcast)
-        if: inputs.broadcast && inputs.target != 'verify'
+        if: steps.guard.outputs.broadcast == 'true' && inputs.target != 'verify'
         working-directory: contracts
         timeout-minutes: 30
         run: python -m pytest tests -q
@@ -143,7 +185,7 @@ jobs:
       # can replace a pending tx or leave a contract mined at an unexpected address.
       - name: Pause the oracle scheduler and wait for running executions
         id: pause
-        if: inputs.broadcast && inputs.target != 'verify'
+        if: steps.guard.outputs.broadcast == 'true' && inputs.target != 'verify'
         shell: bash
         timeout-minutes: 25
         run: |
@@ -201,7 +243,8 @@ jobs:
           ENTRYPOINT_ADDRESS: ${{ vars.ENTRYPOINT_ADDRESS }}
           ACCOUNT_FACTORY_ADDRESS: ${{ vars.ACCOUNT_FACTORY_ADDRESS }}
           TARGET: ${{ inputs.target }}
-          BROADCAST: ${{ inputs.broadcast }}
+          # From the guard, not the raw input: a missing or refused guard means simulate.
+          BROADCAST: ${{ steps.guard.outputs.broadcast }}
           PERMISSIONLESS: ${{ inputs.permissionless }}
           CLOSE_GATE: ${{ inputs.close_gate }}
           MIN_SEED_USDC: ${{ inputs.min_seed_usdc }}
@@ -233,13 +276,15 @@ jobs:
             exit 1
           fi
 
-      - name: Scheduler left paused (resume after deploy-gcp)
+      - name: Scheduler left paused (deploy-gcp resumes it)
         if: success() && steps.pause.outputs.paused == 'true'
         shell: bash
         run: |
+          echo "::notice::$SCHEDULER_JOB_NAME stays paused until deploy-gcp.yml finishes (it resumes the scheduler unless OU_KEEP_SCHEDULER_PAUSED=true)."
           {
             echo ""
-            echo "**$SCHEDULER_JOB_NAME is paused.** After the repo variables are updated and deploy-gcp.yml has finished:"
+            echo "**$SCHEDULER_JOB_NAME is paused.** Update the repo variables, then run deploy-gcp.yml: its last scheduler step"
+            echo "resumes the job (unless repo variable OU_KEEP_SCHEDULER_PAUSED=true). To resume by hand instead:"
             echo '```'
             echo "gcloud scheduler jobs resume $SCHEDULER_JOB_NAME --location=$GCP_REGION --project=$GCP_PROJECT_ID"
             echo '```'

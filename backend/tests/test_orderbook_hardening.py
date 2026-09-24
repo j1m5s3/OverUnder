@@ -107,6 +107,21 @@ async def test_post_order_on_resolved_market_is_409_even_with_halt_off(api):
     assert await _order_count(acct.address) == 0
 
 
+async def test_post_order_on_paused_market_is_409(api):
+    acct = Account.create()
+    token = await siwe_login(api, acct)
+    cid = rand_cid()
+    async with SessionLocal() as db:
+        db.add(Market(condition_id=cid, question="CLOB halt?", close_time=int(time.time()) + 3600, paused=True))
+        await db.commit()
+    with relayer_env(make_settings(trading_halt_at_close=True), FakeChain()):
+        r = await _post(api, token, order_body(acct, cid=cid, is_buy=True))
+        book = (await api.get(f"/api/v1/orderbook/{cid}")).json()
+    assert r.status_code == 409 and r.json()["detail"] == "market paused"
+    assert await _order_count(acct.address) == 0
+    assert book["tradingOpen"] is False and book["haltReason"] == "market paused"
+
+
 async def test_bad_input_on_closed_market_is_still_400(api):
     acct = Account.create()
     token = await siwe_login(api, acct)

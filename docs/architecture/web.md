@@ -8,13 +8,13 @@ pointers:
   - "[web/src/app/providers.tsx : L21-45]"
   - "[web/src/features/wallet/ConnectBar.tsx : L36-89]"
   - "[web/src/features/trade/AmmSwap.tsx : L54-130]"
-  - "[web/src/features/trade/AmmSwap.tsx : L264-365]"
+  - "[web/src/features/trade/AmmSwap.tsx : L244-367]"
   - "[web/src/features/trade/AmmSwap.tsx : L410-423]"
   - "[web/src/features/trade/tradingWindow.ts : L1-99]"
   - "[web/src/features/wallet/userOpOutcome.ts : L45-126]"
   - "[web/src/features/listing/ListMarketForm.tsx : L66-344]"
   - "[web/src/features/listing/listing.ts : L167-349]"
-  - "[web/src/features/wallet/RampCard.tsx : L42-95]"
+  - "[web/src/features/wallet/RampCard.tsx : L41-98]"
   - "[web/src/shared/api/client.ts : L1-65]"
   - "[web/src/features/markets/MarketList.tsx : L36-160]"
   - "[web/src/features/markets/eventHub.ts : L24-37]"
@@ -25,13 +25,13 @@ pointers:
   - "[web/src/features/markets/MatchupHero.tsx : L1-75]"
   - "[web/src/features/markets/PriceChart.tsx : L16-101]"
   - "[web/src/features/oracle/OraclePanel.tsx : L8-64]"
-  - "[web/src/features/oracle/oracleStatus.ts : L43-63]"
+  - "[web/src/features/oracle/oracleStatus.ts : L49-74]"
   - "[mobile/lib/config/app_config.dart : L1-24]"
-  - "[mobile/lib/models/models.dart : L150-167]"
+  - "[mobile/lib/models/models.dart : L150-166]"
   - "[mobile/lib/models/deployments.dart : L77-90]"
   - "[mobile/lib/services/api_client.dart : L98-133]"
-  - "[mobile/lib/services/api_client.dart : L196-212]"
-  - "[mobile/lib/features/trade/amm_swap_widget.dart : L81-131]"
+  - "[mobile/lib/services/api_client.dart : L197-213]"
+  - "[mobile/lib/features/trade/amm_swap_widget.dart : L81-144]"
 ---
 
 # Web and mobile
@@ -53,12 +53,12 @@ Next.js App Router under `web/`. Feature folders are the Flutter carryover map; 
 ## Wallet
 
 - [SHIPPED] Email OTP via CDP hooks; `POST /auth/cdp` exchanges the access token for an HS256 session. JWT `sub` is the smart account. [web/src/features/wallet/ConnectBar.tsx : L36-89]
-- [SHIPPED] RampCard validates the amount, checks KYC, then opens MoonPay; the Coinbase URL is the fallback to the smart account. [web/src/features/wallet/RampCard.tsx : L42-95]
+- [SHIPPED] RampCard validates the amount, checks KYC, then opens MoonPay; the Coinbase URL is the fallback to the smart account. [web/src/features/wallet/RampCard.tsx : L41-98]
 - [SHIPPED] User-facing wallets are CDP embedded smart accounts. See [ADR-0010](../adr/0010-cdp-embedded-wallets.md).
 
 ## Trade
 
-- [SHIPPED] AmmSwap quotes, then executes a batched CDP user op: USDC `approve` + `buyWithUSDC`, or CTF `setApprovalForAll` + `sellToUSDC`, `useCdpPaymaster: true`, never a paymaster URL. Addresses come from `NEXT_PUBLIC_AMM_ADDRESS`, `NEXT_PUBLIC_USDC_ADDRESS` and `NEXT_PUBLIC_CTF_ADDRESS`. [web/src/features/trade/AmmSwap.tsx : L264-365]
+- [SHIPPED] AmmSwap quotes, then executes a batched CDP user op: USDC `approve` + `buyWithUSDC`, or CTF `setApprovalForAll` + `sellToUSDC`, `useCdpPaymaster: true`, never a paymaster URL. Addresses come from `NEXT_PUBLIC_AMM_ADDRESS`, `NEXT_PUBLIC_USDC_ADDRESS` and `NEXT_PUBLIC_CTF_ADDRESS`. [web/src/features/trade/AmmSwap.tsx : L244-367]
 - [SHIPPED] Trading closed: the server's `tradingHaltsAt` wins when present (`NEXT_PUBLIC_TRADING_HALT_AT_CLOSE` plus `closeTime` only when the field is missing); `resolved`, `tradingOpen: false`, a quote 409 or a `"market closed"` revert also close the ticket. A one-shot timer flips it at the halt time. [web/src/features/trade/tradingWindow.ts : L1-99] [web/src/features/trade/AmmSwap.tsx : L54-130]
 - [SHIPPED] Closed state: no quoting, banner ("Trading closed at …", "Market resolved" or listing not confirmed), inputs and button disabled. Other quote errors show short text, not raw JSON. [web/src/features/trade/AmmSwap.tsx : L410-423]
 - [SHIPPED] Success shows only once the user op is confirmed; a lost status poll keeps the ticket locked while it re-polls (up to 150 s) instead of reporting a failure. [web/src/features/wallet/userOpOutcome.ts : L45-126]
@@ -73,17 +73,17 @@ Next.js App Router under `web/`. Feature folders are the Flutter carryover map; 
 
 ## Oracle UI
 
-- [SHIPPED] OraclePanel polls `/oracle/{id}/status`, keeps each agent's latest row, labels outcome 2 "undetermined", computes unanimity itself and shows the vote count. It does not read `kind`, so a research record can be an agent's latest row. [web/src/features/oracle/OraclePanel.tsx : L8-64] [web/src/features/oracle/oracleStatus.ts : L43-63]
+- [SHIPPED] OraclePanel polls `/oracle/{id}/status`, drops `kind: research` rows (a missing kind counts as a resolution report, as on the server and mobile), keeps each agent's latest remaining row, labels outcome 2 "undetermined", computes unanimity itself and shows the vote count. Agreeing low-confidence or failed-send research rows therefore never show "unanimous … settling". [web/src/features/oracle/OraclePanel.tsx : L8-64] [web/src/features/oracle/oracleStatus.ts : L49-74]
 - [PHASE2] Cast vote, evidence links, countdown to WINDOW, arbitration banner.
 
 ## Mobile
 
 - [SHIPPED] Flutter app mirrors the web markets, trade, wallet and oracle modules; no listing UI. Email OTP and trades go through the OverUnder API (`/auth/cdp/*`, `/aa/cdp-send`). Shared tokens and OpenAPI: [mobile/README.md](../../mobile/README.md).
 - [SHIPPED] Build-time `--dart-define`: `API_BASE_URL`, `CHAIN_ID` (default 31337) and `TRADING_HALT_AT_CLOSE` (fallback only when the API omits `tradingHaltsAt`). [mobile/lib/config/app_config.dart : L1-24]
-- [SHIPPED] Models read camelCase with snake_case fallback; types 0 and 2 head event cards; `yesProbability` prefers `yesPriceMicros`; `isTradingClosed` is true when resolved, `tradingOpen` is false, or now ≥ `tradingHaltsAt`. [mobile/lib/models/models.dart : L150-167]
-- [SHIPPED] Trade targets come from `GET /api/v1/chain/addresses`, else the bundled `assets/deployments/<CHAIN_ID>.json`; resolution fails closed on a chain mismatch or when neither exists. Regenerate the asset with `scripts/sync_mobile_deployments.py` after every AMM/Factory redeploy. [mobile/lib/models/deployments.dart : L77-90]
-- [SHIPPED] Quotes send `buy_yes`/`usdc_in` or `sell_yes`/`token_amount` in base units; a 409 from the quote or `/aa/cdp-send` becomes `TradingClosedException`. [mobile/lib/services/api_client.dart : L98-119] [mobile/lib/services/api_client.dart : L196-212]
-- [SHIPPED] The swap widget shows a closed banner, disables its controls, flips at `tradingHaltsAt` with a timer and surfaces a failed address load on execute. [mobile/lib/features/trade/amm_swap_widget.dart : L81-131]
+- [SHIPPED] Models read camelCase with snake_case fallback; types 0 and 2 head event cards; `yesProbability` prefers `yesPriceMicros`; `isTradingClosed` is true when resolved, `tradingOpen` is false, or now ≥ `tradingHaltsAt`. [mobile/lib/models/models.dart : L150-166]
+- [SHIPPED] Trade targets come from `GET /api/v1/chain/addresses`, else the bundled `assets/deployments/<CHAIN_ID>.json`; resolution fails closed on a chain mismatch or when neither exists. Regenerate the asset with `scripts/sync_mobile_deployments.py` after every AMM/Factory redeploy; it refuses simulated, failed or partial v2 uploads unless `--force` is passed. [mobile/lib/models/deployments.dart : L77-90]
+- [SHIPPED] Quotes send `buy_yes`/`usdc_in` or `sell_yes`/`token_amount` in base units; a 409 from the quote or `/aa/cdp-send` becomes `TradingClosedException`. [mobile/lib/services/api_client.dart : L98-119] [mobile/lib/services/api_client.dart : L197-213]
+- [SHIPPED] The swap widget shows a closed banner, disables its controls, flips at `tradingHaltsAt` with a timer and surfaces a failed address load on execute. [mobile/lib/features/trade/amm_swap_widget.dart : L81-144]
 - [SHIPPED] Oracle status reads `attestations` (dropping `kind: research` rows) and `votes`.
 - [STUB] `mobile/assets/deployments/84532.json` is untracked and stale; it must be regenerated after the v2 redeploy.
 - [PHASE2] No `android/` or `ios/` folders yet; `flutter create .` comes first for store builds.

@@ -70,7 +70,7 @@ def test_run_job_fake_http_no_cursor(monkeypatch):
         return payloads[url]
 
     class FakeCoord:
-        def run(self, question, condition_id=None):
+        def run(self, question, condition_id=None, kickoff=None):
             seen.append((question, condition_id))
             return {"unanimous": True}
 
@@ -227,7 +227,7 @@ def test_run_job_budget_exhausted_skips(monkeypatch):
     runs = []
 
     class FakeCoord:
-        def run(self, question, condition_id=None):
+        def run(self, question, condition_id=None, kickoff=None):
             runs.append(condition_id)
             return {"unanimous": True}
 
@@ -789,10 +789,144 @@ def test_run_tick_budget_spent_skips_later_stages(monkeypatch):
     fakes["resolve_job"] = slow_resolve
     summary = run_tick(budget_seconds=600, **fakes)
     assert order == ["scores", "resolve"]
-    for stage in ("resolve_general", "schedule", "listing"):
-        assert summary[stage] == {"ok": True, "skipped": "budget"}
-    assert exit_code(summary) == 0
+    for stage in ("resolve_general", "schedule"):
+        assert summary[stage] == {"ok": True, "skipped": "budget", "deferred": True}
+    # Listing is critical: a budget skip fails the tick instead of passing quietly.
+    assert summary["listing"] == {"ok": False, "skipped": "budget"}
+    assert summary["deferred"] == {"resolve_general": 1, "schedule": 1, "listing": 1}
+    assert exit_code(summary) == 1
     assert budget.exhausted() is False  # cleared after the tick
+
+
+def test_run_tick_scores_capped_to_its_share_then_resolve_and_listing_run(monkeypatch):
+    """A score stage that would use the whole tick stops at its share (default 0.4)."""
+    import time
+
+    import budget
+    from job import exit_code, run_tick
+
+    monkeypatch.delenv("OU_STAGE_SHARE_SCORES", raising=False)
+    monkeypatch.setenv("OU_LISTING_RESERVE_SECONDS", "0")
+    order = []
+    fakes = _stage_fakes(order)
+    seen = {}
+
+    def greedy_scores(**kwargs):
+        order.append("scores")
+        seen["scores_left"] = budget.remaining()
+        while not budget.exhausted():  # scouts until its stage budget is spent
+            time.sleep(0.01)
+        seen["total_left"] = budget.total_remaining()
+        return {"ok": True, "results": [{"conditionId": "0xa", "ok": True, "skipped": "budget"}]}
+
+    def resolve(**kwargs):
+        order.append("resolve")
+        seen["resolve_left"] = budget.remaining()
+        return {"ok": True, "results": [{"conditionId": "0xb", "ok": True, "reason": "budget"}]}
+
+    fakes["score_job"] = greedy_scores
+    fakes["resolve_job"] = resolve
+    summary = run_tick(budget_seconds=1, **fakes)
+    assert order == ["scores", "resolve", "resolve_general", "schedule", "listing"]
+    assert seen["scores_left"] <= 0.41
+    assert seen["total_left"] > 0.5
+    assert seen["resolve_left"] > 0.5
+    assert summary["deferred"] == {"scores": 1, "resolve": 1}
+    assert exit_code(summary) == 0
+
+
+def test_run_tick_listing_reserve_stops_earlier_stages(monkeypatch):
+    import time
+
+    import budget
+    from job import run_tick
+
+    monkeypatch.setenv("OU_LISTING_RESERVE_SECONDS", "100000")  # capped at a quarter: 150 of 600
+    order = []
+    fakes = _stage_fakes(order)
+    seen = {}
+
+    def resolve(**kwargs):
+        order.append("resolve")
+        seen["resolve_left"] = budget.remaining()
+        seen["total_left"] = budget.total_remaining()
+        return {"ok": True}
+
+    fakes["resolve_job"] = resolve
+    run_tick(budget_seconds=600, **fakes)
+    assert 440 < seen["resolve_left"] <= 450 < seen["total_left"]
+    assert order[-1] == "listing"
+
+    order.clear()
+    fakes = _stage_fakes(order)
+
+    def slow_scores(**kwargs):
+        order.append("scores")
+        budget._deadline[0] = time.monotonic() + 100  # only part of the 150s reserve is left
+        return {"ok": True}
+
+    fakes["score_job"] = slow_scores
+    summary = run_tick(budget_seconds=600, **fakes)
+    assert order == ["scores", "listing"]
+    assert summary["resolve"] == {"ok": False, "skipped": "budget"}
+    assert summary["resolve_general"] == {"ok": True, "skipped": "budget", "deferred": True}
+    assert summary["listing"] == {"ok": True}
+
+
+def test_stage_share_env_validation(monkeypatch):
+    from job import listing_reserve_seconds, run_tick, stage_share
+
+    monkeypatch.delenv("OU_STAGE_SHARE_SCORES", raising=False)
+    assert stage_share("scores") == 0.4 and stage_share("resolve") == 1.0
+    monkeypatch.setenv("OU_STAGE_SHARE_RESOLVE", "0.5")
+    assert stage_share("resolve") == 0.5
+    for bad in ("0", "1.5", "x"):
+        monkeypatch.setenv("OU_STAGE_SHARE_SCORES", bad)
+        with pytest.raises(RuntimeError, match="OU_STAGE_SHARE_SCORES"):
+            stage_share("scores")
+    order = []
+    summary = run_tick(budget_seconds=600, **_stage_fakes(order))
+    assert summary["scores"]["ok"] is False and "OU_STAGE_SHARE_SCORES" in summary["scores"]["error"]
+    assert "scores" not in order and "listing" in order
+    monkeypatch.setenv("OU_LISTING_RESERVE_SECONDS", "-1")
+    with pytest.raises(RuntimeError, match="OU_LISTING_RESERVE_SECONDS"):
+        listing_reserve_seconds()
+
+
+def test_deferred_counts_listing_list_and_results():
+    from job import deferred_counts
+
+    summary = {
+        "scores": {"ok": True, "results": [{"skipped": "budget"}, {"ok": True}]},
+        "resolve": {"ok": True, "results": [{"reason": "budget", "deferred": "send"}, {"reason": "capped"}]},
+        "listing": {"ok": True, "deferred": ["Bills vs Jets: Bills win?"]},
+    }
+    assert deferred_counts(summary) == {"scores": 1, "resolve": 1, "listing": 1}
+
+
+def test_budget_stage_and_send_helpers():
+    import budget
+
+    budget.start(0)
+    try:
+        assert budget.receipt_timeout(180) == 180 and budget.can_start(10**6)
+        with budget.stage(0.1):
+            assert budget.remaining() is None
+    finally:
+        budget.clear()
+    budget.start(100)
+    try:
+        assert 170 > budget.receipt_timeout(180) > 85
+        with budget.stage(0.1, reserve=0):
+            assert budget.remaining() <= 10.0
+            assert not budget.can_start(90) and budget.can_start(5)
+            assert budget.total_remaining() > 90
+        assert budget.remaining() > 90
+        budget._deadline[0] = budget.time.monotonic() + 25
+        with pytest.raises(budget.SendDeferred):
+            budget.receipt_timeout(180)
+    finally:
+        budget.clear()
 
 
 def test_budget_env_validation(monkeypatch):

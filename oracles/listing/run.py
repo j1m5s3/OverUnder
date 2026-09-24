@@ -6,6 +6,16 @@ and rematches. A stale row whose kickoff is older than
 OU_LISTING_STALE_GRACE_SECONDS counts as done, because the schedule scout only
 refreshes the current and next week. A 409 from create (condition prepared
 outside the factory) is reported under `squatted`, not as a stage error.
+
+A linked market is trusted only while it is registered on the configured oracle
+(ConsensusOracle.closeTime != 0). A link to a market created on an older oracle
+(an orphan, possibly archived) can never resolve, so the game is treated as
+unlisted: it is relisted, and when it cannot be relisted this tick the link is
+cleared (schedule upsert with listedConditionId ""). A paused market that is still
+registered keeps its link (an operator decision) and is reported under
+`pausedLinks`. When the chain read fails, or the job has no RPC/oracle config,
+links are trusted as before (`linkCheck` says which). Creates stop once the tick
+budget is spent; the rest are reported under `deferred` for the next tick.
 """
 
 from __future__ import annotations
@@ -16,6 +26,7 @@ from typing import Any, Callable
 
 import httpx
 
+import budget
 from listing.questions import question_id, winner_question
 from redact import log_error
 from scores.job import _api_url, _http_get_json, sports_primaries
@@ -106,6 +117,28 @@ def _brief(game: dict, status: str | None) -> dict:
     }
 
 
+def _default_chain():
+    """resolve.chain when the job has RPC + oracle config, else None (link checks off)."""
+    rpc = (os.getenv("ANVIL_RPC_URL") or os.getenv("OU_RPC_URL") or "").strip()
+    if not rpc or not (os.getenv("ORACLE_ADDRESS") or "").strip():
+        return None
+    from resolve import chain as chain_mod
+
+    return chain_mod
+
+
+def _schedule_body(game: dict, listed_cid: str) -> dict:
+    return {
+        "away": game["away"],
+        "home": game["home"],
+        "kickoff_unix": game["kickoff_unix"],
+        "week": game["week"],
+        "season": game["season"],
+        "status": game.get("status") or "scheduled",
+        "listedConditionId": listed_cid,
+    }
+
+
 def _post_json(url: str, body: Any, headers: dict[str, str] | None = None, client: httpx.Client | None = None) -> Any:
     own = client is None
     http = client or httpx.Client(timeout=60)
@@ -141,7 +174,9 @@ def run(
     http_get: Callable[[str], Any] | None = None,
     http_post: Callable[..., Any] | None = None,
     now: float | None = None,
+    chain=None,
 ) -> dict:
+    """`chain` needs onchain_close_time(cid); defaults to resolve.chain when configured."""
     base = _api_url()
     getter = http_get or _http_get_json
     poster = http_post or _post_json
@@ -154,8 +189,10 @@ def run(
     if not isinstance(schedule, list):
         raise RuntimeError("schedule must be an array")
     primaries = sports_primaries(cards)
+    chain_api = chain if chain is not None else _default_chain()
     cards_by_key: dict[tuple[str, int], str] = {}
     questions_listed: set[str] = set()
+    visible_cids = {str(p.get("conditionId") or "").lower() for p in primaries if p.get("conditionId")}
     for primary in primaries:
         cid = primary.get("conditionId") or ""
         question = primary.get("question") or ""
@@ -169,7 +206,10 @@ def run(
         if close:
             cards_by_key.setdefault((question, close), cid)
     # Link every schedule row to its own market before any status lookup.
-    games_linked = [{**game, "listedConditionId": _listed_cid(game, cards_by_key)} for game in schedule]
+    games_linked = [
+        {**game, "listedConditionId": _listed_cid(game, cards_by_key), "_rowLink": game.get("listedConditionId") or ""}
+        for game in schedule
+    ]
     status_by_cid: dict[str, str | None] = {}
     for cid in sorted({g["listedConditionId"] for g in games_linked if g["listedConditionId"]}):
         try:
@@ -191,8 +231,103 @@ def run(
     blocked = []
     assumed_done = []
     collisions = []
+    orphaned = []
+    paused_links = []
+    link_errors = []
+    deferred = []
+    link_state: dict[str, str] = {}
     seen_ids: set[str] = set()
     token = None
+
+    def check_link(cid: str) -> str:
+        """"ok" | "orphan" (not registered on the configured oracle) | "paused" | "unknown"."""
+        if cid in link_state:
+            return link_state[cid]
+        if chain_api is None:
+            state = "unknown"
+        else:
+            try:
+                registered = int(chain_api.onchain_close_time(cid) or 0) != 0
+            except Exception as exc:
+                log_error(f"listing link check failed {cid}: {exc}")
+                link_errors.append({"conditionId": cid, "error": str(exc)})
+                registered = None
+            if registered is None:
+                state = "unknown"
+            elif not registered:
+                state = "orphan"
+            elif cid.lower() not in visible_cids:
+                state = "paused"
+            else:
+                state = "ok"
+        link_state[cid] = state
+        return state
+
+    def operator_token() -> str:
+        nonlocal token
+        if token is None:
+            token = mint_operator_jwt()
+        return token
+
+    def clear_link(game: dict, q: str) -> None:
+        try:
+            poster(f"{base}/api/v1/markets/schedule", [_schedule_body(game, "")], {"Authorization": f"Bearer {operator_token()}"})
+        except Exception as exc:
+            log_error(f"listing unlink failed {q}: {exc}")
+            errors.append({"question": q, "error": f"unlink orphan: {exc}"})
+
+    def list_game(game: dict, q: str) -> bool:
+        """Create the game's market and link it; True when a market was created."""
+        qid = question_id(game["season"], game["week"], game["away"], game["home"], game["kickoff_unix"])
+        if qid in seen_ids:
+            skipped.append(q)
+            return False
+        if q in questions_listed:
+            # Same text, different game (earlier season or a rematch): list it, but say so.
+            collisions.append({"question": q, "season": game["season"], "week": game["week"]})
+        if (game.get("status") or "scheduled") != "scheduled":
+            inactive.append(q)
+            return False
+        kickoff = int(game["kickoff_unix"])
+        if kickoff <= clock + MIN_LEAD_SECONDS:
+            too_late.append(q)
+            return False
+        if budget.exhausted():
+            deferred.append(q)
+            return False
+        # Config errors (JWT_SECRET, OU_SEED_USDC) still fail the whole stage.
+        auth = {"Authorization": f"Bearer {operator_token()}"}
+        body = {
+            "question": q,
+            "resolution_criteria": "NFL winner; YES if named team wins",
+            "close_time": kickoff,
+            "question_id": qid,
+            "seed_usdc": seed_usdc(),
+            "market_type": 0,
+        }
+        try:
+            created_row = poster(f"{base}/api/v1/markets", body, auth)
+        except Exception as exc:
+            conflict = _conflict_detail(exc)
+            if conflict is not None:
+                # Someone prepared this condition first; retrying every tick cannot fix it.
+                log_error(f"listing create squatted {q}: {conflict}")
+                squatted.append({"question": q, "questionId": qid, "detail": conflict})
+                seen_ids.add(qid)
+                return False
+            log_error(f"listing create failed {q}: {exc}")
+            errors.append({"question": q, "error": str(exc)})
+            return False
+        seen_ids.add(qid)
+        cid = created_row.get("conditionId") if isinstance(created_row, dict) else None
+        created.append({"question": q, "conditionId": cid, "close_time": body["close_time"]})
+        if cid:
+            try:
+                poster(f"{base}/api/v1/markets/schedule", [_schedule_body(game, cid)], auth)
+            except Exception as exc:
+                log_error(f"listing schedule upsert failed {q}: {exc}")
+        return True
+
     for (season, week), games in sorted(grouped.items()):
         nxt = grouped.get((season, week + 1))
         if not nxt:
@@ -213,73 +348,18 @@ def run(
             continue
         for game in nxt:
             q = winner_question(game["home"], game["away"])
-            if game["listedConditionId"]:
-                skipped.append(q)
-                continue
-            qid = question_id(game["season"], game["week"], game["away"], game["home"], game["kickoff_unix"])
-            if qid in seen_ids:
-                skipped.append(q)
-                continue
-            if q in questions_listed:
-                # Same text, different game (earlier season or a rematch): list it, but say so.
-                collisions.append({"question": q, "season": game["season"], "week": game["week"]})
-            if (game.get("status") or "scheduled") != "scheduled":
-                inactive.append(q)
-                continue
-            kickoff = int(game["kickoff_unix"])
-            if kickoff <= clock + MIN_LEAD_SECONDS:
-                too_late.append(q)
-                continue
-            # Config errors (JWT_SECRET, OU_SEED_USDC) still fail the whole stage.
-            if token is None:
-                token = mint_operator_jwt()
-            body = {
-                "question": q,
-                "resolution_criteria": "NFL winner; YES if named team wins",
-                "close_time": kickoff,
-                "question_id": qid,
-                "seed_usdc": seed_usdc(),
-                "market_type": 0,
-            }
-            try:
-                created_row = poster(
-                    f"{base}/api/v1/markets",
-                    body,
-                    {"Authorization": f"Bearer {token}"},
-                )
-            except Exception as exc:
-                conflict = _conflict_detail(exc)
-                if conflict is not None:
-                    # Someone prepared this condition first; retrying every tick cannot fix it.
-                    log_error(f"listing create squatted {q}: {conflict}")
-                    squatted.append({"question": q, "questionId": qid, "detail": conflict})
-                    seen_ids.add(qid)
+            linked = game["listedConditionId"]
+            if linked:
+                state = check_link(linked)
+                if state == "paused":
+                    paused_links.append({"question": q, "conditionId": linked})
+                if state != "orphan":
+                    skipped.append(q)
                     continue
-                log_error(f"listing create failed {q}: {exc}")
-                errors.append({"question": q, "error": str(exc)})
-                continue
-            seen_ids.add(qid)
-            cid = created_row.get("conditionId") if isinstance(created_row, dict) else None
-            created.append({"question": q, "conditionId": cid, "close_time": body["close_time"]})
-            if cid:
-                try:
-                    poster(
-                        f"{base}/api/v1/markets/schedule",
-                        [
-                            {
-                                "away": game["away"],
-                                "home": game["home"],
-                                "kickoff_unix": game["kickoff_unix"],
-                                "week": game["week"],
-                                "season": game["season"],
-                                "status": game.get("status") or "scheduled",
-                                "listedConditionId": cid,
-                            }
-                        ],
-                        {"Authorization": f"Bearer {token}"},
-                    )
-                except Exception as exc:
-                    log_error(f"listing schedule upsert failed {q}: {exc}")
+                # Not registered on the configured oracle: it can never resolve, so list the game again.
+                orphaned.append({"question": q, "conditionId": linked, "season": game["season"], "week": game["week"]})
+            if not list_game(game, q) and linked and game["_rowLink"]:
+                clear_link(game, q)
     return {
         "ok": not errors,
         "created": created,
@@ -291,4 +371,9 @@ def run(
         "blocked": blocked,
         "assumedDone": assumed_done,
         "collisions": collisions,
+        "orphaned": orphaned,
+        "pausedLinks": paused_links,
+        "linkCheck": "off" if chain_api is None else ("errors" if link_errors else "on"),
+        "linkCheckErrors": link_errors,
+        "deferred": deferred,
     }

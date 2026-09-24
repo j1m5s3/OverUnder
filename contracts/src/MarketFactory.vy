@@ -79,7 +79,7 @@ wildcardGenerator: public(address)
 markets: public(HashMap[bytes32, Market])
 marketExists: public(HashMap[bytes32, bool])
 
-# User listing (marketType 2). Closed at deploy: only allowlisted listers until the operator flips permissionless.
+# User listing (marketType 2). Closed at construction (allowlisted listers only); setPermissionless opens it. The Sepolia v2 migration and local deploys open it (ADR-0012).
 permissionless: public(bool)
 listerAllowed: public(HashMap[address, bool])
 minSeedUsdc: public(uint256)

@@ -31,19 +31,19 @@ pointers:
   - "[contracts/src/ConsensusOracle.vy : L197-226]"
   - "[contracts/src/FeeVault.vy : L44-83]"
   - "[contracts/src/RevenueToken.vy : L13-32]"
-  - "[contracts/src/EmissionsDistributor.vy : L22-49]"
+  - "[contracts/src/EmissionsDistributor.vy : L23-49]"
   - "[contracts/src/OverUnderPaymaster.vy : L322-355]"
   - "[contracts/src/OverUnderPaymaster.vy : L358-368]"
   - "[contracts/src/SimpleAccount.vy : L40-49]"
   - "[contracts/src/SimpleAccountFactory.vy : L46-53]"
   - "[contracts/src/MockEntryPoint.vy : L94-120]"
   - "[contracts/script/deploy.py : L116-198]"
-  - "[contracts/script/deploy_v2.py : L166-256]"
+  - "[contracts/script/deploy_v2.py : L178-268]"
 ---
 
 # Contracts
 
-All production logic is Vyper 0.4.3 under `contracts/src/`. Tests live in `contracts/tests/`. Full-graph deploy: [contracts/script/deploy.py : L116-198]. AMM + Factory swap on an existing stack: [contracts/script/deploy_v2.py : L166-256].
+All production logic is Vyper 0.4.3 under `contracts/src/`. Tests live in `contracts/tests/`. Full-graph deploy: [contracts/script/deploy.py : L116-198]. AMM + Factory swap on an existing stack: [contracts/script/deploy_v2.py : L178-268].
 
 ## ConditionalTokens
 
@@ -87,7 +87,7 @@ Static uniform-LVR pool (Moallemi & Robinson): x = YES reserve, y = NO reserve, 
 - [SHIPPED] `addLiquidity` is proportional at constant price with a short-side token refund. `removeLiquidity` pays pro rata (merging complete sets before resolution, tokens after). Seed shares are locked until closeTime or resolution and `MIN_LP` of them forever (`"seed locked"`); `lpLocked(cid, account)` shows the current lock. [contracts/src/MarketAMM.vy : L319-414]
 - [SHIPPED] Fixed-point math lives in `lib/NormalMath.vy`: Solady expWad/lnWad ports, Hart 5666 Φ tail, `g_cdf` with one exp, and `solve_g` (Newton, result verified at or below the root). [contracts/src/lib/NormalMath.vy : L1-8] [contracts/src/lib/NormalMath.vy : L140-229]
 - [PHASE2] Dynamic liquidity L_t shrinking toward closeTime (OU-T015).
-- [SHIPPED] Migration (`deploy_v2.migrate_v2`): deploy AMM v2 and Factory v2, wire them, set listing config, then `oracle.setFactory(new)` and import legacy rows. Legacy pools stay on the old AMM (`MarketAMMLegacy`) and still trade and resolve there. [contracts/script/deploy_v2.py : L166-256]
+- [SHIPPED] Migration (`deploy_v2.migrate_v2`): deploy AMM v2 and Factory v2, wire them, set listing config, then `oracle.setFactory(new)` and import legacy rows. Legacy pools stay on the old AMM (`MarketAMMLegacy`) and still trade and resolve there. [contracts/script/deploy_v2.py : L178-268]
 
 ## ConsensusOracle
 
@@ -111,7 +111,7 @@ Three agent addresses. `WINDOW = 86400`, `ARBITRATION_GRACE = 172800` (grace sto
 
 Treasury-gated OU distribution. Never mints; only `transferFrom` treasury to recipients. Operator-only.
 
-- [SHIPPED] `distribute(program, recipients[], amounts[])`: pulls OU from treasury (requires treasury approval), transfers to recipients, and asserts `totalSupply` is unchanged. [contracts/src/EmissionsDistributor.vy : L22-49]
+- [SHIPPED] `distribute(program, recipients[], amounts[])`: pulls OU from treasury (requires treasury approval), transfers to recipients, and asserts `totalSupply` is unchanged. [contracts/src/EmissionsDistributor.vy : L23-49]
 - [SHIPPED] Program IDs: 0=LP, 1=maker, 2=agent, 3=quest. See [docs/emissions/schedule.yaml](../emissions/schedule.yaml).
 - [SHIPPED] FeeVault never receives minted OU; only fees from Exchange, AMM and optional listing fees.
 

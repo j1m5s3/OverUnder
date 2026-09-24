@@ -89,14 +89,15 @@ The workflow:
 | `PAYMASTER_ADDRESS`, `ENTRYPOINT_ADDRESS`, `ACCOUNT_FACTORY_ADDRESS` | deploy-gcp, deploy-contracts | empty | Leftover ERC-4337 contracts (user wallets are CDP, ADR-0010) |
 | `CDP_PROJECT_ID` | deploy-gcp (API env, web build arg) | empty | Coinbase CDP project id |
 | `COINBASE_ONRAMP_APP_ID` | deploy-gcp | empty | Coinbase Pay app id |
-| `INDEXER_START_BLOCK` | deploy-gcp (API) | `0` | First block the indexer reads; set it to the `deployBlock` printed by deploy-contracts |
+| `INDEXER_START_BLOCK` | deploy-gcp (API) | `0` | Where a new `(MarketFactory, MarketAMM)` address pair's indexer checkpoint starts; set it to the `deployBlock` printed by deploy-contracts before the cutover deploy. An existing checkpoint only fast-forwards to it, never rewinds |
 | `TRADING_HALT_AT_CLOSE` | deploy-gcp (API env + web build arg `NEXT_PUBLIC_TRADING_HALT_AT_CLOSE`) | `true` | At `closeTime`: AMM quotes return 409, the UI disables trading, and the CLOB stops too (`POST /orders` 409, no matching, the relayer worker rolls back fills matched after close). MarketAMM v2 also rejects trades on chain (`closeGate`) |
 | `RELAYER_ENABLED` | deploy-gcp (API, secret preflight) | `false` | Accept CLOB orders (OU-T003); when true the preflight requires `OU_RELAYER_PRIVATE_KEY` |
-| `RELAYER_WORKER_ENABLED` | deploy-gcp (API) | `false` | Run the relayer settlement worker in the API process; has no effect (the preflight warns) unless `RELAYER_ENABLED` is also true |
+| `RELAYER_WORKER_ENABLED` | deploy-gcp (API) | `false` | Run the relayer settlement worker in the API process; has no effect (the preflight warns) unless `RELAYER_ENABLED` is also true. With both true the API deploys with `--no-cpu-throttling --min-instances=1`; turning it off later does not remove them (`gcloud run services update overunder-api --cpu-throttling --min-instances=0 …`) |
+| `OU_KEEP_SCHEDULER_PAUSED` | deploy-gcp (scheduler step) | unset | `true` = leave a PAUSED `overunder-oracle-tick` paused; otherwise deploy-gcp resumes it at the end (skipped with a warning while a deploy-contracts run is in progress) |
 | `OU_CURSOR_RUNTIME` | deploy-gcp (oracle job, always passed) | `local` | `local` = cursor-sdk agents in the job container restricted to MCP tools; `cloud` = Cursor cloud agents |
 | `OU_FALLBACK_POLICY` | deploy-gcp (oracle job, always passed) | `attest` | ADR-0002 24 h fallback: `attest` (matching agents attest, then permissionless `resolveFallback`), `arbitrate` or `manual` |
 | `OU_TICK_BUDGET_SECONDS` | deploy-gcp (oracle job, always passed; sets the task timeout) | `780` | Wall-clock budget per tick, 1 to 780; the job's task timeout is this + 60 s |
-| `OU_SEED_USDC`, `OU_SCOUT_*`, `OU_RESOLVE_MAX_MARKETS`, `OU_RESEARCH_RETRY_SECONDS`, `OU_GENERAL_RESOLVE_*`, `OU_LISTING_STALE_GRACE_SECONDS`, `OU_TICK_SINGLE_FLIGHT`, `OU_CURSOR_MODEL_*` | deploy-gcp (oracle job, passed only when set) | oracles code default | See [Oracle job tunables](#oracle-job-tunables); leave unset unless you need to change the default |
+| `OU_SEED_USDC`, `OU_SCOUT_*`, `OU_RESOLVE_MAX_MARKETS`, `OU_RESEARCH_RETRY_SECONDS`, `OU_RESEARCH_ERROR_RETRY_SECONDS`, `OU_RESEARCH_MIN_SECONDS`, `OU_GENERAL_RESOLVE_*`, `OU_LISTING_STALE_GRACE_SECONDS`, `OU_LISTING_RESERVE_SECONDS`, `OU_STAGE_SHARE_*`, `OU_TICK_SINGLE_FLIGHT`, `OU_CURSOR_MODEL_*` | deploy-gcp (oracle job, passed only when set) | oracles code default | See [Oracle job tunables](#oracle-job-tunables); leave unset unless you need to change the default |
 | `RUNTIME_SERVICE_ACCOUNT` | deploy-gcp (warn-only check) | `<project-number>-compute@developer.gserviceaccount.com` | Only tells the check which account to inspect; the deploys do not pass `--service-account` |
 | `TREASURY_ADDRESS` | deploy-contracts (`core` only) | none | Receives the OU supply on a full redeploy |
 | `PRIVY_APP_ID` | nothing | — | Stale (Privy was replaced by CDP embedded wallets); safe to delete |
@@ -138,6 +139,9 @@ Every line the deploy prints that needs action, and its fix. `<S>` is a secret n
 | `Skipping optional <S>: <rule>` | optional secret not mapped this deploy | fine unless you need MoonPay, the relayer key (emissions) or `OU_QUESTION_ID_KEY`; fix the rule to map it. With `RELAYER_ENABLED=true` the relayer key is required instead and fails as `ERROR: OU_RELAYER_PRIVATE_KEY: …` |
 | `warning: Optional secret <S> exists but failed preflight (<rule>)` | the secret is there but unusable, so it is not mapped | add a valid version (the warning prints the command) |
 | `warning: RELAYER_WORKER_ENABLED=… has no effect while RELAYER_ENABLED=…` | the worker only runs with both flags on | set both, or unset `RELAYER_WORKER_ENABLED` |
+| `RELAYER_WORKER_ENABLED=…: the API deploys with --no-cpu-throttling --min-instances=1` | worker on: the API keeps CPU between requests and one warm instance (billed while idle) | expected; see the variable table to undo it |
+| `warning: overunder-oracle-tick is PAUSED (<reason>)` | the scheduler step did not resume it: `OU_KEEP_SCHEDULER_PAUSED`, a running deploy-contracts, or a failed check or resume | resume it with the printed command once nothing else signs with the operator key |
+| `Broadcast refused` (deploy-contracts) | broadcast dispatched from a ref other than `main`, or `confirm` is not exactly `BROADCAST <target>` | merge, then dispatch from `main` with the confirm phrase, or untick broadcast to simulate |
 | `ERROR: repo variable <V>='<value>' …` | an oracle repo variable fails validation (for example `OU_TICK_BUDGET_SECONDS` above 780) | `gh variable set <V> --body <value> -R j1m5s3/OverUnder`, or `gh variable delete <V>` to use the default |
 | `warning: ORACLE_ADDRESS is not set` | the oracle job gets an empty `ORACLE_ADDRESS` and every resolve stage fails | set the `ORACLE_ADDRESS` repo variable |
 | `ERROR: Cloud Run Jobs (overunder-oracle): no access` | github-deploy lacks Cloud Run rights | grant `roles/run.admin` (IAM matrix) |
@@ -224,8 +228,9 @@ Contracts are deployed by `.github/workflows/deploy-contracts.yml`, never by `de
 | Input | Default | Meaning |
 |---|---|---|
 | `target` | `verify` | `verify` = read-only wiring check; `v2` = MarketAMM v2 + MarketFactory v2 (reuses CTF, ConsensusOracle, FeeVault, USDC, Exchange, paymaster); `core` = full new stack |
-| `broadcast` | `false` | unchecked = simulate on `boa.fork` (nothing sent); checked = real transactions, gated by the contracts test suite |
-| `permissionless` | `true` | v2: anyone may list a market (`createPermissionlessMarket`) |
+| `broadcast` | `false` | unchecked = simulate on `boa.fork` (nothing sent, any branch); checked = real transactions, gated by the contracts test suite. Refused unless dispatched from `main` with `confirm` set |
+| `confirm` | empty | broadcast only: must be exactly `BROADCAST <target>` (`BROADCAST v2`, `BROADCAST core`); checked in the first step, before checkout |
+| `permissionless` | `true` | v2: anyone may list a market (`createPermissionlessMarket`), rate-limited by `listing_cooldown`. On for the Sepolia migration per ADR-0012; untick to keep listing allowlist-only |
 | `close_gate` | `true` | v2: MarketAMM rejects buys/sells at or after `closeTime` |
 | `min_seed_usdc` | `10000000` | v2: minimum seed for user listings (6-decimal units, 10 USDC) |
 | `listing_cooldown` | `3600` | v2: seconds between user listings per creator, the only per-address rate limit on listing (`0` disables it) |
@@ -243,18 +248,19 @@ gh workflow run deploy-contracts.yml --ref main -R $R -f target=verify          
 gh workflow run deploy-contracts.yml --ref main -R $R -f target=v2                       # 2. simulate on a fork
 gcloud scheduler jobs pause overunder-oracle-tick --location=us-central1 --project=overunder-509107   # 3. required before any broadcast
 gcloud run jobs executions list --job=overunder-oracle --region=us-central1 --project=overunder-509107 --filter='NOT status.completionTime:*' --format='value(metadata.name)'   # 3b. wait until this prints nothing
-gh workflow run deploy-contracts.yml --ref main -R $R -f target=v2 -f broadcast=true     # 4. deploy + migrate
+gh workflow run deploy-contracts.yml --ref main -R $R -f target=v2 -f broadcast=true -f confirm="BROADCAST v2"   # 4. deploy + migrate (main only)
 # 5. copy the `gh variable set` lines from the run summary (GITHUB_TOKEN cannot write repo variables):
 gh variable set AMM_ADDRESS --body <new MarketAMM> -R $R
 gh variable set FACTORY_ADDRESS --body <new MarketFactory> -R $R
 gh variable set INDEXER_START_BLOCK --body <deployBlock> -R $R
 # 5b. regenerate the mobile asset with scripts/sync_mobile_deployments.py (commands in the run summary; see below)
-gh workflow run deploy-gcp.yml --ref main -R $R                                          # 6. redeploy API, web and job
-gcloud scheduler jobs resume overunder-oracle-tick --location=us-central1 --project=overunder-509107  # 7. after deploy-gcp (paused since 3)
+gh workflow run deploy-gcp.yml --ref main -R $R                                          # 6. redeploy API, web and job; resumes the scheduler
+# 7. check the "oracle scheduler state" row of the deploy-gcp summary; only if it is not ENABLED:
+gcloud scheduler jobs resume overunder-oracle-tick --location=us-central1 --project=overunder-509107
 gh workflow run deploy-contracts.yml --ref main -R $R -f target=verify                   # 8. verify the new wiring
 ```
 
-Step 3 is required whenever `broadcast=true`: the migration signs with `OU_OPERATOR_PRIVATE_KEY`, the same key the oracle job and the API use. titanoboa takes each nonce from `latest` and predicts contract addresses locally, so a concurrent operator transaction can replace a pending one, fail the migration part-way, or leave a contract mined at an unexpected address (the summary lists it under "Deployed but never wired"). The workflow also pauses the scheduler and waits up to 20 min for running executions itself, refuses to broadcast while the operator has pending transactions, and resumes the scheduler if the run fails; after a successful broadcast it stays paused until step 7. The API cannot be paused, so avoid operator actions in it (listing confirms) during step 4.
+Step 3 is required whenever `broadcast=true`: the migration signs with `OU_OPERATOR_PRIVATE_KEY`, the same key the oracle job and the API use. titanoboa takes each nonce from `latest` and predicts contract addresses locally, so a concurrent operator transaction can replace a pending one, fail the migration part-way, or leave a contract mined at an unexpected address (the summary lists it under "Deployed but never wired"). The workflow also pauses the scheduler and waits up to 20 min for running executions itself, refuses to broadcast while the operator has pending transactions, and resumes the scheduler if the run fails; after a successful broadcast it stays paused until deploy-gcp (step 6) resumes it. deploy-gcp leaves it paused, with a warning and the resume command in its summary, when `OU_KEEP_SCHEDULER_PAUSED=true`, while a deploy-contracts run is in progress, or when that check or the resume fails. The API cannot be paused, so avoid operator actions in it (listing confirms) during step 4. Before step 4, resolve or wind down closed legacy markets: v1 pools check only `isResolved`, so a closed, unresolved legacy pool stays tradable on chain (checklist in [docs/runbooks/operations.md](../../docs/runbooks/operations.md#pre-broadcast-checklist)).
 
 If a migration fails part-way, the summary and the uploaded JSON (`migrationFailed`, `completedSteps`, `orphans`) show what landed. Do not re-run v2 blindly once `oracle.setFactory` is listed; finish the remaining steps by hand as the operator. The local CLI (`contracts/script/deploy_v2.py`) writes the same record to `deployments/<chain>.v2-partial.json` and leaves `deployments/<chain>.json` unchanged; it refuses a JSON that already records a migration (`MarketFactoryLegacy`) and a pair that is already v2 (`--allow-v2-source` exists for chain 31337 only).
 
@@ -267,7 +273,7 @@ python scripts/sync_mobile_deployments.py 84532 --source /tmp/ou-84532-v2/84532.
 python scripts/sync_mobile_deployments.py 84532 --check                               # exit 0 = mobile asset matches contracts JSON
 ```
 
-The sync script takes every contract address (and `operator`/`agents`) from the upload and carries `treasury` over from the current mobile asset, so the mobile asset is regenerated, never hand-edited. Merge by hand only into `contracts/deployments/84532.json` (gitignored; read by `scripts/sync_deploy_env.py 84532`): the upload omits `SimpleAccount`, `treasury` and `canonicalUSDC`, so do not overwrite that file wholesale. A `core` broadcast prints the same download and sync commands with `-core-` in the names.
+The sync script takes every contract address (and `operator`/`agents`) from the upload and carries `treasury` over from the current mobile asset, so the mobile asset is regenerated, never hand-edited. It exits 1 and writes nothing for a simulation upload (`simulated: true`), a failed or partial migration (`migrationFailed`, `orphans`, `completedSteps`), or a v2 payload missing a v2 key; `--force` overrides that after you check the addresses on chain. Merge by hand only into `contracts/deployments/84532.json` (gitignored; read by `scripts/sync_deploy_env.py 84532`): the upload omits `SimpleAccount`, `treasury` and `canonicalUSDC`, so do not overwrite that file wholesale. A `core` broadcast prints the same download and sync commands with `-core-` in the names.
 
 ## Operations
 
@@ -371,11 +377,15 @@ The workflow validates each repo variable the way the oracles code parses it and
 | `OU_SCOUT_MAX_AGE_SECONDS` | `0` (off) | Opt-in cutoff: stop scouting games that closed longer ago than this |
 | `OU_RESOLVE_MAX_MARKETS` | `3` | Sports primaries resolved per tick |
 | `OU_RESEARCH_RETRY_SECONDS` | `21600` (6 h) | Skip re-researching a market while its newest research record is younger than this (reads `attestations[].createdAt` from `GET /api/v1/oracle/{cid}/status`) |
+| `OU_RESEARCH_ERROR_RETRY_SECONDS` | `3600` (1 h) | Shorter cooldown when the newest research record is an `oracle-job` failure marker (the research run raised) (`oracles/resolve/cooldown.py`) |
+| `OU_RESEARCH_MIN_SECONDS` | `90` | Do not start a 3-agent research run (resolvers, score scout) with less than this left in the stage budget; the market is deferred to the next tick (`oracles/budget.py`) |
 | `OU_GENERAL_RESOLVE_MAX_MARKETS` | `2` | Wildcard, user-listed and non-sports markets researched per tick |
 | `OU_GENERAL_RESOLVE_DELAY_SECONDS` | `86400` (24 h) | Wait after `closeTime` before researching an ungated general market (no score feed or parent to wait for) |
 | `OU_GENERAL_RESOLVE_GATED_DELAY_SECONDS` | `3600` | Wait after `closeTime` for event-gated markets, which also need a final score or a resolved parent |
 | `OU_GENERAL_RESOLVE_MIN_CONFIDENCE` | `0.8` | Every agent must reach this confidence (0 to 1) for unanimous consensus; the 24 h fallback counts only agents at or above it |
 | `OU_LISTING_STALE_GRACE_SECONDS` | `28800` (8 h) | Schedule rows still `scheduled`/`in_progress` this long after kickoff count as done for week-roll listing (`scripts/audit_markets.py` mirrors it) |
+| `OU_LISTING_RESERVE_SECONDS` | `120` | Every stage before listing stops this long before the tick deadline, capped at a quarter of the budget (`oracles/job.py`) |
+| `OU_STAGE_SHARE_<STAGE>` | `0.4` for `SCORES`, `1.0` for `RESOLVE`, `RESOLVE_GENERAL`, `SCHEDULE`, `LISTING` | Largest share of the tick budget one stage may use, a number in (0, 1] (`oracles/job.py`) |
 | `OU_CURSOR_MODEL_ALPHA` / `_BETA` / `_GAMMA` | `composer-2.5` / `grok-4.6` / `gpt-5.1` | Cursor model per agent |
 
 ## Security Notes

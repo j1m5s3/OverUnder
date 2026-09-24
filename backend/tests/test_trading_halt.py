@@ -449,3 +449,70 @@ async def test_slow_quote_rpc_does_not_block_the_event_loop(halt_client):
     assert health.status_code == 200
     assert quote.status_code == 200 and quote.json()["tokensOut"] == 123
     assert health_done < 0.5
+
+
+# --- paused / archived markets: no sponsored quotes or trades ------------------------
+
+PAUSED = "0x" + "81" * 32
+PAUSED_CLOSED = "0x" + "82" * 32
+
+
+@pytest.fixture
+async def paused_rows(halt_client):
+    now = int(time.time())
+    async with SessionLocal() as session:
+        await session.execute(delete(Market).where(Market.condition_id.in_((PAUSED, PAUSED_CLOSED))))
+        paused, paused_closed = _row(PAUSED, now + 3600), _row(PAUSED_CLOSED, now - 60)
+        paused.paused = paused_closed.paused = True
+        session.add_all([paused, paused_closed])
+        await session.commit()
+    yield halt_client
+    async with SessionLocal() as session:
+        await session.execute(delete(Market).where(Market.condition_id.in_((PAUSED, PAUSED_CLOSED))))
+        await session.commit()
+
+
+@pytest.mark.asyncio
+async def test_paused_market_halts_quotes_before_rpc(paused_rows):
+    for flag in (True, False):
+        with patch("app.amm.router.get_settings", return_value=_settings(flag)), patch(
+            "app.contract_addresses.get_contract_addresses", side_effect=_no_rpc
+        ):
+            r = await paused_rows.get(f"/api/v1/amm/{PAUSED}/quote")
+            s = await paused_rows.get(f"/api/v1/amm/{PAUSED}/quote", params={"sell_yes": True, "token_amount": 5})
+        assert r.status_code == s.status_code == 409
+        assert r.json() == {"detail": "market paused"}
+
+
+@pytest.mark.asyncio
+async def test_paused_reason_ranks_after_closed_and_resolved(paused_rows):
+    async with SessionLocal() as session:
+        assert await trading_halt_reason(session, PAUSED, _settings(True)) == "market paused"
+        # The relayer worker keys its after-close rollback on "market closed".
+        assert await trading_halt_reason(session, PAUSED_CLOSED, _settings(True)) == "market closed"
+        assert await trading_halt_reason(session, PAUSED_CLOSED, _settings(False)) == "market paused"
+
+
+@pytest.mark.asyncio
+async def test_cdp_send_refuses_trade_on_paused_market(paused_rows):
+    token = await _cdp_token(paused_rows)
+    with patch("app.aa.router.get_settings", return_value=_cdp_settings(False)):
+        with patch("app.aa.router.send_user_operation", new_callable=AsyncMock) as send:
+            res = await paused_rows.post(
+                "/api/v1/aa/cdp-send",
+                headers={"Authorization": f"Bearer {token}"},
+                json={"calls": [{"to": AMM, "data": _buy_calldata_for(PAUSED), "value": 0}]},
+            )
+    assert res.status_code == 409
+    assert res.json()["detail"] == "market paused"
+    send.assert_not_called()
+
+
+def test_market_public_trading_open_false_when_paused():
+    from app.markets.trading import trading_open
+
+    m = _row(PAUSED, int(time.time()) + 3600)
+    assert trading_open(m, _settings(True)) is True
+    m.paused = True
+    assert trading_open(m, _settings(True)) is False
+    assert trading_open(m, _settings(False)) is False

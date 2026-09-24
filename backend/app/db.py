@@ -155,6 +155,67 @@ def ensure_price_point_unique(connection) -> None:
     )
 
 
+VOTE_UNIQUE = "uq_vote_condition_voter"
+
+
+def ensure_vote_unique(connection) -> None:
+    """One vote per (condition_id, voter). Drops later duplicates (keeps MIN(id), the first vote cast)
+    first: before this key existed, concurrent POST /oracle/vote calls could each insert a row."""
+    inspector = inspect(connection)
+    if not inspector.has_table("votes"):
+        return
+    if VOTE_UNIQUE in {i["name"] for i in inspector.get_indexes("votes")}:
+        return
+    if connection.dialect.name == "postgresql":
+        connection.execute(
+            text(
+                "DELETE FROM votes a USING votes b WHERE a.id > b.id "
+                "AND a.condition_id = b.condition_id AND a.voter = b.voter"
+            )
+        )
+    else:
+        connection.execute(
+            text("DELETE FROM votes WHERE id NOT IN (SELECT MIN(id) FROM votes GROUP BY condition_id, voter)")
+        )
+    connection.execute(text(f"CREATE UNIQUE INDEX IF NOT EXISTS {VOTE_UNIQUE} ON votes (condition_id, voter)"))
+
+
+EMISSION_LIVE_UNIQUE = "uq_emission_live_payload"
+EMISSION_LIVE_WHERE = "status IN ('sending', 'sent', 'confirmed')"
+
+
+def ensure_emission_live_unique(connection) -> None:
+    """At most one live distribution per (payload_hash, idempotency_key) (partial unique index).
+
+    Live duplicates already on record are real signed txs, so they are never deleted: the index is
+    skipped with a warning until an operator reconciles them (the route still re-checks under the
+    nonce lock). Both SQLite and Postgres support partial indexes."""
+    import logging
+
+    inspector = inspect(connection)
+    if not inspector.has_table("emission_distributions"):
+        return
+    if EMISSION_LIVE_UNIQUE in {i["name"] for i in inspector.get_indexes("emission_distributions")}:
+        return
+    dupes = connection.execute(
+        text(
+            "SELECT COUNT(*) FROM (SELECT payload_hash, idempotency_key FROM emission_distributions "
+            f"WHERE {EMISSION_LIVE_WHERE} GROUP BY payload_hash, idempotency_key HAVING COUNT(*) > 1) d"
+        )
+    ).scalar()
+    if dupes:
+        logging.getLogger(__name__).warning(
+            "emission_distributions has %s live duplicate payload(s); %s not created", dupes, EMISSION_LIVE_UNIQUE
+        )
+        return
+    connection.execute(
+        text(
+            f"CREATE UNIQUE INDEX IF NOT EXISTS {EMISSION_LIVE_UNIQUE} ON emission_distributions "
+            f"(payload_hash, idempotency_key) WHERE {EMISSION_LIVE_WHERE}"
+        )
+    )
+
+
 def insert_ignore(dialect_name: str, model, values: dict, index_elements: list[str]):
     """INSERT ... ON CONFLICT DO NOTHING for Postgres and SQLite (both support it).
 
@@ -207,6 +268,8 @@ def run_migrations(connection) -> None:
     ensure_market_listing_reason(connection)
     ensure_vote_weight_bigint(connection)
     ensure_price_point_unique(connection)
+    ensure_vote_unique(connection)
+    ensure_emission_live_unique(connection)
 
 
 async def get_db():

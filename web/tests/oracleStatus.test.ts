@@ -1,14 +1,16 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { outcomeLabel, summarizeOracleStatus } from "../src/features/oracle/oracleStatus.ts";
+import { isResearch, outcomeLabel, summarizeOracleStatus } from "../src/features/oracle/oracleStatus.ts";
 
-const row = (agent: string, outcome: number, summary = "") => ({
+const row = (agent: string, outcome: number, summary = "", kind?: string) => ({
   agent,
   outcome,
   summary,
   evidenceHash: "0x",
   createdAt: "2026-09-23T00:00:00Z",
+  ...(kind === undefined ? {} : { kind }),
 });
+const research = (agent: string, outcome: number, summary = "research") => row(agent, outcome, summary, "research");
 
 describe("outcomeLabel", () => {
   it("labels YES, NO and undetermined", () => {
@@ -30,7 +32,7 @@ describe("summarizeOracleStatus", () => {
     }
   });
 
-  it("keeps each agent's latest row so repeated research rows do not duplicate agents", () => {
+  it("keeps each agent's latest row so repeated reports do not duplicate agents", () => {
     const summary = summarizeOracleStatus({
       attestations: [row("0xA", 2, "research: no source yet"), row("0xb", 0), row("0xa", 0, "final")],
     });
@@ -56,9 +58,53 @@ describe("summarizeOracleStatus", () => {
     assert.equal(undetermined.unanimous, false);
     assert.equal(undetermined.consensusOutcome, null);
 
-    // The server's flag counts every row; the panel does not trust it alone.
+    // The panel recomputes unanimity per agent instead of trusting the server's flag alone.
     const stale = summarizeOracleStatus({ unanimous: true, attestations: [row("a", 1), row("a", 1), row("a", 1)] });
     assert.equal(stale.unanimous, false);
+  });
+
+  it("ignores research rows, even three that agree on YES with low confidence", () => {
+    // oracles/resolve persists agreeing-but-low-confidence runs and failed consensus sends as research.
+    const lowConfidence = summarizeOracleStatus({
+      unanimous: false,
+      attestations: [research("a", 0, "low confidence"), research("b", 0, "low confidence"), research("c", 0, "low confidence")],
+    });
+    assert.equal(lowConfidence.unanimous, false);
+    assert.equal(lowConfidence.consensusOutcome, null);
+    assert.deepEqual(lowConfidence.latest, []);
+
+    const txError = summarizeOracleStatus({ attestations: [research("a", 1, "tx error"), research("b", 1), research("c", 1)] });
+    assert.equal(txError.unanimous, false);
+
+    // A research row after a resolution report does not replace it as the agent's latest row.
+    const mixed = summarizeOracleStatus({
+      attestations: [row("a", 0, "final", "resolution"), row("b", 0), row("c", 0, "", "RESOLUTION"), research("a", 1)],
+    });
+    assert.equal(mixed.unanimous, true);
+    assert.equal(mixed.consensusOutcome, 0);
+    assert.deepEqual(
+      mixed.latest.map((a) => [a.agent, a.outcome]),
+      [
+        ["a", 0],
+        ["b", 0],
+        ["c", 0],
+      ],
+    );
+
+    // Two resolution reports plus one research row are not three agents.
+    const partial = summarizeOracleStatus({ attestations: [row("a", 1), row("b", 1), research("c", 1)] });
+    assert.equal(partial.unanimous, false);
+    assert.equal(partial.latest.length, 2);
+  });
+
+  it("treats a missing, null or unknown kind as a resolution report", () => {
+    const legacy = summarizeOracleStatus({
+      attestations: [row("a", 1), { ...row("b", 1), kind: null }, row("c", 1, "", "")],
+    });
+    assert.equal(legacy.unanimous, true);
+    assert.equal(legacy.consensusOutcome, 1);
+    assert.equal(isResearch(row("a", 0, "", " Research ")), true);
+    assert.equal(isResearch(row("a", 0)), false);
   });
 
   it("counts participant votes", () => {

@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import JSON, BigInteger, Boolean, DateTime, Index, Integer, String, Text, UniqueConstraint, func
+from sqlalchemy import JSON, BigInteger, Boolean, DateTime, Index, Integer, String, Text, UniqueConstraint, func, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
@@ -89,6 +89,8 @@ class Attestation(Base):
 
 class Vote(Base):
     __tablename__ = "votes"
+    # One vote per (market, voter); db.ensure_vote_unique adds it to pre-existing tables after a dedup.
+    __table_args__ = (Index("uq_vote_condition_voter", "condition_id", "voter", unique=True),)
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     condition_id: Mapped[str] = mapped_column(String(66), index=True)
     voter: Mapped[str] = mapped_column(String(42))
@@ -98,9 +100,26 @@ class Vote(Base):
 
 
 class Checkpoint(Base):
+    """Legacy single indexer checkpoint (row id=1), not tied to contract addresses.
+
+    Read-only for current code: a fresh address set may start from it (never past it),
+    and an older revision still running during a rollout keeps writing it."""
+
     __tablename__ = "checkpoints"
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     last_block: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class IndexerCheckpoint(Base):
+    """Indexer checkpoint per (MarketFactory, MarketAMM) address set, lowercase ('' when unset).
+
+    A new address set (the v2 cutover) starts its own row, so events of the new contracts
+    between their deploy block and the old set's checkpoint are never skipped."""
+
+    __tablename__ = "indexer_checkpoints"
+    factory_address: Mapped[str] = mapped_column(String(42), primary_key=True)
+    amm_address: Mapped[str] = mapped_column(String(42), primary_key=True, default="")
+    last_block: Mapped[int] = mapped_column(BigInteger, default=0)
 
 
 class PricePoint(Base):
@@ -225,6 +244,18 @@ class EmissionDistribution(Base):
     """Write-ahead record of one EmissionsDistributor.distribute tx (the contract has no idempotency key)."""
 
     __tablename__ = "emission_distributions"
+    # At most one live (sending/sent/confirmed) row per payload + idempotency key: the database picks the
+    # winner of two concurrent identical requests (db.ensure_emission_live_unique for older tables).
+    __table_args__ = (
+        Index(
+            "uq_emission_live_payload",
+            "payload_hash",
+            "idempotency_key",
+            unique=True,
+            postgresql_where=text("status IN ('sending', 'sent', 'confirmed')"),
+            sqlite_where=text("status IN ('sending', 'sent', 'confirmed')"),
+        ),
+    )
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     program: Mapped[int] = mapped_column(Integer)
     # keccak(abi.encode(program, recipients, amounts)), 0x-hex

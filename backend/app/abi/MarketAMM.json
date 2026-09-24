@@ -324,6 +324,31 @@
     ]
   },
   {
+    "stateMutability": "nonpayable",
+    "type": "function",
+    "name": "addLiquidity",
+    "inputs": [
+      {
+        "name": "conditionId",
+        "type": "bytes32"
+      },
+      {
+        "name": "usdcAmount",
+        "type": "uint256"
+      },
+      {
+        "name": "minLpOut",
+        "type": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256"
+      }
+    ]
+  },
+  {
     "stateMutability": "view",
     "type": "function",
     "name": "lpLocked",

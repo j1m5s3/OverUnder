@@ -45,7 +45,7 @@ ADR-0005 shipped injected wagmi plus an in-house ERC-4337 paymaster for EOA-owne
 - [SHIPPED] `POST /aa/userop` returns 410. The `/aa/cdp-send` allowlist rejects `matchOrders`, nonzero `value` and anything not listed above with 403. [backend/app/aa/router.py : L163-165] [backend/app/aa/router.py : L75-104]
 - [SHIPPED] Fail closed on CDP routes when `CDP_PROJECT_ID` or `CDP_API_KEY_SECRET` is missing. Tests mock the CDP client. [backend/app/cdp.py : L21-25]
 - [SHIPPED] Local fallback may read `.secrets/cb_keys.json` keys `PROJECT_ID`, `API_KEY_ID`, `API_SECRET` only if env vars are unset. No wallet secret unless a SDK call fails without it. [backend/app/config.py : L12-32]
-- [SHIPPED] Onramp destination is the smart account. [web/src/app/wallet/page.tsx : L7-16]
+- [SHIPPED] Onramp destination is the smart account. [web/src/app/wallet/page.tsx : L7-17]
 - [SHIPPED] `OverUnderPaymaster.vy` and `SimpleAccount.vy` stay in the repo and are not redeployed for this path. The app does not call them.
 
 ## Consequences

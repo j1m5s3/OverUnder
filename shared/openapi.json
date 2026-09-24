@@ -245,6 +245,18 @@
             "in": "query",
             "required": false,
             "schema": { "anyOf": [{ "type": "string" }, { "type": "null" }], "title": "Parentid" }
+          },
+          {
+            "name": "includePaused",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "Operator bearer JWT required: also list paused (and archived) markets, so the oracle job can still resolve a paused registered market.",
+              "default": false,
+              "title": "Includepaused"
+            },
+            "description": "Operator bearer JWT required: also list paused (and archived) markets, so the oracle job can still resolve a paused registered market."
           }
         ],
         "responses": {
@@ -950,7 +962,7 @@
       "post": {
         "tags": ["emissions"],
         "summary": "Distribute",
-        "description": "Distribute OU emissions from treasury to recipients.\n\nOperator-only. Calls EmissionsDistributor.distribute which transfers from treasury.\nNever mints. Program IDs: 0=LP, 1=maker, 2=agent, 3=quest.\nSigns with RELAYER_PRIVATE_KEY through the relayer's shared NonceManager (above the in-flight nonce\nfloor) so it never races the CLOB worker for a nonce. The contract has no idempotency key, so every\nsigned tx is recorded write-ahead: a retry of the same payload (and idempotencyKey) returns the\nrecorded distribution instead of paying twice, and an ambiguous broadcast answers 202 with its hash.",
+        "description": "Distribute OU emissions from treasury to recipients.\n\nOperator-only. Calls EmissionsDistributor.distribute which transfers from treasury.\nNever mints. Program IDs: 0=LP, 1=maker, 2=agent, 3=quest.\nSigns with RELAYER_PRIVATE_KEY through the relayer's shared NonceManager (above the in-flight nonce\nfloor) so it never races the CLOB worker for a nonce. The contract has no idempotency key, so every\nsigned tx is recorded write-ahead: a retry of the same payload (and idempotencyKey) returns the\nrecorded distribution instead of paying twice, and an ambiguous broadcast answers 202 with its hash.\nThe duplicate check is repeated under the nonce lock and backed by a partial unique index, so two\nconcurrent identical requests send exactly one tx.",
         "operationId": "distribute_api_v1_emissions_distribute_post",
         "parameters": [
           {
@@ -1362,7 +1374,16 @@
         "title": "KycCheckResponse"
       },
       "KycSessionRequest": {
-        "properties": { "jurisdiction": { "type": "string", "title": "Jurisdiction", "default": "" } },
+        "properties": {
+          "jurisdiction": {
+            "type": "string",
+            "maxLength": 2,
+            "pattern": "^([A-Z]{2})?$",
+            "title": "Jurisdiction",
+            "description": "ISO 3166-1 alpha-2 country code (two uppercase letters); write-once per address.",
+            "default": ""
+          }
+        },
         "type": "object",
         "title": "KycSessionRequest"
       },
@@ -1664,7 +1685,7 @@
       },
       "ResolvedIn": {
         "properties": {
-          "conditionId": { "type": "string", "title": "Conditionid" },
+          "conditionId": { "type": "string", "maxLength": 66, "title": "Conditionid" },
           "outcome": { "type": "integer", "title": "Outcome" }
         },
         "type": "object",
@@ -1684,7 +1705,13 @@
             "title": "Status",
             "default": "scheduled"
           },
-          "listedConditionId": { "type": "string", "title": "Listedconditionid", "default": "" }
+          "listedConditionId": {
+            "type": "string",
+            "maxLength": 66,
+            "title": "Listedconditionid",
+            "description": "Omit to keep the stored link; \"\" clears it (operator relist of an archived orphan).",
+            "default": ""
+          }
         },
         "type": "object",
         "required": ["away", "home", "kickoff_unix", "week", "season"],
@@ -1703,7 +1730,13 @@
             "title": "Status",
             "default": "scheduled"
           },
-          "listedConditionId": { "type": "string", "title": "Listedconditionid", "default": "" },
+          "listedConditionId": {
+            "type": "string",
+            "maxLength": 66,
+            "title": "Listedconditionid",
+            "description": "Omit to keep the stored link; \"\" clears it (operator relist of an archived orphan).",
+            "default": ""
+          },
           "id": { "type": "integer", "title": "Id" }
         },
         "type": "object",

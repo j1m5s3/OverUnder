@@ -11,6 +11,8 @@ Usage (cwd contracts/):
   python script/deploy_v2.py [--legacy-cids CIDS] [--api URL] [--permissionless|--no-permissionless]
       [--no-close-gate] [--min-seed-usdc N] [--listing-fee-usdc N] [--fee-recipient ADDR] [--min-lead-time S]
       [--max-horizon S] [--listing-cooldown S] [--allow-v2-source] [--dry-run]
+User listing: the new factory is constructed closed; the migration then calls setPermissionless, which
+defaults to on for 31337 and Base Sepolia 84532 (ADR-0012, same as deploy_ci.py) and off on other chains.
 Env: CHAIN_ID (default 31337), OPERATOR_PRIVATE_KEY (anvil default on 31337 only),
      DEPLOY_RPC_URL or ANVIL_RPC_URL (default http://127.0.0.1:8545).
 Never prints private keys or the full RPC URL. A migration runs once per stack: it refuses a deployments
@@ -38,7 +40,9 @@ ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "src"
 OUT = ROOT / "deployments"
 
-IMPORT_CHUNK = 50  # MarketFactory.importLegacyMarkets takes DynArray[bytes32, 50]
+# MarketFactory.importLegacyMarkets takes DynArray[bytes32, 50], but 50 rows with 256-byte questions cost about
+# 15.9M gas, 95% of the 2^24 (16,777,216) per-transaction cap (EIP-7825). 25 per tx is about 8.0M, under half.
+IMPORT_CHUNK = 25
 CID_RE = re.compile(r"0x[0-9a-fA-F]{64}")
 ADDR_RE = re.compile(r"0x[0-9a-fA-F]{40}")
 ZERO_ADDRESS = "0x" + "00" * 20
@@ -55,6 +59,14 @@ LISTING_KEYS = ("minSeedUsdc", "listingFeeUsdc", "feeRecipient", "minLeadTime", 
 MIN_LEAD_FLOOR = 600
 MAX_HORIZON_CAP = 31_622_400
 AMM_CLOSE_GATE_DEFAULT = True
+# The MarketFactory v2 constructor leaves user listing closed; migrate_v2 then calls setPermissionless(flag).
+# ADR-0012: the Base Sepolia v2 migration opens it (min seed plus the 1 h per-creator cooldown are the gates),
+# as does a local anvil. Any other chain stays allowlist-only unless --permissionless is passed.
+PERMISSIONLESS_CHAINS = (31337, 84532)
+
+
+def default_permissionless(chain: int) -> bool:
+    return int(chain) in PERMISSIONLESS_CHAINS
 
 
 def _fn(name: str, inputs=(), outputs=(), mutability: str = "view") -> dict:
@@ -177,7 +189,7 @@ def migrate_v2(
     """Deploy MarketAMM v2 + MarketFactory v2 next to the legacy pair and cut the shared oracle over.
 
     Order: all reads and checks first (no tx on failure), then deploy, configure the fresh contracts,
-    switch `oracle.setFactory` (legacy creates stop here), then import the legacy rows in chunks of 50.
+    switch `oracle.setFactory` (legacy creates stop here), then import the legacy rows in chunks of IMPORT_CHUNK (25).
     `progress` (optional) is filled as transactions land ("MarketAMM", "MarketFactory", "deployBlock",
     "steps", and "orphans" for a contract mined at an unexpected address), so a caller can report what is
     already on chain if a later transaction fails.
@@ -322,7 +334,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--legacy-cids", default="", help="comma/space separated legacy condition ids to import")
     p.add_argument("--api", default="", help="backend base URL; imports the cids listed by GET /api/v1/markets")
     p.add_argument("--permissionless", action=argparse.BooleanOptionalAction, default=None,
-                   help="open user listing to everyone (default: on for 31337, off elsewhere)")
+                   help="open user listing to everyone (default: on for 31337 and Base Sepolia 84532, matching "
+                        "ADR-0012 and deploy_ci.py; off on any other chain, where only setLister addresses may list)")
     p.add_argument("--close-gate", action=argparse.BooleanOptionalAction, default=True,
                    help="halt AMM trading at closeTime (default: on)")
     for flag, key in (
@@ -355,7 +368,7 @@ def main(argv: list[str] | None = None) -> int:
     cids = _parse_cid_arg(args.legacy_cids)
     if args.api:
         cids = normalize_cids(cids + fetch_market_cids(args.api))
-    permissionless = local if args.permissionless is None else args.permissionless
+    permissionless = default_permissionless(chain) if args.permissionless is None else args.permissionless
     listing = {k: getattr(args, k) for k in LISTING_KEYS if getattr(args, k) is not None}
 
     try:

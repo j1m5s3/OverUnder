@@ -237,6 +237,42 @@ def test_v2_preflight_blocks_wrong_operator_before_any_tx(capsys, tmp_path, monk
         _assert_no_keys(capsys.readouterr(), env)
 
 
+def test_v2_preflight_blocks_a_fee_vault_var_that_is_not_the_amm_fee_vault(capsys, tmp_path, monkeypatch):
+    def never(**kwargs):
+        raise AssertionError("migrate_v2 must not run when preflight fails")
+
+    monkeypatch.setitem(sys.modules, "deploy_v2", types.SimpleNamespace(migrate_v2=never))
+    with boa.env.anchor():
+        env, payload = _core_env(tmp_path)
+        env["FEE_VAULT_ADDRESS"] = payload["Exchange"]  # has code, so only the feeVault() row can catch it
+        out_dir = tmp_path / "v2"
+        argv = ["--target", "v2", "--in-process", "--broadcast", "--out", str(out_dir), "--allow-v2-source"]
+        assert deploy_ci.main(argv, env=env) == 1
+        checks = {c["check"]: c for c in json.loads((out_dir / "v2-checks.json").read_text())}
+        row = checks["amm.feeVault() == FEE_VAULT_ADDRESS"]
+        assert row["ok"] is False and row["actual"].lower() == payload["FeeVault"].lower()
+        assert all(c["ok"] for name, c in checks.items() if name != "amm.feeVault() == FEE_VAULT_ADDRESS")
+        assert not (out_dir / "31337.json").exists()
+        _assert_no_keys(capsys.readouterr(), env)
+
+
+def test_v2_permissionless_defaults_on_and_help_says_so(capsys, tmp_path, monkeypatch):
+    seen = {}
+
+    def migrate_v2(*, deployments, operator, legacy_cids, listing, permissionless, close_gate, progress=None, allow_v2_source=False):
+        seen["permissionless"] = permissionless
+        return {"MarketAMM": Account.create().address, "MarketFactory": Account.create().address, "imported": [], "deployBlock": 1}
+
+    monkeypatch.setitem(sys.modules, "deploy_v2", types.SimpleNamespace(migrate_v2=migrate_v2))
+    with boa.env.anchor():
+        env, _ = _core_env(tmp_path)
+        assert deploy_ci.main(["--target", "v2", "--in-process", "--out", str(tmp_path / "v2"), "--allow-v2-source"], env=env) == 0
+    assert seen["permissionless"] is True
+    with pytest.raises(SystemExit):
+        deploy_ci.main(["--help"], env={})
+    assert "ADR-0012" in capsys.readouterr().out
+
+
 def test_v2_calls_migrate_v2_with_the_agreed_signature(capsys, tmp_path, monkeypatch):
     seen = {}
     new_amm, new_factory = Account.create().address, Account.create().address
@@ -275,7 +311,8 @@ def test_v2_calls_migrate_v2_with_the_agreed_signature(capsys, tmp_path, monkeyp
     assert seen["legacy_cids"] == [cid]  # the unknown cid is filtered out before migrate_v2
     assert seen["permissionless"] is False and seen["close_gate"] is True
     assert seen["listing"]["minSeedUsdc"] == 25_000_000
-    assert seen["listing"]["feeRecipient"] == payload["FeeVault"]
+    # The recipient is left to migrate_v2 (legacy AMM's on-chain feeVault()); the payload records that value.
+    assert "feeRecipient" not in seen["listing"]
     assert seen["listing"]["listingCooldown"] == 3600  # contract default: 1 h per creator, never 0 by default
     deployments = seen["deployments"]
     for name in deploy_ci.CORE_NAMES:
@@ -287,6 +324,7 @@ def test_v2_calls_migrate_v2_with_the_agreed_signature(capsys, tmp_path, monkeyp
     assert written["MarketAMM"] == new_amm and written["MarketFactory"] == new_factory
     assert written["MarketFactoryLegacy"] == payload["MarketFactory"]
     assert written["deployBlock"] == 77 and written["imported"] == [cid]
+    assert written["listing"]["feeRecipient"] == payload["FeeVault"] and written["permissionless"] is False
     text = summary.read_text()
     assert f"gh variable set AMM_ADDRESS --body {new_amm} -R me/repo" in text
     assert f"gh variable set FACTORY_ADDRESS --body {new_factory} -R me/repo" in text
@@ -319,6 +357,9 @@ def test_v2_in_process_with_real_migration(capsys, tmp_path):
         assert oracle.factory().lower() == v2["MarketFactory"].lower()
         new_factory = deploy_ci._at("MarketFactory", v2["MarketFactory"])
         assert new_factory.marketExists(bytes.fromhex(cid[2:]))
+        assert new_factory.feeRecipient().lower() == payload["FeeVault"].lower()
+        assert new_factory.permissionless() is True  # deploy_ci default: listing opens (ADR-0012)
+        assert v2["permissionless"] is True
 
         # A second run against the old repo vars is refused: the oracle already points at v2.
         assert deploy_ci.main(argv, env=env) == 1

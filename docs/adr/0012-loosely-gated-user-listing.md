@@ -8,20 +8,22 @@ pointers:
   - "[contracts/src/MarketFactory.vy : L82-108]"
   - "[contracts/src/MarketFactory.vy : L161-199]"
   - "[contracts/src/MarketFactory.vy : L201-227]"
-  - "[contracts/script/deploy_ci.py : L82-85]"
-  - "[.github/workflows/deploy-contracts.yml : L20-35]"
+  - "[contracts/script/deploy_ci.py : L85-89]"
+  - "[contracts/script/deploy_ci.py : L311-341]"
+  - "[contracts/script/deploy_v2.py : L62-69]"
+  - "[.github/workflows/deploy-contracts.yml : L27-42]"
   - "[backend/app/markets/listing.py : L237-362]"
   - "[backend/app/markets/listing.py : L376-489]"
   - "[backend/app/markets/listing.py : L492-526]"
   - "[backend/app/markets/listing_gates.py : L54-167]"
   - "[backend/app/markets/visibility.py : L28-107]"
-  - "[backend/app/indexer/listener.py : L384-453]"
+  - "[backend/app/indexer/listener.py : L454-523]"
   - "[backend/app/aa/router.py : L75-160]"
   - "[web/src/features/listing/ListMarketForm.tsx : L318-344]"
   - "[web/src/features/listing/listing.ts : L276-349]"
-  - "[oracles/resolve/general.py : L211-409]"
+  - "[oracles/resolve/general.py : L219-438]"
   - "[oracles/listing/questions.py : L21-26]"
-  - "[contracts/tests/test_factory_listing.py : L75-89]"
+  - "[contracts/tests/test_factory_listing.py : L75-87]"
 ---
 
 ## Status
@@ -51,20 +53,20 @@ On chain: MarketFactory v2
   - `criteria required`: a non-zero `criteriaHash`;
   - `cooldown`: `lastListedAt + listingCooldown`, per creator.
   [contracts/src/MarketFactory.vy : L177-186]
-- [SHIPPED] The factory stores `creatorOf`, `seedOf` and `criteriaHashOf` and emits `UserMarketListed`. It pulls seed + `listingFeeUsdc` from the lister and sends the fee to `feeRecipient` (FeeVault, so it accrues to OU NAV). The seed goes through `amm.seedPoolFor(cid, seed, lister)`: the lister owns the LP, which is seed-locked until close or resolution with `MIN_LP` locked forever (ADR-0011). [contracts/src/MarketFactory.vy : L187-199] [contracts/src/MarketAMM.vy : L354-368]
+- [SHIPPED] The factory stores `creatorOf`, `seedOf` and `criteriaHashOf` and emits `UserMarketListed`. It pulls seed + `listingFeeUsdc` from the lister and sends the fee to `feeRecipient` (the FeeVault the AMM also pays, so it accrues to OU NAV). The seed goes through `amm.seedPoolFor(cid, seed, lister)`: the lister owns the LP, which is seed-locked until close or resolution with `MIN_LP` locked forever (ADR-0011). [contracts/src/MarketFactory.vy : L187-199] [contracts/src/MarketAMM.vy : L354-368]
 - [SHIPPED] Operator admin:
   - `setListingConfig` enforces bounds: min seed > 0; a fee needs a recipient; `minLeadTime` ≥ 600 s; `minLeadTime` < `maxHorizon` ≤ 31,622,400 s.
   - `setPermissionless` and `setLister` control access; `setPaused` is unchanged.
-  - Constructor defaults are closed (allowlist only): 10 USDC minimum seed, no fee, 3,600 s lead, 90-day horizon, 3,600 s cooldown.
+  - The constructor leaves listing closed (allowlist only): 10 USDC minimum seed, no fee, 3,600 s lead, 90-day horizon, 3,600 s cooldown. Opening it is a separate `setPermissionless(true)` that the deploy scripts send; see the next bullet.
   [contracts/src/MarketFactory.vy : L96-108] [contracts/src/MarketFactory.vy : L201-227]
-- [SHIPPED] Base Sepolia v2 values come from `deploy-contracts.yml` inputs through `deploy_ci.py`:
-  - `permissionless` true;
+- [SHIPPED] Decision for the Base Sepolia v2 migration: listing opens to everyone. The values come from `deploy-contracts.yml` inputs through `deploy_ci.py`:
+  - `permissionless` true: the workflow input and `deploy_ci.py --permissionless` both default on, and `migrate_v2` calls `setPermissionless(true)` right after construction. Untick the input (or pass `--no-permissionless`) to keep the allowlist;
   - `min_seed_usdc` 10,000,000 (10 USDC);
-  - fee 0, with FeeVault as recipient;
+  - fee 0. The recipient is the legacy AMM's on-chain `feeVault()`, which `migrate_v2` reads; `preflight_v2` refuses to send if the `FEE_VAULT_ADDRESS` repo var differs from it;
   - lead 3,600 s, horizon 7,776,000 s;
-  - `listing_cooldown` 3,600 s;
+  - `listing_cooldown` 3,600 s, the only per-address rate limit;
   - `close_gate` true.
-  Local chain 31337 (`deploy.py`) opens listing with cooldown 0. [.github/workflows/deploy-contracts.yml : L20-35] [contracts/script/deploy_ci.py : L82-85]
+  The local `deploy_v2.py` CLI uses the same default on 84532 and 31337 and keeps listing closed on any other chain unless `--permissionless` is passed. Local chain 31337 (`deploy.py`) opens listing with cooldown 0. [.github/workflows/deploy-contracts.yml : L27-42] [contracts/script/deploy_ci.py : L85-89] [contracts/script/deploy_ci.py : L311-341] [contracts/script/deploy_v2.py : L62-69]
 
 Backend listing API
 - [SHIPPED] `GET /api/v1/markets/listing/config` reads the chain config (disabled on a v1 factory). `GET /eligibility` reports allowlist state, cooldown left and pending count. [backend/app/markets/listing.py : L237-285]
@@ -81,8 +83,8 @@ Backend listing API
   - a prepared listing's on-chain question, closeTime and seed must equal the prepared values, because the question is committed in neither the condition id nor the hash;
   - the wording, whitespace and duplicate gates re-run on the on-chain question.
 
-  A pass sets `confirmed`. A failure sets `rejected` with `reject_reason`, and `/confirm` answers 422 `listing rejected: <reason>`. Before the tx lands it answers 409 `not on chain yet`. [backend/app/markets/listing.py : L376-489] [backend/app/markets/visibility.py : L73-107] [backend/app/indexer/listener.py : L384-453]
-- [SHIPPED] Visibility rule: a type-2 market is public only once its listing is `confirmed`. `indexed`, `prepared` and `rejected` rows stay out of lists, detail, quotes (409 `listing not confirmed`) and sponsored trades. `Market.paused` is not reused, so an unpause cannot re-publish a rejected market. [backend/app/markets/visibility.py : L28-49] [backend/app/markets/trading.py : L50-54]
+  A pass sets `confirmed`. A failure sets `rejected` with `reject_reason`, and `/confirm` answers 422 `listing rejected: <reason>`. Before the tx lands it answers 409 `not on chain yet`. [backend/app/markets/listing.py : L376-489] [backend/app/markets/visibility.py : L73-107] [backend/app/indexer/listener.py : L454-523]
+- [SHIPPED] Visibility rule: a type-2 market is public only once its listing is `confirmed`. `indexed`, `prepared` and `rejected` rows stay out of lists, detail, quotes (409 `listing not confirmed`) and sponsored trades. `Market.paused` is not reused, so an unpause cannot re-publish a rejected market. [backend/app/markets/visibility.py : L28-49] [backend/app/markets/trading.py : L55-59]
 - [SHIPPED] The operator-only `GET /api/v1/markets/listing/review` lists type-2 markets that are not public. Hidden markets can still be traded directly on the AMM, and the general resolver never sees them. The operator pauses them (`POST /markets/{id}/pause`; the flag hides the row, and MarketAMM does not read it) and resolves them by hand. [backend/app/markets/listing.py : L492-526]
 
 Web and sponsored gas
@@ -105,10 +107,10 @@ Resolution
   - After oracle closeTime + 24 h, under the default `attest` policy, a confident 2/3 majority attests and `resolveFallback` runs. `resolveArbitrated` is never called.
   - A failed research attempt waits 6 h before retrying.
 
-  [oracles/resolve/general.py : L1-19] [oracles/resolve/general.py : L168-179] [oracles/resolve/general.py : L211-409] [oracles/resolve/cooldown.py : L19-82]
+  [oracles/resolve/general.py : L1-19] [oracles/resolve/general.py : L176-187] [oracles/resolve/general.py : L219-438] [oracles/resolve/cooldown.py : L24-121]
 
 Squatting
-- [SHIPPED] Operator NFL question ids are derived from the public schedule. With the `OU_QUESTION_ID_KEY` secret set, the listing job makes them HMAC-SHA256 under that key, so nobody can precompute them and prepare the condition first. Without the key they stay the legacy public sha256. The key must stay stable, because changing it changes every future id. A squatted create gets 409 `condition prepared outside this factory` and is reported under `squatted`, not as a stage error. [oracles/listing/questions.py : L21-26] [backend/app/markets/router.py : L386-396] [oracles/listing/run.py : L250-257]
+- [SHIPPED] Operator NFL question ids are derived from the public schedule. With the `OU_QUESTION_ID_KEY` secret set, the listing job makes them HMAC-SHA256 under that key, so nobody can precompute them and prepare the condition first. Without the key they stay the legacy public sha256. The key must stay stable, because changing it changes every future id. A squatted create gets 409 `condition prepared outside this factory` and is reported under `squatted`, not as a stage error. [oracles/listing/questions.py : L21-26] [backend/app/markets/router.py : L447-457] [oracles/listing/run.py : L310-317]
 
 ## Consequences
 

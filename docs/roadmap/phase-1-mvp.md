@@ -6,7 +6,7 @@ summary: Vertical slice shipped on Anvil — seeded AMM on all market types (a C
 last_verified: 2026-09-23
 pointers:
   - "[contracts/script/deploy.py : L116-198]"
-  - "[scripts/e2e_local.py : L27-114]"
+  - "[scripts/e2e_local.py : L27-113]"
   - "[scripts/run_stack.cmd : L1-56]"
   - "[backend/app/main.py : L27-61]"
   - "[contracts/src/MarketFactory.vy : L143-150]"
@@ -21,7 +21,7 @@ Scope: one operator can list a seeded primary, a generator can seed a wildcard, 
 
 - [SHIPPED] Vyper protocol deploy as one graph. [contracts/script/deploy.py : L116-198]
 - [SHIPPED] boa tests for AMM, oracle, vault, factory required seed; leftover Exchange tests stay in `test_exchange.py`.
-- [SHIPPED] `scripts/e2e_local.py` happy path (seeded AMM buy+sell) plus fallback. [scripts/e2e_local.py : L27-114]
+- [SHIPPED] `scripts/e2e_local.py` happy path (seeded AMM buy+sell) plus fallback. [scripts/e2e_local.py : L27-113]
 - [SHIPPED] FastAPI routers, factory-backed `POST /markets`, `/health`.
 - [SHIPPED] Indexer loop started from app lifespan. [backend/app/main.py : L27-61]
 - [SHIPPED] Next.js markets / detail / portfolio / wallet pages with AmmSwap as the only ticket. [web/src/features/trade/AmmSwap.tsx : L54-70]

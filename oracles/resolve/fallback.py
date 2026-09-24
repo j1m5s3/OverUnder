@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import os
 
+from budget import SendDeferred
 from consensus.fallback import combine, majority
 
 POLICIES = ("manual", "attest", "arbitrate")
@@ -59,7 +60,9 @@ def run_fallback(
 ) -> dict:
     """Attest `derived` for matching agents, then resolveFallback (or arbitrate).
 
-    Never attests an outcome other than `derived`. Raises SendFailed when a send raises,
+    Never attests an outcome other than `derived`. budget.SendDeferred (the tick budget
+    cannot cover a send) propagates unchanged; nothing was broadcast for that send and the
+    next tick continues from the on-chain slots. Raises SendFailed when a send raises,
     except for send races with a concurrent tick: a 'dup attestation' revert whose slot is
     now submitted is skipped, and a resolving send that fails because the market is already
     resolved returns reason "already resolved". `supporters` lists the agents whose on-chain
@@ -109,6 +112,8 @@ def run_fallback(
         sig = coord.sign_one(name, oracle, chain_id, cid_bytes, evidence, derived, deadline)
         try:
             chain_api.submit_attestation(condition_id, derived, evidence, deadline, sig)
+        except SendDeferred:
+            raise
         except Exception as exc:
             # A concurrent tick may have landed the same attestation first.
             fresh = _raced_slot(chain_api, condition_id, addr) if "dup attestation" in str(exc) else None
@@ -164,6 +169,8 @@ def _resolve_send(label: str, attested: list[str], chain_api, condition_id: str,
     """Send a resolving tx; False when it failed because another sender resolved first."""
     try:
         call(*args)
+    except SendDeferred:
+        raise
     except Exception as exc:
         try:
             raced = bool(chain_api.is_resolved(condition_id))

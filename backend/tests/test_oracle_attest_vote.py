@@ -264,3 +264,35 @@ def test_read_position_weight_sums_yes_and_no():
         "app.contract_addresses.get_contract_addresses", return_value={"ConditionalTokens": "0x" + "01" * 20}
     ):
         assert read_position_weight(Settings(), CID, HOLDER) == 7
+
+
+@pytest.mark.asyncio
+async def test_concurrent_votes_from_one_holder_record_one_row(oclient):
+    """All requests pass the SELECT while the balance read is in flight; the unique key keeps one."""
+    import asyncio
+    import time as _time
+
+    def slow_read(settings, cid, holder):
+        _time.sleep(0.1)
+        return 7
+
+    with patch("app.oracle.router.read_position_weight", side_effect=slow_read):
+        results = await asyncio.gather(
+            *(
+                oclient.post("/api/v1/oracle/vote", json={"conditionId": CID, "outcome": i % 2}, headers=_h(HOLDER))
+                for i in range(3)
+            )
+        )
+    assert sorted(r.status_code for r in results) == [200, 409, 409], [r.text for r in results]
+    assert all(r.json()["detail"] == "already voted" for r in results if r.status_code == 409)
+    async with SessionLocal() as session:
+        rows = (await session.execute(select(Vote).where(Vote.condition_id == CID))).scalars().all()
+    assert len(rows) == 1 and rows[0].voter == HOLDER
+
+
+@pytest.mark.asyncio
+async def test_resolved_rejects_oversized_condition_id(oclient):
+    r = await oclient.post(
+        "/api/v1/oracle/resolved", json={"conditionId": "0x" + "a" * 200, "outcome": 0}, headers=_h(OP, True)
+    )
+    assert r.status_code == 422

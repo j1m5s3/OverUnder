@@ -135,3 +135,71 @@ async def test_enforce_kyc_gate_refuses_invalid_amount(notional):
     with pytest.raises(HTTPException) as exc:
         await enforce_kyc_gate(notional, User(address=ADDR), None)
     assert exc.value.status_code == 400
+
+
+# --- jurisdiction: ISO 3166-1 alpha-2 only, write-once -------------------------------------
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("bad", ["USA", "U", "1A", "U$", "x" * 300, "U S", "gb", "Gb"])
+async def test_kyc_session_rejects_non_alpha2_jurisdiction(client, bad):
+    headers = {"Authorization": f"Bearer {await _session_token()}"}
+    r = await client.post("/api/v1/kyc/session", json={"jurisdiction": bad}, headers=headers)
+    assert r.status_code == 422
+    async with SessionLocal() as s:
+        assert await s.get(KycRecord, ADDR) is None
+
+
+@pytest.mark.asyncio
+async def test_kyc_session_jurisdiction_is_write_once(client):
+    headers = {"Authorization": f"Bearer {await _session_token()}"}
+    first = await client.post("/api/v1/kyc/session", json={"jurisdiction": "GB"}, headers=headers)
+    assert first.status_code == 200 and first.json()["jurisdiction"] == "GB"
+    same = await client.post("/api/v1/kyc/session", json={"jurisdiction": "GB"}, headers=headers)
+    assert same.status_code == 200
+    blank = await client.post("/api/v1/kyc/session", json={}, headers=headers)
+    assert blank.status_code == 200 and blank.json()["jurisdiction"] == "GB"
+    changed = await client.post("/api/v1/kyc/session", json={"jurisdiction": "XX"}, headers=headers)
+    assert changed.status_code == 409
+    async with SessionLocal() as s:
+        assert (await s.get(KycRecord, ADDR)).jurisdiction == "GB"
+
+
+@pytest.mark.asyncio
+async def test_kyc_session_sets_jurisdiction_once_when_first_blank(client):
+    headers = {"Authorization": f"Bearer {await _session_token()}"}
+    assert (await client.post("/api/v1/kyc/session", json={}, headers=headers)).json()["jurisdiction"] == ""
+    later = await client.post("/api/v1/kyc/session", json={"jurisdiction": "CA"}, headers=headers)
+    assert later.status_code == 200 and later.json()["jurisdiction"] == "CA"
+
+
+@pytest.mark.asyncio
+async def test_moonpay_webhook_rejects_fields_past_column_sizes(client, monkeypatch):
+    import hashlib
+    import hmac
+    import json
+
+    import app.ramps.router as ramps
+
+    monkeypatch.setattr(ramps.settings, "moonpay_secret", "sk_test")
+
+    def signed(payload: dict):
+        body = json.dumps(payload).encode()
+        sig = hmac.new(b"sk_test", body, hashlib.sha256).hexdigest()
+        return {"content": body, "headers": {"moonpay-signature": sig, "content-type": "application/json"}}
+
+    base = {"type": "transaction_updated", "externalTransactionId": "kyc-bounds-1", "status": "completed",
+            "walletAddress": ADDR, "cryptoAmount": 5.0}
+    for field, value in (("externalTransactionId", "x" * 256), ("walletAddress", "0x" + "a" * 41),
+                         ("status", "s" * 33), ("status", 7)):
+        r = await client.post("/api/v1/ramps/moonpay/webhook", **signed({**base, field: value}))
+        assert r.status_code == 400, (field, r.text)
+    ok = await client.post("/api/v1/ramps/moonpay/webhook", **signed(base))
+    assert ok.status_code == 200
+    from sqlalchemy import delete
+
+    from app.models import RampTx
+
+    async with SessionLocal() as s:
+        await s.execute(delete(RampTx).where(RampTx.provider_id == "kyc-bounds-1"))
+        await s.commit()

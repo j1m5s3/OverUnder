@@ -933,6 +933,111 @@ async def test_emissions_and_worker_respect_each_others_in_flight_nonces():
     assert (await _job(fresh.job_id)).nonce == 52
 
 
+class _SlowEstimateChain(FakeChain):
+    """Yields inside estimate_gas so two requests interleave there (a double-click / client retry)."""
+
+    async def estimate_gas(self, tx):
+        await asyncio.sleep(0.05)
+        return await super().estimate_gas(tx)
+
+
+def _payload_hash(body: dict) -> str:
+    from eth_abi import encode
+    from web3 import Web3
+
+    encoded = encode(
+        ["uint256", "address[]", "uint256[]"],
+        [body["program"], [Web3.to_checksum_address(r["address"]) for r in body["recipients"]],
+         [int(r["amount"]) for r in body["recipients"]]],
+    )
+    return Web3.to_hex(Web3.keccak(encoded)).lower()
+
+
+async def test_emissions_concurrent_identical_requests_send_exactly_one_tx():
+    relayer = Account.create()
+    chain = _SlowEstimateChain()
+    chain.pending = 40
+    settings = _emission_settings(relayer)
+    body = _dist_body()
+    app = create_app()
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as api:
+        hdr = await _op_token(api)
+        with relayer_env(settings, chain):
+            r1, r2 = await asyncio.gather(
+                api.post("/api/v1/emissions/distribute", headers=hdr, json=body),
+                api.post("/api/v1/emissions/distribute", headers=hdr, json=body),
+            )
+    assert len(chain.sent) == 1 and chain.sent[0]["nonce"] == 40
+    assert len(chain.estimate_calls) == 2  # both really raced past the fast-path check
+    codes = sorted([r1.status_code, r2.status_code])
+    assert codes == [200, 202], (r1.text, r2.text)
+    dup = r1 if r1.status_code == 202 else r2
+    assert dup.json()["duplicate"] is True and dup.json()["txHash"] == chain.sent[0]["hash"]
+
+
+async def test_emissions_unique_index_decides_a_cross_process_race():
+    """Another instance records the same payload after this one's in-lock check: the insert loses, nothing is sent."""
+    from app.db import SessionLocal as S
+    from app.emissions import router as em
+    from app.models import EmissionDistribution
+
+    relayer = Account.create()
+    chain = FakeChain()
+    chain.pending = 40
+    settings = _emission_settings(relayer)
+    body = _dist_body()
+    other_hash = "0x" + "77" * 32
+    real_floor = em._nonce_floor
+
+    async def floor_after_rival_commits(db, sender):
+        async with S() as other:
+            other.add(EmissionDistribution(
+                program=body["program"], payload_hash=_payload_hash(body), idempotency_key="", sender=sender,
+                nonce=90, raw_tx="", tx_hash=other_hash, status="sent", recipient_count=1, total_amount="1000",
+                sent_at=int(time.time()), last_error="",
+            ))
+            await other.commit()
+        return await real_floor(db, sender)
+
+    app = create_app()
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as api:
+        hdr = await _op_token(api)
+        with relayer_env(settings, chain), patch.object(em, "_nonce_floor", floor_after_rival_commits):
+            r = await api.post("/api/v1/emissions/distribute", headers=hdr, json=body)
+    assert r.status_code == 202, r.text
+    assert r.json()["duplicate"] is True and r.json()["txHash"] == other_hash
+    assert chain.sent == []
+
+
+async def test_emissions_nonce_low_finds_earlier_mined_row_without_index_conflict():
+    from app.db import SessionLocal as S
+    from app.models import EmissionDistribution
+
+    relayer = Account.create()
+    chain = FakeChain()
+    chain.pending = 40
+    settings = _emission_settings(relayer)
+    body = _dist_body()
+    earlier_hash = "0x" + "66" * 32
+    async with S() as db:
+        db.add(EmissionDistribution(
+            program=body["program"], payload_hash=_payload_hash(body), idempotency_key="",
+            sender=relayer.address.lower(), nonce=39, raw_tx="", tx_hash=earlier_hash, status="failed",
+            recipient_count=1, total_amount="1000", sent_at=int(time.time()), last_error="lagging rpc",
+        ))
+        await db.commit()
+    chain.mine(earlier_hash)
+    chain.send_errors = [ValueError("nonce too low")]
+    app = create_app()
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as api:
+        hdr = await _op_token(api)
+        with relayer_env(settings, chain):
+            r = await api.post("/api/v1/emissions/distribute", headers=hdr, json=body)
+    assert r.status_code == 200, r.text
+    assert r.json()["duplicate"] is True and r.json()["txHash"] == earlier_hash
+    assert r.json()["status"] == "confirmed"
+
+
 # ================================================= 11. leader lock release under concurrent manual ticks
 class _Res:
     def __init__(self, v):

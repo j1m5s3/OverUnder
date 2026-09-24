@@ -16,7 +16,7 @@ from sqlalchemy import select, text, update
 from app.config import get_settings
 from app.contract_addresses import get_contract_addresses, load_abi
 from app.db import PRICE_POINT_KEY, SessionLocal, engine, insert_ignore, session_dialect
-from app.models import Checkpoint, Market, MarketListing, PricePoint
+from app.models import Checkpoint, IndexerCheckpoint, Market, MarketListing, PricePoint
 
 logger = logging.getLogger(__name__)
 
@@ -46,13 +46,22 @@ class _LeaderState:
 _LEADER = _LeaderState()
 
 
-async def _drop_leader_conn() -> None:
+async def _drop_leader_conn(invalidate: bool = False) -> None:
+    """Forget the leader connection. `invalidate` ends its server session first: a pooled close()
+    only rolls back, so a session advisory lock would otherwise survive in the pool and make every
+    later pg_try_advisory_lock (this instance's included) return false until the connection recycles."""
     conn, _LEADER.conn = _LEADER.conn, None
-    if conn is not None:
+    if conn is None:
+        return
+    if invalidate:
         try:
-            await conn.close()
+            await conn.invalidate()
         except Exception:
             pass
+    try:
+        await conn.close()
+    except Exception:
+        pass
 
 
 async def ensure_indexer_leader(settings) -> bool:
@@ -74,12 +83,17 @@ async def ensure_indexer_leader(settings) -> bool:
             return True
         except Exception as e:
             logger.warning(f"Indexer lost its leader connection ({type(e).__name__}); re-electing")
-            await _drop_leader_conn()
+            await _drop_leader_conn(invalidate=True)
     conn = await engine.connect()
     try:
         got = bool((await conn.execute(text("SELECT pg_try_advisory_lock(:k)"), {"k": key})).scalar())
         await conn.commit()
     except Exception:
+        # The lock may have been granted before the failure: never return this session to the pool.
+        try:
+            await conn.invalidate()
+        except Exception:
+            pass
         await conn.close()
         raise
     if not got:
@@ -98,9 +112,10 @@ async def release_indexer_leadership() -> None:
     try:
         await conn.execute(text("SELECT pg_advisory_unlock(:k)"), {"k": get_settings().indexer_leader_lock_key})
         await conn.commit()
+        unlocked = True
     except Exception:
-        pass
-    await _drop_leader_conn()
+        unlocked = False
+    await _drop_leader_conn(invalidate=not unlocked)
 
 
 def mid_to_micros(yes_reserve: int, no_reserve: int) -> int:
@@ -171,9 +186,10 @@ def build_seed_point(condition_id: str, ts: int, block_number: int, log_index: i
 
 
 def resolve_start_block(last_block: int, start_block: int, head: int, chain_id: int, lookback: int) -> int:
-    """First block to index this tick.
+    """First block to index this tick, from the current address set's checkpoint.
 
-    INDEXER_START_BLOCK > 0 is a floor: a checkpoint behind it fast-forwards.
+    INDEXER_START_BLOCK > 0 is a floor: a fresh address set starts exactly there,
+    and a checkpoint behind it fast-forwards; it never rewinds a checkpoint.
     Unset on anvil, index from block 1. Unset elsewhere with no checkpoint yet,
     start `lookback` blocks behind head instead of scanning from genesis.
     """
@@ -272,8 +288,9 @@ async def index_once() -> bool:
         logger.warning(f"Indexer cannot read block number: {type(e).__name__}")
         return False
 
+    key = checkpoint_key(addresses)
     async with SessionLocal() as db:
-        last_block = await _load_checkpoint(db)
+        last_block = await _load_checkpoint(db, key, settings, head)
         start = resolve_start_block(
             last_block, settings.indexer_start_block, head, settings.chain_id, settings.indexer_lookback_blocks
         )
@@ -284,38 +301,91 @@ async def index_once() -> bool:
             ok = await index_range(w3, factory, amm, db, lo, hi)
             if not ok:
                 _STATE.block_range = max(settings.indexer_min_block_range, (hi - lo + 1) // 2)
-                held = await advance_checkpoint(db, lo - 1)
+                held = await advance_checkpoint(db, key, lo - 1)
                 logger.warning(
                     f"Indexer range {lo}-{hi} failed; holding last_block at {held}, next window {_STATE.block_range}"
                 )
                 return False
-            await advance_checkpoint(db, hi)
+            await advance_checkpoint(db, key, hi)
         _STATE.block_range = min(settings.indexer_max_block_range, window * 2)
     return True
 
 
-async def _load_checkpoint(db) -> int:
-    """Checkpoint row 1's last_block, creating it conflict-free (two instances may race here)."""
-    await db.execute(insert_ignore(session_dialect(db), Checkpoint, {"id": 1, "last_block": 0}, ["id"]))
+def checkpoint_key(addresses: dict[str, str]) -> tuple[str, str]:
+    """(factory, amm) lowercase: the address set a checkpoint belongs to ('' when the AMM is unset)."""
+    return (
+        str(addresses.get("MarketFactory") or "").strip().lower(),
+        str(addresses.get("MarketAMM") or "").strip().lower(),
+    )
+
+
+def _key_clause(key: tuple[str, str]):
+    return (IndexerCheckpoint.factory_address == key[0]) & (IndexerCheckpoint.amm_address == key[1])
+
+
+async def _read_checkpoint(db, key: tuple[str, str]) -> int | None:
+    value = (await db.execute(select(IndexerCheckpoint.last_block).where(_key_clause(key)))).scalar_one_or_none()
+    return None if value is None else int(value)
+
+
+async def _fresh_last_block(db, settings, head: int) -> int:
+    """Initial last_block for an address set with no checkpoint yet.
+
+    INDEXER_START_BLOCK > 0: start exactly there (the v2 deploy block), whatever the
+    legacy checkpoint says. Anvil: block 1. Otherwise `lookback` blocks behind head, but
+    never past the legacy unkeyed checkpoint (row id=1): if it is further behind, the
+    same contracts may have events it has not indexed yet. Replays are idempotent.
+    """
+    if settings.indexer_start_block > 0:
+        return settings.indexer_start_block - 1
+    if settings.chain_id == ANVIL_CHAIN_ID:
+        return 0
+    behind_head = max(0, head - settings.indexer_lookback_blocks)
+    legacy = (await db.execute(select(Checkpoint.last_block).where(Checkpoint.id == 1))).scalar_one_or_none()
+    if legacy is not None and int(legacy) > 0:
+        return min(int(legacy), behind_head)
+    return behind_head
+
+
+async def _load_checkpoint(db, key: tuple[str, str], settings, head: int) -> int:
+    """This address set's last_block, creating its row conflict-free (two instances may race here).
+
+    The checkpoint is keyed by (factory, amm): after the v2 cutover the new contracts start
+    their own row, so events between their deploy block and the old set's checkpoint (which an
+    older revision may still be advancing) are never skipped."""
+    current = await _read_checkpoint(db, key)
+    if current is not None:
+        return current
+    initial = await _fresh_last_block(db, settings, head)
+    await db.execute(
+        insert_ignore(
+            session_dialect(db),
+            IndexerCheckpoint,
+            {"factory_address": key[0], "amm_address": key[1], "last_block": initial},
+            ["factory_address", "amm_address"],
+        )
+    )
     await db.commit()
-    return int((await db.execute(select(Checkpoint.last_block).where(Checkpoint.id == 1))).scalar_one())
+    stored = await _read_checkpoint(db, key)
+    logger.info(f"Indexer checkpoint for factory {key[0]} amm {key[1] or '-'} starts at {stored}")
+    return int(stored or 0)
 
 
-async def advance_checkpoint(db, block: int) -> int:
-    """Commit pending writes and move last_block forward to `block`, never backward.
+async def advance_checkpoint(db, key: tuple[str, str], block: int) -> int:
+    """Commit pending writes and move this address set's last_block forward to `block`, never backward.
 
     A conditional UPDATE (portable; SQLite has no GREATEST) so a lagging
     instance or a stale tick can never rewind a checkpoint another one advanced.
     Returns the stored value.
     """
     await db.execute(
-        update(Checkpoint)
-        .where(Checkpoint.id == 1, Checkpoint.last_block < block)
+        update(IndexerCheckpoint)
+        .where(_key_clause(key), IndexerCheckpoint.last_block < block)
         .values(last_block=block)
         .execution_options(synchronize_session=False)
     )
     await db.commit()
-    return int((await db.execute(select(Checkpoint.last_block).where(Checkpoint.id == 1))).scalar_one())
+    return int(await _read_checkpoint(db, key) or 0)
 
 
 async def index_range(w3, factory, amm, db, start: int, end: int) -> bool:

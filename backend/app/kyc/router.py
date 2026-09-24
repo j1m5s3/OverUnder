@@ -86,7 +86,13 @@ async def enforce_kyc_gate(
 
 
 class KycSessionRequest(BaseModel):
-    jurisdiction: str = ""
+    # ISO 3166-1 alpha-2, two uppercase letters (kyc_records.jurisdiction is VARCHAR(2)); "" leaves it unset.
+    jurisdiction: str = Field(
+        default="",
+        max_length=2,
+        pattern=r"^([A-Z]{2})?$",
+        description="ISO 3166-1 alpha-2 country code (two uppercase letters); write-once per address.",
+    )
 
 
 class KycSessionResponse(BaseModel):
@@ -123,6 +129,9 @@ async def kyc_session(
     existing = result.scalar_one_or_none()
 
     if existing:
+        if req.jurisdiction and existing.jurisdiction and req.jurisdiction != existing.jurisdiction.upper():
+            # Write-once: a user in a restricted jurisdiction must not re-declare their way past the gate.
+            raise HTTPException(status_code=409, detail="jurisdiction already set")
         if req.jurisdiction:
             existing.jurisdiction = req.jurisdiction
         existing.updated_at = datetime.utcnow()

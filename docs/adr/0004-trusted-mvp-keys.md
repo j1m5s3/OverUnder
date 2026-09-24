@@ -6,13 +6,13 @@ summary: Operator, relayer, three agents, treasury and wildcard generator are tr
 last_verified: 2026-09-23
 pointers:
   - "[contracts/script/deploy.py : L18-27]"
-  - "[contracts/script/deploy.py : L104-114]"
+  - "[contracts/script/deploy.py : L104-113]"
   - "[contracts/src/MarketFactory.vy : L143-150]"
   - "[contracts/src/MarketFactory.vy : L243-248]"
   - "[contracts/src/ConsensusOracle.vy : L219-226]"
   - "[backend/app/relayer/queue.py : L30-38]"
   - "[backend/app/orderbook/router.py : L104-128]"
-  - "[oracles/resolve/chain.py : L184-255]"
+  - "[oracles/resolve/chain.py : L188-261]"
   - "[oracles/tick_lease.py : L1-16]"
   - "[oracles/listing/questions.py : L21-26]"
 ---
@@ -32,10 +32,10 @@ Amended 2026-09-23. Key roles and guards:
   - API create and pause transactions;
   - every oracle-job send: `submitConsensus`, relayed `submitAttestation`, `resolveFallback` and `resolveArbitrated` (the job has no other sender key);
   - the `deploy-contracts.yml` v2 migration, which pauses the oracle scheduler first to avoid nonce races.
-  The operator also holds the new switches: `closeGate` ([ADR-0011](0011-pm-amm-v2-close-gate.md)), and listing config, `permissionless` and listers ([ADR-0012](0012-loosely-gated-user-listing.md)). [backend/app/markets/router.py : L358-370] [oracles/resolve/chain.py : L184-255] [.github/workflows/deploy-contracts.yml : L141-160]
-- Single flight: before any stage, the oracle job lists its own Cloud Run executions and skips the tick while an older one is still running. The guard fails open on API errors. [oracles/tick_lease.py : L1-16] [oracles/tick_lease.py : L70-102] [oracles/job.py : L60-86]
+  The operator also holds the new switches: `closeGate` ([ADR-0011](0011-pm-amm-v2-close-gate.md)), and listing config, `permissionless` and listers ([ADR-0012](0012-loosely-gated-user-listing.md)). [backend/app/markets/router.py : L416-427] [oracles/resolve/chain.py : L188-261] [.github/workflows/deploy-contracts.yml : L183-202]
+- Single flight: before any stage, the oracle job lists its own Cloud Run executions and skips the tick while an older one is still running. The guard fails open on API errors. [oracles/tick_lease.py : L1-16] [oracles/tick_lease.py : L70-102] [oracles/job.py : L136-162]
 - Optional secret `OU_QUESTION_ID_KEY` turns operator listing question ids into an HMAC so they cannot be squatted. [oracles/listing/questions.py : L21-26]
-- `deploy.py` refuses missing role keys and the public Anvil keys on any chain other than 31337. [contracts/script/deploy.py : L104-114]
+- `deploy.py` refuses missing role keys and the public Anvil keys on any chain other than 31337. [contracts/script/deploy.py : L104-113]
 
 ## Context
 

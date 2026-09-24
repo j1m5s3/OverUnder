@@ -39,6 +39,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
+      actions: read  # the scheduler step checks for a running deploy-contracts broadcast before resuming
 
     steps:
       - name: Checkout code
@@ -169,11 +170,19 @@ jobs:
           relayer_pair="RELAYER_PRIVATE_KEY=OU_RELAYER_PRIVATE_KEY"
           api_req="$API_SECRETS_REQUIRED"; api_opt="$API_SECRETS_OPTIONAL"
           relayer_on=${RELAYER_ENABLED:-false}; worker_on=${RELAYER_WORKER_ENABLED:-false}
+          api_scaling=""
           case "${relayer_on,,}" in
             true|1|yes|on)
               api_req+=",$relayer_pair"
               api_opt=$(tr ',' '\n' <<<"$api_opt" | grep -vx "$relayer_pair" | paste -sd, -)
               echo "RELAYER_ENABLED=$relayer_on: OU_RELAYER_PRIVATE_KEY is required."
+              # The worker is a background loop in the API process: it needs CPU between requests and a live instance.
+              case "${worker_on,,}" in
+                true|1|yes|on)
+                  api_scaling="--no-cpu-throttling --min-instances=1"
+                  echo "RELAYER_WORKER_ENABLED=$worker_on: the API deploys with $api_scaling (turning the worker off later does not undo them)."
+                  ;;
+              esac
               ;;
             *)
               case "${worker_on,,}" in
@@ -209,6 +218,7 @@ jobs:
           {
             echo "api_secrets=$api_secrets"
             echo "oracle_secrets=$oracle_secrets"
+            echo "api_scaling=$api_scaling"
           } >> "$GITHUB_OUTPUT"
           echo "API maps: $api_secrets"
           echo "Oracle job maps: $oracle_secrets"
@@ -238,6 +248,15 @@ jobs:
           OU_SCOUT_MAX_AGE_SECONDS: ${{ vars.OU_SCOUT_MAX_AGE_SECONDS }}
           OU_RESOLVE_MAX_MARKETS: ${{ vars.OU_RESOLVE_MAX_MARKETS }}
           OU_RESEARCH_RETRY_SECONDS: ${{ vars.OU_RESEARCH_RETRY_SECONDS }}
+          OU_RESEARCH_ERROR_RETRY_SECONDS: ${{ vars.OU_RESEARCH_ERROR_RETRY_SECONDS }}
+          OU_RESEARCH_MIN_SECONDS: ${{ vars.OU_RESEARCH_MIN_SECONDS }}
+          OU_LISTING_RESERVE_SECONDS: ${{ vars.OU_LISTING_RESERVE_SECONDS }}
+          # Per-stage share of the tick budget (oracles/job.py STAGES): scores 0.4, the others 1.0.
+          OU_STAGE_SHARE_SCORES: ${{ vars.OU_STAGE_SHARE_SCORES }}
+          OU_STAGE_SHARE_RESOLVE: ${{ vars.OU_STAGE_SHARE_RESOLVE }}
+          OU_STAGE_SHARE_RESOLVE_GENERAL: ${{ vars.OU_STAGE_SHARE_RESOLVE_GENERAL }}
+          OU_STAGE_SHARE_SCHEDULE: ${{ vars.OU_STAGE_SHARE_SCHEDULE }}
+          OU_STAGE_SHARE_LISTING: ${{ vars.OU_STAGE_SHARE_LISTING }}
           OU_GENERAL_RESOLVE_MAX_MARKETS: ${{ vars.OU_GENERAL_RESOLVE_MAX_MARKETS }}
           OU_GENERAL_RESOLVE_DELAY_SECONDS: ${{ vars.OU_GENERAL_RESOLVE_DELAY_SECONDS }}
           OU_GENERAL_RESOLVE_GATED_DELAY_SECONDS: ${{ vars.OU_GENERAL_RESOLVE_GATED_DELAY_SECONDS }}
@@ -290,9 +309,15 @@ jobs:
             if [[ $v =~ ^[0-9]{1,15}$ ]] && [ $((10#$v)) -ge 1 ]; then add "$name" "$((10#$v))"; else bad "$name" "$v" "must be an integer >= 1"; fi
           done
           for name in OU_SCOUT_STALE_SECONDS OU_SCOUT_RECENT_SECONDS OU_SCOUT_MAX_AGE_SECONDS OU_RESEARCH_RETRY_SECONDS \
+            OU_RESEARCH_ERROR_RETRY_SECONDS OU_RESEARCH_MIN_SECONDS OU_LISTING_RESERVE_SECONDS \
             OU_GENERAL_RESOLVE_DELAY_SECONDS OU_GENERAL_RESOLVE_GATED_DELAY_SECONDS OU_LISTING_STALE_GRACE_SECONDS; do
             v=${!name:-}; [ -n "$v" ] || continue
             if [[ $v =~ ^[0-9]{1,9}$ ]]; then add "$name" "$((10#$v))"; else bad "$name" "$v" "must be a whole number of seconds (>= 0)"; fi
+          done
+          # oracles/job.py stage_share: a number in (0, 1].
+          for name in OU_STAGE_SHARE_SCORES OU_STAGE_SHARE_RESOLVE OU_STAGE_SHARE_RESOLVE_GENERAL OU_STAGE_SHARE_SCHEDULE OU_STAGE_SHARE_LISTING; do
+            v=${!name:-}; [ -n "$v" ] || continue
+            if [[ $v =~ ^(0?\.[0-9]*[1-9][0-9]*|1(\.0+)?)$ ]]; then add "$name" "$v"; else bad "$name" "$v" "must be a number in (0, 1]"; fi
           done
           v=${OU_GENERAL_RESOLVE_MIN_CONFIDENCE:-}
           if [ -n "$v" ]; then
@@ -417,6 +442,7 @@ jobs:
             --add-cloudsql-instances=overunder-509107:us-central1:overunder-pg \
             --set-secrets="${{ steps.secrets.outputs.api_secrets }}" \
             --set-env-vars="CHAIN_ID=84532,CDP_PROJECT_ID=${{ vars.CDP_PROJECT_ID || '' }},USDC_ADDRESS=${{ vars.USDC_ADDRESS || '' }},CTF_ADDRESS=${{ vars.CTF_ADDRESS || '' }},FACTORY_ADDRESS=${{ vars.FACTORY_ADDRESS || '' }},EXCHANGE_ADDRESS=${{ vars.EXCHANGE_ADDRESS || '' }},AMM_ADDRESS=${{ vars.AMM_ADDRESS || '' }},ORACLE_ADDRESS=${{ vars.ORACLE_ADDRESS || '' }},FEE_VAULT_ADDRESS=${{ vars.FEE_VAULT_ADDRESS || '' }},OU_TOKEN_ADDRESS=${{ vars.OU_TOKEN_ADDRESS || '' }},PAYMASTER_ADDRESS=${{ vars.PAYMASTER_ADDRESS || '' }},ENTRYPOINT_ADDRESS=${{ vars.ENTRYPOINT_ADDRESS || '' }},ACCOUNT_FACTORY_ADDRESS=${{ vars.ACCOUNT_FACTORY_ADDRESS || '' }},COINBASE_ONRAMP_APP_ID=${{ vars.COINBASE_ONRAMP_APP_ID || '' }},INDEXER_START_BLOCK=${{ vars.INDEXER_START_BLOCK || '0' }},TRADING_HALT_AT_CLOSE=${{ vars.TRADING_HALT_AT_CLOSE || 'true' }},RELAYER_ENABLED=${{ vars.RELAYER_ENABLED || 'false' }},RELAYER_WORKER_ENABLED=${{ vars.RELAYER_WORKER_ENABLED || 'false' }}" \
+            ${{ steps.secrets.outputs.api_scaling }} \
             --project=${{ env.GCP_PROJECT_ID }}
 
       - name: Capture API URL
@@ -509,39 +535,71 @@ jobs:
             --set-secrets="${{ steps.secrets.outputs.oracle_secrets }}" \
             --project="$GCP_PROJECT_ID"
 
+      # `jobs update` keeps a paused job paused, and deploy-contracts leaves it paused after a broadcast.
+      # Resume it here unless OU_KEEP_SCHEDULER_PAUSED is set or a deploy-contracts run is in progress.
       - name: Schedule oracle job every 15 minutes
+        id: scheduler
+        shell: bash
+        env:
+          KEEP_PAUSED: ${{ vars.OU_KEEP_SCHEDULER_PAUSED || 'false' }}
+          GH_TOKEN: ${{ github.token }}
+          CONTRACTS_WORKFLOW: deploy-contracts.yml
         run: |
-          SCHEDULER_NAME=${{ env.SCHEDULER_JOB_NAME }}
-          URI="https://${{ env.GCP_REGION }}-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/${{ env.GCP_PROJECT_ID }}/jobs/${{ env.ORACLE_JOB_NAME }}:run"
-          SA=github-deploy@${{ env.GCP_PROJECT_ID }}.iam.gserviceaccount.com
-          gcloud services enable cloudscheduler.googleapis.com --project=${{ env.GCP_PROJECT_ID }} --quiet || true
-          if gcloud scheduler jobs describe "$SCHEDULER_NAME" --location=${{ env.GCP_REGION }} --project=${{ env.GCP_PROJECT_ID }} >/dev/null 2>&1; then
-            gcloud scheduler jobs update http "$SCHEDULER_NAME" \
-              --location=${{ env.GCP_REGION }} \
-              --schedule="*/15 * * * *" \
-              --uri="$URI" \
-              --http-method=POST \
-              --oauth-service-account-email="$SA" \
-              --attempt-deadline=180s \
-              --project=${{ env.GCP_PROJECT_ID }} \
-              --quiet
+          set -euo pipefail
+          loc=(--location="$GCP_REGION" --project="$GCP_PROJECT_ID")
+          uri="https://$GCP_REGION-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/$GCP_PROJECT_ID/jobs/$ORACLE_JOB_NAME:run"
+          sa="github-deploy@$GCP_PROJECT_ID.iam.gserviceaccount.com"
+          flags=(--schedule="*/15 * * * *" --uri="$uri" --http-method=POST --oauth-service-account-email="$sa" --attempt-deadline=180s --quiet)
+          gcloud services enable cloudscheduler.googleapis.com --project="$GCP_PROJECT_ID" --quiet || true
+          if gcloud scheduler jobs describe "$SCHEDULER_JOB_NAME" "${loc[@]}" >/dev/null 2>&1; then
+            gcloud scheduler jobs update http "$SCHEDULER_JOB_NAME" "${loc[@]}" "${flags[@]}"
           else
-            gcloud scheduler jobs create http "$SCHEDULER_NAME" \
-              --location=${{ env.GCP_REGION }} \
-              --schedule="*/15 * * * *" \
-              --uri="$URI" \
-              --http-method=POST \
-              --oauth-service-account-email="$SA" \
-              --attempt-deadline=180s \
-              --project=${{ env.GCP_PROJECT_ID }} \
-              --quiet
+            gcloud scheduler jobs create http "$SCHEDULER_JOB_NAME" "${loc[@]}" "${flags[@]}"
           fi
+
+          resume_cmd="gcloud scheduler jobs resume $SCHEDULER_JOB_NAME --location=$GCP_REGION --project=$GCP_PROJECT_ID"
+          state=$(gcloud scheduler jobs describe "$SCHEDULER_JOB_NAME" "${loc[@]}" --format='value(state)' 2>/dev/null) || state=""
+          note=""
+          if [ "$state" = PAUSED ]; then
+            case "${KEEP_PAUSED,,}" in
+              true|1|yes|on) note="kept paused: OU_KEEP_SCHEDULER_PAUSED=$KEEP_PAUSED" ;;
+              *)
+                # A running broadcast paused it on purpose (shared operator key); never resume under it.
+                running=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/$CONTRACTS_WORKFLOW/runs?status=in_progress&per_page=1" --jq '.total_count' 2>/dev/null) || running=""
+                case "$running" in
+                  0)
+                    if gcloud scheduler jobs resume "$SCHEDULER_JOB_NAME" "${loc[@]}" --quiet >/dev/null; then
+                      state=ENABLED; note="resumed by this deploy (was PAUSED)"
+                      echo "Resumed $SCHEDULER_JOB_NAME (it was PAUSED)."
+                    else
+                      note="resume failed (github-deploy needs roles/cloudscheduler.admin)"
+                    fi
+                    ;;
+                  ""|*[!0-9]*) note="not resumed: could not check for a running $CONTRACTS_WORKFLOW" ;;
+                  *) note="not resumed: $CONTRACTS_WORKFLOW is running (a broadcast pauses the scheduler)" ;;
+                esac
+                ;;
+            esac
+          fi
+          case "$state" in
+            ENABLED) ;;
+            PAUSED) echo "::warning::$SCHEDULER_JOB_NAME is PAUSED ($note): no market is listed or resolved until it runs. Fix: $resume_cmd" ;;
+            "") state=UNKNOWN; echo "::warning::Could not read the state of $SCHEDULER_JOB_NAME after the update. Check: gcloud scheduler jobs describe $SCHEDULER_JOB_NAME --location=$GCP_REGION --project=$GCP_PROJECT_ID" ;;
+            *) echo "::warning::$SCHEDULER_JOB_NAME is $state. Check: gcloud scheduler jobs describe $SCHEDULER_JOB_NAME --location=$GCP_REGION --project=$GCP_PROJECT_ID" ;;
+          esac
+          {
+            echo "state=$state"
+            echo "note=$note"
+          } >> "$GITHUB_OUTPUT"
+          echo "$SCHEDULER_JOB_NAME: $state${note:+ ($note)}"
 
       - name: Output Service URLs
         shell: bash
         env:
           ORACLE_ENV: ${{ steps.oracle_env.outputs.env_vars }}
           TASK_TIMEOUT: ${{ steps.oracle_env.outputs.task_timeout }}
+          SCHEDULER_STATE: ${{ steps.scheduler.outputs.state }}
+          SCHEDULER_NOTE: ${{ steps.scheduler.outputs.note }}
         run: |
           API_URL=$(gcloud run services describe ${{ env.API_SERVICE_NAME }} --platform=managed --region=${{ env.GCP_REGION }} --format='value(status.url)' --project=${{ env.GCP_PROJECT_ID }})
           WEB_URL=$(gcloud run services describe ${{ env.WEB_SERVICE_NAME }} --platform=managed --region=${{ env.GCP_REGION }} --format='value(status.url)' --project=${{ env.GCP_PROJECT_ID }})
@@ -566,6 +624,14 @@ jobs:
               if [ -n "$key" ]; then echo "| $key (oracle job) | ${value:-(empty)} |"; fi
             done
             echo "| other OU_* oracle tunables | code defaults (infra/gcp/README.md) |"
+            echo "| oracle scheduler state | ${SCHEDULER_STATE:-UNKNOWN}${SCHEDULER_NOTE:+ ($SCHEDULER_NOTE)} |"
+            if [ "${SCHEDULER_STATE:-UNKNOWN}" != ENABLED ]; then
+              echo ""
+              echo "**$SCHEDULER_JOB_NAME is not running.** Resume it once nothing else is signing with the operator key:"
+              echo '```'
+              echo "gcloud scheduler jobs resume $SCHEDULER_JOB_NAME --location=$GCP_REGION --project=$GCP_PROJECT_ID"
+              echo '```'
+            fi
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Diagnose failed deploy (conditions only)

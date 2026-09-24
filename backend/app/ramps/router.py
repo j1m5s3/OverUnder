@@ -116,6 +116,10 @@ async def moonpay_webhook(request: Request, db: AsyncSession = Depends(get_db)):
     address = payload.get("walletAddress", "")
     amount = str(payload.get("cryptoAmount", 0))
     status = payload.get("status", "unknown")
+    # Bound to the ramp_txs column sizes: an oversized value would 500 on Postgres at commit.
+    fields = ((provider_id, 255), (address, 42), (amount, 64), (status, 32))
+    if not all(isinstance(v, str) and len(v) <= limit for v, limit in fields):
+        raise HTTPException(status_code=400, detail="Invalid webhook payload")
 
     # Check if exists
     result = await db.execute(select(RampTx).where(RampTx.provider_id == provider_id))

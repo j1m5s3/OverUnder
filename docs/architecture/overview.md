@@ -16,11 +16,11 @@ pointers:
   - "[contracts/src/ConsensusOracle.vy : L144-161]"
   - "[contracts/src/ConsensusOracle.vy : L220-226]"
   - "[backend/app/main.py : L27-61]"
-  - "[backend/app/markets/trading.py : L42-58]"
+  - "[backend/app/markets/trading.py : L47-67]"
   - "[backend/app/orderbook/router.py : L94-164]"
-  - "[backend/app/relayer/worker.py : L1-24]"
-  - "[oracles/job.py : L1-19]"
-  - "[oracles/resolve/fallback.py : L47-151]"
+  - "[backend/app/relayer/worker.py : L1-21]"
+  - "[oracles/job.py : L1-31]"
+  - "[oracles/resolve/fallback.py : L48-156]"
   - "[web/src/app/providers.tsx : L21-45]"
   - "[contracts/src/OverUnderPaymaster.vy : L322-355]"
 ---
@@ -33,7 +33,7 @@ OverUnder is a Base-chain prediction market. Collateral is USDC (6 decimals). Ou
 
 - [SHIPPED] Vyper contracts under `contracts/src/` deploy as one graph: MockUSDC, ConditionalTokens, MarketFactory, Exchange, MarketAMM (with `lib/NormalMath.vy`), ConsensusOracle, FeeVault, RevenueToken, OverUnderPaymaster, SimpleAccount + factory. `contracts/script/deploy_v2.py` swaps in MarketAMM v2 + MarketFactory v2 and reuses the rest.
 - [SHIPPED] FastAPI under `backend/app/` exposes `/api/v1` plus `/health`; startup runs one locked schema migration, the chain indexer and (when enabled) the CLOB relayer worker. [backend/app/main.py : L27-61]
-- [SHIPPED] Python oracles under `oracles/` run as one Cloud Run Job tick: scores → resolve → resolve_general → schedule → listing, after a single-flight lease and an operator auth preflight. [oracles/job.py : L1-19]
+- [SHIPPED] Python oracles under `oracles/` run as one Cloud Run Job tick: scores → resolve → resolve_general → schedule → listing, after a single-flight lease and an operator auth preflight. [oracles/job.py : L1-31]
 - [SHIPPED] Next.js web under `web/` lists markets, executes AMM swaps, lists user markets at `/list`, shows oracle status.
 - [SHIPPED] Flutter app under `mobile/` mirrors the web markets, trade, wallet and oracle modules (no listing UI). See [mobile/README.md](../../mobile/README.md).
 
@@ -47,15 +47,15 @@ OverUnder is a Base-chain prediction market. Collateral is USDC (6 decimals). Ou
 
 ## Market lifecycle
 
-- [SHIPPED] Trading halts at closeTime twice over: MarketAMM v2 reverts buys, sells and adds (`closeGate`, default on) and the API returns 409 for quotes, sponsored trades and CLOB orders (`TRADING_HALT_AT_CLOSE`, default true). Direct contract calls on a v1 AMM are not gated. [contracts/src/MarketAMM.vy : L115-119] [backend/app/markets/trading.py : L42-58]
+- [SHIPPED] Trading halts at closeTime twice over: MarketAMM v2 reverts buys, sells and adds (`closeGate`, default on) and the API returns 409 for quotes, sponsored trades and CLOB orders (`TRADING_HALT_AT_CLOSE`, default true). Direct contract calls on a v1 AMM are not gated. [contracts/src/MarketAMM.vy : L115-119] [backend/app/markets/trading.py : L47-67]
 - [SHIPPED] Resolution: unanimous `submitConsensus` from the job (dual gate for sports winners, 3/3 plus a confidence floor elsewhere). [contracts/src/ConsensusOracle.vy : L144-161]
-- [SHIPPED] Past closeTime + 24 h the job's `OU_FALLBACK_POLICY` (default `attest`) has matching agents `submitAttestation`, then calls `resolveFallback`; `arbitrate` adds operator `resolveArbitrated`. [oracles/resolve/fallback.py : L47-151]
+- [SHIPPED] Past closeTime + 24 h the job's `OU_FALLBACK_POLICY` (default `attest`) has matching agents `submitAttestation`, then calls `resolveFallback`; `arbitrate` adds operator `resolveArbitrated`. [oracles/resolve/fallback.py : L48-156]
 - [STUB] Cancelled or unanswerable markets have no payout path: ConsensusOracle only reports [1,0] or [0,1] (OU-T014). [contracts/src/ConsensusOracle.vy : L120-127]
 
 ## Trust boundaries
 
 - [SHIPPED] `operator` creates primaries, pauses markets, sets factory, generator, listing config and the AMM close gate, relays fallback attestations and arbitrates after the window. [contracts/src/ConsensusOracle.vy : L220-226]
-- [SHIPPED] The CLOB relayer (off by default) submits leftover `matchOrders` with `RELAYER_PRIVATE_KEY` only after verifying both EIP-712 signatures at the API edge; anyone holding both signatures could settle, so the relayer is a convenience, not an on-chain privilege. [backend/app/orderbook/router.py : L94-164] [backend/app/relayer/worker.py : L1-24]
+- [SHIPPED] The CLOB relayer (off by default) submits leftover `matchOrders` with `RELAYER_PRIVATE_KEY` only after verifying both EIP-712 signatures at the API edge; anyone holding both signatures could settle, so the relayer is a convenience, not an on-chain privilege. [backend/app/orderbook/router.py : L94-164] [backend/app/relayer/worker.py : L1-21]
 - [SHIPPED] Three agent EOAs are the only attestors. The job's config guard refuses to send when its keys do not match `oracle.agents(i)` and `operator()`.
 - [SHIPPED] User-facing auth is Coinbase CDP `validateAccessToken`; HS256 `sub` is the smart-account address. CDP users are not operators. [backend/app/auth/router.py : L144-173]
 - [SHIPPED] SIWE with `ecrecover` remains for operator/dev JWT; the oracle job bootstraps its operator user through it. [backend/app/auth/router.py : L86-141]

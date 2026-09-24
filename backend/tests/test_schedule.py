@@ -94,3 +94,31 @@ async def test_schedule_upsert_then_get(client):
     assert len(again.json()) == 1
     assert again.json()[0]["kickoff_unix"] == 1_800_000_100
     assert again.json()[0]["status"] == "final"
+
+
+LINKED = "0x" + "5e" * 32
+
+
+@pytest.mark.asyncio
+async def test_schedule_link_is_kept_when_omitted_and_cleared_by_empty_string(client):
+    linked = await client.post("/api/v1/markets/schedule", headers=_op_headers(), json=[_game(listedConditionId=LINKED)])
+    assert linked.json()[0]["listedConditionId"] == LINKED
+
+    kept = await client.post("/api/v1/markets/schedule", headers=_op_headers(), json=[_game(status="in_progress")])
+    assert kept.status_code == 200
+    assert kept.json()[0]["listedConditionId"] == LINKED and kept.json()[0]["status"] == "in_progress"
+
+    cleared = await client.post("/api/v1/markets/schedule", headers=_op_headers(), json=[_game(listedConditionId="")])
+    assert cleared.status_code == 200
+    assert cleared.json()[0]["listedConditionId"] == ""
+    async with SessionLocal() as session:
+        (row,) = (await session.execute(select(NflScheduleGame))).scalars().all()
+        assert row.listed_condition_id == ""
+
+
+@pytest.mark.asyncio
+async def test_schedule_rejects_oversized_condition_id(client):
+    r = await client.post(
+        "/api/v1/markets/schedule", headers=_op_headers(), json=[_game(listedConditionId="0x" + "a" * 65)]
+    )
+    assert r.status_code == 422

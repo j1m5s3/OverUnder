@@ -358,7 +358,7 @@ def test_agents_pass_context_and_as_of_to_live_research(monkeypatch, module, cls
     mod = importlib.import_module(module)
     seen = []
 
-    def fake_live(question, s, context=None, as_of=None):
+    def fake_live(question, s, context=None, as_of=None, kickoff=None):
         seen.append((question, s, context, as_of))
         return [], 1, 0.9, "ok", []
 
@@ -395,3 +395,75 @@ def test_coordinator_threads_context_and_as_of():
     result = Coordinator(agents=[Modern("beta"), Modern("gamma")]).run("Q?", context="c", as_of="2026-09-20T17:00:00Z")
     assert result["unanimous"] is True and result["outcome"] == 2
     assert calls[1:] == [("beta", "Q?", "c", "2026-09-20T17:00:00Z"), ("gamma", "Q?", "c", "2026-09-20T17:00:00Z")]
+
+
+# --- kickoff date pinning for sports research (PR #30 review) ---------------------
+
+
+def test_game_date_matches_tolerates_time_zones_only():
+    from agents.cursor_runtime import game_date_matches
+
+    kickoff = "2026-09-21T00:20:00Z"
+    assert game_date_matches("2026-09-20", kickoff)  # US local date of a Sunday night game
+    assert game_date_matches("2026-09-21", kickoff)
+    assert game_date_matches("2026-09-21T00:20:00Z", kickoff)
+    assert game_date_matches("2026-09-22", kickoff)
+    for bad in ("2026-09-23", "2026-09-14", "2025-09-21", None, "", "Sunday", True, "2026-13-40"):
+        assert not game_date_matches(bad, kickoff)
+    with pytest.raises(ValueError, match="kickoff"):
+        game_date_matches("2026-09-21", "next Sunday")
+
+
+def test_research_prompt_kickoff_line_is_trusted_guidance():
+    from agents.cursor_runtime import _research_prompt
+
+    prompt = _research_prompt("Chiefs vs Bills: Chiefs win?", kickoff="2026-09-21T00:20:00Z")
+    guidance = prompt.index("kick off at 2026-09-21T00:20:00Z")
+    assert guidance < prompt.index("<<<Chiefs vs Bills")  # outside the untrusted fence
+    assert "- game_date:" in prompt and "other meeting" in prompt
+    plain = _research_prompt("Chiefs vs Bills: Chiefs win?")
+    assert "game_date" not in plain and "kick off" not in plain
+    with pytest.raises(ValueError, match="kickoff"):
+        _research_prompt("q?", kickoff="2026-09-21 injected text")
+
+
+def test_live_research_other_meeting_is_undetermined(monkeypatch):
+    import agents.cursor_runtime as cr
+
+    kickoff = "2026-09-21T00:20:00Z"
+    replies = iter(
+        [
+            {**_hits(), "outcome": 0, "confidence": 0.95, "summary": "Chiefs won 31-10", "game_date": "2025-09-21"},
+            {**_hits(), "outcome": 1, "confidence": 0.9, "summary": "Bills won"},  # no game_date
+            {**_hits(), "outcome": 0, "confidence": 0.9, "summary": "Chiefs won 24-20", "game_date": "2026-09-20"},
+            {**_hits(), "outcome": 2, "confidence": 0.0, "summary": "not played yet"},
+        ]
+    )
+    monkeypatch.setattr(cr, "prompt_json", lambda prompt, model: next(replies))
+    _hits_, outcome, confidence, summary, _urls = cr.live_research("Chiefs vs Bills: Chiefs win?", "alpha", kickoff=kickoff)
+    assert (outcome, confidence) == (2, 0.0) and summary.startswith("game_date 2025-09-21 is not the 2026-09-21 game")
+    _hits_, outcome, confidence, summary, _urls = cr.live_research("Chiefs vs Bills: Chiefs win?", "beta", kickoff=kickoff)
+    assert (outcome, confidence) == (2, 0.0) and "missing" in summary
+    _hits_, outcome, confidence, _summary, _urls = cr.live_research("Chiefs vs Bills: Chiefs win?", "gamma", kickoff=kickoff)
+    assert (outcome, confidence) == (0, 0.9)
+    _hits_, outcome, _confidence, summary, _urls = cr.live_research("Chiefs vs Bills: Chiefs win?", "alpha", kickoff=kickoff)
+    assert outcome == 2 and summary == "not played yet"
+
+
+def test_coordinator_threads_kickoff_only_when_set():
+    from agents.base import Attestation
+    from consensus.coordinator import Coordinator
+
+    calls = []
+
+    class Agent:
+        def __init__(self, name):
+            self.name = name
+
+        def research(self, question, **kwargs):
+            calls.append((self.name, kwargs))
+            return Attestation(outcome=0, confidence=0.9, evidence_urls=[], summary="s")
+
+    Coordinator(agents=[Agent("alpha")]).run("Q?", kickoff="2026-09-21T00:20:00Z")
+    Coordinator(agents=[Agent("beta")]).run("Q?", as_of="2026-09-21T00:20:00Z")
+    assert calls == [("alpha", {"kickoff": "2026-09-21T00:20:00Z"}), ("beta", {"as_of": "2026-09-21T00:20:00Z"})]

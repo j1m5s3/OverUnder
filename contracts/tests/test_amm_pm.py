@@ -382,6 +382,65 @@ def test_add_then_remove_returns_deposit(proto):
     _solvent(proto, cid)
 
 
+def _expected_lp(pool, amount):
+    return pool[2] * amount // (max(pool[0], pool[1]) + pool[5])
+
+
+def test_add_liquidity_min_lp_out_bound(proto):
+    amm = proto["amm"]
+    cid, _ = _market(proto, seed=100_000_000)
+    lp = _funded(proto)
+    amount = 30_000_000
+    want = _expected_lp(amm.pools(cid), amount)
+    with boa.env.prank(lp):
+        with boa.reverts("slippage"):
+            amm.addLiquidity(cid, amount, want + 1)
+        assert amm.addLiquidity(cid, amount, want) == want
+    assert amm.lpBalance(cid, lp) == want
+
+
+def test_add_liquidity_keeps_v1_selector_and_adds_min_lp_overload(proto):
+    from eth_utils import function_signature_to_4byte_selector as sel
+
+    ids = {sel(f"{f['name']}({','.join(i['type'] for i in f['inputs'])})") for f in proto["amm"].abi if f.get("type") == "function"}
+    assert sel("addLiquidity(bytes32,uint256)") in ids
+    assert sel("addLiquidity(bytes32,uint256,uint256)") in ids
+
+
+def test_add_liquidity_sandwich_blocked_by_min_lp_out(proto):
+    """Front-run buy / victim add / back-run sell: profitable with no bound, reverts 'slippage' with a 1% bound."""
+    amm, ctf, usdc = proto["amm"], proto["ctf"], proto["usdc"]
+    cid, _ = _market(proto, seed=200_000_000)
+    attacker, victim = _funded(proto), _funded(proto)
+    deposit = 1_000 * 10**6
+    min_lp = _expected_lp(amm.pools(cid), deposit) * 99 // 100
+    yes_id = ctf.positionId(cid, 0)
+
+    def sandwich(min_lp_out):
+        start = usdc.balanceOf(attacker)
+        with boa.env.prank(attacker):
+            got = amm.buyWithUSDC(cid, True, 200_000_000, 0)
+        with boa.env.prank(victim):
+            if min_lp_out:
+                with boa.reverts("slippage"):
+                    amm.addLiquidity(cid, deposit, min_lp_out)
+            else:
+                amm.addLiquidity(cid, deposit)
+        with boa.env.prank(attacker):
+            amm.sellToUSDC(cid, True, got, 0)
+        assert ctf.balanceOf(attacker, yes_id) == 0
+        return usdc.balanceOf(attacker) - start
+
+    with boa.env.anchor():
+        assert sandwich(0) > 10 * 10**6  # the unbounded deposit is worth sandwiching
+    assert amm.lpBalance(cid, victim) == 0
+    assert sandwich(min_lp) < 0  # bounded: the victim's add reverts, the attacker only pays fees
+    assert amm.lpBalance(cid, victim) == 0
+    with boa.env.prank(victim):
+        assert amm.addLiquidity(cid, deposit, min_lp) >= min_lp
+    _solvent(proto, cid)
+
+
 def test_remove_liquidity_checks_balance(proto):
     amm = proto["amm"]
     cid, _ = _market(proto)

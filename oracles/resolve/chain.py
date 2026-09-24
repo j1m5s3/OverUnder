@@ -2,7 +2,9 @@
 
 Sends are signed by OPERATOR_PRIVATE_KEY (the job has no other relayer key).
 resolveFallback / resolveArbitrated are only called by resolve/fallback.py
-under OU_FALLBACK_POLICY.
+under OU_FALLBACK_POLICY. Each send waits for its receipt at most
+min(RECEIPT_TIMEOUT, tick time left - 10s) and raises budget.SendDeferred, before
+broadcasting, when the tick budget cannot cover that wait (the next tick sends).
 """
 
 from __future__ import annotations
@@ -14,6 +16,8 @@ from pathlib import Path
 from eth_account import Account
 from web3 import Web3
 from web3.exceptions import ContractLogicError
+
+import budget
 
 _ABI_PATH = Path(__file__).resolve().parents[1] / "abi" / "ConsensusOracle.json"
 _CTF_ABI_PATH = Path(__file__).resolve().parents[1] / "abi" / "ConditionalTokens.json"
@@ -196,6 +200,8 @@ def _chain_id() -> int:
 
 
 def _send(w3: Web3, account, fn, gas: int, label: str) -> str:
+    # Raises SendDeferred before anything is signed or broadcast.
+    wait = budget.receipt_timeout(RECEIPT_TIMEOUT)
     try:
         fn.call({"from": account.address})
     except ContractLogicError as exc:
@@ -211,7 +217,7 @@ def _send(w3: Web3, account, fn, gas: int, label: str) -> str:
     )
     signed = account.sign_transaction(tx)
     txh = w3.eth.send_raw_transaction(signed.raw_transaction)
-    receipt = w3.eth.wait_for_transaction_receipt(txh, timeout=RECEIPT_TIMEOUT)
+    receipt = w3.eth.wait_for_transaction_receipt(txh, timeout=wait)
     if receipt["status"] != 1:
         raise RuntimeError(f"{label} transaction failed")
     return Web3.to_hex(txh)

@@ -19,9 +19,9 @@ pointers:
   - "[contracts/src/MarketAMM.vy : L319-352]"
   - "[contracts/src/MarketAMM.vy : L354-414]"
   - "[contracts/tests/test_normal_math.py : L129-195]"
-  - "[contracts/tests/test_amm_pm.py : L621-660]"
-  - "[contracts/tests/test_amm_pm.py : L685-724]"
-  - "[oracles/listing/run.py : L229-243]"
+  - "[contracts/tests/test_amm_pm.py : L680-719]"
+  - "[contracts/tests/test_amm_pm.py : L744-783]"
+  - "[oracles/listing/run.py : L291-307]"
 ---
 
 # Uniform-LVR spike (OU-T008)
@@ -44,7 +44,7 @@ Vyper has no exp, ln or erf, so `contracts/src/lib/NormalMath.vy` is a stateless
 - [SHIPPED] Φ(−a) = e^(−a²/2)·N(a)/D(a) with the Hart 5666 / West (2005) rational coefficients. [contracts/src/lib/NormalMath.vy : L119-137]
 - [SHIPPED] `g_cdf` returns (g, Φ) from one exp. It computes g(−a) = e·(1/√(2π) − a·N/D), which avoids the φ − aΦ cancellation in the tail. [contracts/src/lib/NormalMath.vy : L140-159]
 
-Measured against a 50-digit Decimal reference (about 520 points on |w| ≤ 6). `test_normal_math.py` asserts ≤ 200 wei for g and ≤ 100 wei for Φ. [contracts/tests/test_normal_math.py : L129-136]
+Measured against a 50-digit Decimal reference (about 520 points on |w| ≤ 6). `test_normal_math.py` asserts ≤ 200 wei for g and ≤ 100 wei for Φ. [contracts/tests/test_normal_math.py : L129-137]
 
 | Function | Max abs error | Gas (harness call) |
 |---|---|---|
@@ -85,16 +85,16 @@ Re-measured on the final contracts on 2026-09-23. Method: boa `get_gas_used` (ex
 | Buy, worst constructed case (fresh trader, P_YES 1e-4 → 0.5) | — | 90,763 |
 | Buy, first trade on 16 fresh pools of random size | — | max 91,437 |
 | `sellToUSDC` | 57,546 | 34,751 (34,734–34,893 over 100 random sells) |
-| `addLiquidity`, first / repeat deposit by an account | 59,327 / 37,427 | 69,031 / 25,231 |
-| `removeLiquidity` (unlocked LP) | — | 27,286 |
-| `quoteBuy` | 1,419–1,429 | 17,009–32,103 (median 20,451) |
+| `addLiquidity`, first / repeat deposit by an account | 59,327 / 37,427 | 69,110 / 25,310 |
+| `removeLiquidity` (unlocked LP) | — | 27,263 |
+| `quoteBuy` | 1,419–1,429 | 16,986–32,080 (median 20,428) |
 | `quoteSell` | 2,070 | 9,718 |
-| `priceYes` | — | 4,025 |
+| `priceYes` | — | 4,002 |
 
 - A pool's first v2 swap also creates its `lpFees` slot.
 - Sells cost about 3.5k more than in the first v2 draft (31.2k), mainly because they now evaluate the curve surplus with one extra `g_cdf`.
-- The tests assert that the worst constructed buy and a first buy stay under 150k. [contracts/tests/test_amm_pm.py : L685-724]
-- Runtime bytecode: MarketAMM v2 is 17,390 bytes (the first draft was 16,185) and MarketFactory v2 is 7,415 bytes; the limit is 24,576.
+- The tests assert that the worst constructed buy and a first buy stay under 150k. [contracts/tests/test_amm_pm.py : L744-783]
+- Runtime bytecode: MarketAMM v2 is 17,571 bytes (the first draft was 16,185) and MarketFactory v2 is 7,415 bytes; the limit is 24,576.
 - A user listing (`createPermissionlessMarket`, 120-byte question, seed included) costs about 720k execution gas.
 
 ## LP accounting
@@ -126,8 +126,8 @@ Pool value at a price, both starting at 1: P = 0.9 gives 0.44 (pm) vs 0.60 (CPMM
 
 ## Why static plus close gate now
 
-- [SHIPPED] Operator listing sets `closeTime` to kickoff, and wildcards cannot close after their parent. The default-on gate therefore freezes the pool before in-game information arrives, so only pre-game line drift reaches the LPs, the regime where the static curve behaves well. [oracles/listing/run.py : L229-243]
-- [SHIPPED] `closeGate` defaults to true, and the operator can toggle it with `setCloseGate`. Buys, sells and `addLiquidity` revert `market closed` at or after `closeTime`; quotes, `priceYes` and `removeLiquidity` stay open. [contracts/src/MarketAMM.vy : L105-119] [contracts/tests/test_amm_pm.py : L621-660]
+- [SHIPPED] Operator listing sets `closeTime` to kickoff, and wildcards cannot close after their parent. The default-on gate therefore freezes the pool before in-game information arrives, so only pre-game line drift reaches the LPs, the regime where the static curve behaves well. [oracles/listing/run.py : L291-307]
+- [SHIPPED] `closeGate` defaults to true, and the operator can toggle it with `setCloseGate`. Buys, sells and `addLiquidity` revert `market closed` at or after `closeTime`; quotes, `priceYes` and `removeLiquidity` stay open. [contracts/src/MarketAMM.vy : L105-119] [contracts/tests/test_amm_pm.py : L680-719]
 - [SHIPPED] The static curve has a closed-form seed, a one-dimensional solve and no time state per trade, so every rounding is easy to bound and quotes equal execution.
 - [SHIPPED] The LP accounting that dynamic L_t will need already exists: proportional deposits, pro-rata withdrawals, provider-owned seeds and the seed lock (see LP accounting).
 - [PHASE2] Dynamic pm-AMM (OU-T015). L_t = L0·√((T − t)/(T − t0)) and V_t = L_t·φ(u), with expected LVR rate V_t / (2(T − t)), uniform in price and time. On each touch it would scale x, y and L by k = √((T − now)/(T − tLast)) (`isqrt` on WAD) and credit the released tokens to LPs. It needs a trusted end time T, which close gates and oracle closeTime already provide.

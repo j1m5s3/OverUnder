@@ -191,7 +191,7 @@ def test_migrate_v2_gate_off_and_listing_closed():
             factory.createPermissionlessMarket(b"\x08" * 32, boa.env.timestamp + 7200, "Closed listing question", CRIT, 7_000_000)
 
 
-def test_migrate_v2_imports_in_chunks_of_50():
+def test_migrate_v2_imports_in_chunks_of_25():
     s = _v1_stack()
     op = s["accounts"]["operator"].address
     close = boa.env.timestamp + 10_000
@@ -200,11 +200,39 @@ def test_migrate_v2_imports_in_chunks_of_50():
     with boa.env.prank(op):
         for i in range(55):
             cids.append(s["factory"].createWildcardMarket(keccak(text=f"wc-{i}"), parent, close, f"Wildcard {i}", 0))
-    result = _migrate(s, cids=["0x" + c.hex() for c in cids])
+    progress = {}
+    result = _migrate(s, cids=["0x" + c.hex() for c in cids], progress=progress)
     _amm, factory = _v2(result)
+    assert deploy_v2.IMPORT_CHUNK == 25
+    assert [st for st in progress["steps"] if st.startswith("importLegacyMarkets")] == [
+        "importLegacyMarkets[0:25]",
+        "importLegacyMarkets[25:50]",
+        "importLegacyMarkets[50:56]",
+    ]
     assert len(result["imported"]) == 56
     assert all(factory.marketExists(c) for c in cids)
     assert factory.markets(cids[-1])[1] == parent
+
+
+def test_import_chunk_worst_case_gas_has_headroom_under_the_per_tx_cap():
+    """IMPORT_CHUNK rows with max-length (256-byte) questions stay under half the 2^24 per-tx gas cap (EIP-7825).
+
+    Measured about 7.95M gas for 25 rows (50 rows is about 15.9M, 95% of the cap)."""
+    s = _v1_stack()
+    op = s["accounts"]["operator"].address
+    close = boa.env.timestamp + 10_000
+    parent = _v1_primary(s, b"a" * 32, close)
+    cids = []
+    with boa.env.prank(op):
+        for i in range(deploy_v2.IMPORT_CHUNK):
+            question = (f"Q{i:03d} " + "x" * 256)[:256]
+            cids.append(s["factory"].createWildcardMarket(keccak(text=f"gas-{i}"), parent, close, question, 0))
+        factory = boa.load("src/MarketFactory.vy", s["ctf"].address, s["oracle"].address, s["amm"].address, s["usdc"].address, op, op)
+        factory.importLegacyMarkets(s["factory"].address, cids)
+        gas = factory._computation.get_gas_used()
+    assert all(factory.marketExists(c) for c in cids)
+    assert len(factory.markets(cids[-1])[5]) == 256
+    assert gas < 2**24 // 2, gas
 
 
 def test_migrate_v2_checks_before_any_transaction():
@@ -513,7 +541,8 @@ def test_deploy_v2_main_failure_after_setfactory_is_redacted_and_recorded(monkey
     assert "SECRET" not in text and key.removeprefix("0x") not in text
     assert "HTTPError" in text and "429" in text and "<rpc>" in text
     assert new_amm in out.err and new_factory in out.err and "Do not re-run blindly" in out.err
-    assert seen["permissionless"] is False and seen["allow_v2_source"] is False  # public-chain defaults
+    # Base Sepolia defaults: listing opens (ADR-0012, same as deploy_ci.py); the v2-source override stays off.
+    assert seen["permissionless"] is True and seen["allow_v2_source"] is False
     assert json.loads((tmp_path / "84532.json").read_text()) == original  # readers keep working
     sidecar = json.loads((tmp_path / "84532.v2-partial.json").read_text())
     assert sidecar["migrationFailed"] is True
@@ -534,6 +563,30 @@ def test_deploy_v2_main_refusal_before_any_tx_exits_cleanly(monkeypatch, capsys,
     out = capsys.readouterr()
     assert "refusing to re-run" in out.err and "Traceback" not in out.err
     assert not (tmp_path / "84532.v2-partial.json").exists()  # nothing landed, nothing to record
+
+
+def test_default_permissionless_matches_adr_0012():
+    import deploy_ci
+
+    assert deploy_v2.default_permissionless(31337) is True
+    assert deploy_v2.default_permissionless(deploy_ci.CHAIN_ID) is True  # the Sepolia migration opens listing
+    assert deploy_v2.default_permissionless(8453) is False  # any other chain: allowlist-only by default
+    assert deploy_v2.default_permissionless(1) is False
+
+
+@pytest.mark.parametrize(("chain", "argv", "expected"), [(8453, [], False), (8453, ["--permissionless"], True), (84532, ["--no-permissionless"], False)])
+def test_deploy_v2_main_permissionless_flag_and_chain_default(monkeypatch, tmp_path, chain, argv, expected):
+    _cli_env(monkeypatch, tmp_path, chain=chain)
+    _fake_network(monkeypatch, chain=chain)
+    seen = {}
+
+    def migrate_v2(**kwargs):
+        seen.update(kwargs)
+        raise ValueError("stop before any tx")
+
+    monkeypatch.setattr(deploy_v2, "migrate_v2", migrate_v2)
+    assert deploy_v2.main(argv) == 1
+    assert seen["permissionless"] is expected
 
 
 def test_deploy_v2_main_allow_v2_source_is_local_only(monkeypatch, tmp_path):

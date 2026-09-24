@@ -198,9 +198,9 @@ class FakeCoord:
         self.runs = []
         self.calls = []
 
-    def run(self, question, context=None, as_of=None):
+    def run(self, question, context=None, as_of=None, kickoff=None):
         self.runs.append(question)
-        self.calls.append({"question": question, "context": context, "as_of": as_of})
+        self.calls.append({"question": question, "context": context, "as_of": as_of, "kickoff": kickoff})
         if self.reports is not None:
             outcomes = {r["outcome"] for r in self.reports}
             unanimous = len(outcomes) == 1
@@ -883,3 +883,299 @@ def test_sports_fallback_real_failure_still_tx_error():
     result = summary["results"][0]
     assert result["txError"] is True and "resolveFallback" in result["error"]
     assert summary["ok"] is False
+
+
+# --- PR #30 review fixes: tx errors, research errors, kickoff, send budget, paused markets ---
+
+
+def test_consensus_send_failure_not_recorded_as_research():
+    pub = FakePub()
+    summary = _run(_detail(), FakeCoord(), chain=FakeChain(fail_submit=True), publisher=pub)
+    assert summary["results"][0]["txError"] is True
+    assert pub.research == [] and pub.atts == []  # no cooldown: the next tick retries the send
+
+
+def test_fallback_send_failure_not_recorded_as_research():
+    pub = FakePub()
+    summary = _run(_detail(), _split(), chain=FakeChain(fail_attest=True), publisher=pub, policy="attest")
+    assert summary["results"][0]["txError"] is True
+    assert pub.research == []
+
+
+def test_research_gets_kickoff_from_close_time():
+    coord = FakeCoord()
+    _run(_detail(close_time=1_758_412_800), coord, chain=FakeChain(close=1_758_412_800, now=1_758_412_800 + 5), now=1_758_412_900)
+    assert coord.calls[0]["kickoff"] == "2025-09-21T00:00:00Z"
+    assert coord.calls[0]["as_of"] is None
+
+
+class RaisingCoord(FakeCoord):
+    def __init__(self, fail_questions=(), **kwargs):
+        super().__init__(**kwargs)
+        self.fail_questions = set(fail_questions)
+
+    def run(self, question, context=None, as_of=None, kickoff=None):
+        if question in self.fail_questions:
+            self.runs.append(question)
+            raise RuntimeError("cursor agent outcome must be 0, 1 or 2, got '1'")
+        return super().run(question, context=context, as_of=as_of, kickoff=kickoff)
+
+
+def _two_market_http(old, new, extra=None):
+    q_old, q_new = "Chiefs vs Broncos: Chiefs win?", "Bills vs Jets: Bills win?"
+    cards = [
+        {"primary": {"conditionId": old, "question": q_old, "marketType": 0, "closeTime": 1}, "children": []},
+        {"primary": {"conditionId": new, "question": q_new, "marketType": 0, "closeTime": 2}, "children": []},
+    ]
+    new_detail = dict(_detail(), conditionId=new, question=q_new)
+    new_detail["score"] = dict(new_detail["score"], homeLabel="Bills", awayLabel="Jets")
+    payloads = {
+        "http://api.test/api/v1/markets": cards,
+        f"http://api.test/api/v1/markets/{old}": _detail(),
+        f"http://api.test/api/v1/markets/{new}": new_detail,
+        **(extra or {}),
+    }
+    return payloads.__getitem__, q_old, q_new
+
+
+def test_research_error_records_failure_and_does_not_use_cap_slot(monkeypatch):
+    monkeypatch.setenv("OU_RESOLVE_MAX_MARKETS", "1")
+    old, new = CID, "0x" + "cd" * 32
+    getter, q_old, q_new = _two_market_http(old, new)
+    coord = RaisingCoord(fail_questions={q_old})
+    pub = FakePub()
+    summary = resolve_run.run(http_get=getter, coordinator_factory=lambda: coord, chain=FakeChain(), publisher=pub, now=100)
+    first, second = summary["results"]
+    assert first["reason"] == "research error" and first["ok"] is False and "got '1'" in first["error"]
+    # The failure did not take the only cap slot: the newer market was researched and resolved.
+    assert second["submitted"] is True and coord.runs == [q_old, q_new]
+    assert summary["researchErrors"] == 1 and summary["attempted"] == 2
+    ((cid, reason, reports),) = pub.research
+    assert cid == old and reason == "research error"
+    assert reports[0]["agent"] == "oracle-job" and reports[0]["outcome"] == 2
+    assert reports[0]["evidenceHash"] == "0x" + "00" * 32 and reports[0]["summary"].startswith("research error: ")
+
+
+def test_research_error_marker_uses_error_cooldown(monkeypatch):
+    from datetime import datetime, timezone
+
+    monkeypatch.delenv("OU_RESEARCH_ERROR_RETRY_SECONDS", raising=False)
+    recent = datetime.fromtimestamp(100 - 60, tz=timezone.utc).isoformat()
+    marker = {"agent": "oracle-job", "createdAt": recent, "kind": "research", "outcome": 2}
+    status = {f"http://api.test/api/v1/oracle/{CID}/status": {"attestations": [marker]}}
+    coord = FakeCoord()
+    summary = resolve_run.run(http_get=_http_with(_detail(), status), coordinator_factory=lambda: coord, chain=FakeChain(), publisher=FakePub(), now=100)
+    assert summary["results"][0]["reason"] == "research cooldown"
+    assert summary["results"][0]["retryAt"] == 40 + 3600
+    # After the 1h error window (well inside the 6h research window) research runs again.
+    summary = resolve_run.run(
+        http_get=_http_with(_detail(), status), coordinator_factory=lambda: coord, chain=FakeChain(), publisher=FakePub(), now=40 + 3600
+    )
+    assert coord.runs == [QUESTION] and summary["results"][0]["submitted"] is True
+
+
+def test_research_errors_bounded_per_tick(monkeypatch):
+    """Failures use no cap slot, but attempts stop at 2 * cap so a quota outage stays cheap."""
+    monkeypatch.setenv("OU_RESOLVE_MAX_MARKETS", "1")
+    old, new, third = CID, "0x" + "cd" * 32, "0x" + "ef" * 32
+    q_third = "Rams vs Giants: Rams win?"
+    third_detail = dict(_detail(), conditionId=third, question=q_third)
+    third_detail["score"] = dict(third_detail["score"], homeLabel="Rams", awayLabel="Giants")
+    base_get, q_old, q_new = _two_market_http(old, new, {f"http://api.test/api/v1/markets/{third}": third_detail})
+
+    def getter(url):
+        if url == "http://api.test/api/v1/markets":
+            card = {"primary": {"conditionId": third, "question": q_third, "marketType": 0, "closeTime": 3}, "children": []}
+            return [*base_get(url), card]
+        return base_get(url)
+
+    coord = RaisingCoord(fail_questions={q_old, q_new, q_third})
+    summary = resolve_run.run(http_get=getter, coordinator_factory=lambda: coord, chain=FakeChain(), publisher=FakePub(), now=100)
+    assert [r["reason"] for r in summary["results"]] == ["research error", "research error", "capped"]
+    assert coord.runs == [q_old, q_new] and summary["researchErrors"] == 2
+
+
+def test_research_cut_off_by_budget_is_deferred_not_recorded():
+    import budget
+
+    class TimingOut(FakeCoord):
+        def run(self, question, **kwargs):
+            budget._deadline[0] = 0  # the watchdog fired mid-run
+            raise RuntimeError("cursor agent timed out")
+
+    pub = FakePub()
+    budget.start(600)
+    try:
+        summary = _run(_detail(), TimingOut(), publisher=pub)
+    finally:
+        budget.clear()
+    assert summary["results"][0]["reason"] == "budget" and pub.research == []
+    assert summary["researchErrors"] == 0
+
+
+def test_research_not_started_without_min_budget(monkeypatch):
+    import budget
+
+    monkeypatch.setenv("OU_RESEARCH_MIN_SECONDS", "120")
+    coord = FakeCoord()
+    budget.start(60)
+    try:
+        summary = _run(_detail(), coord)
+    finally:
+        budget.clear()
+    assert coord.runs == [] and summary["results"][0]["reason"] == "budget"
+
+
+def test_consensus_send_deferred_for_budget_is_not_recorded():
+    import budget
+
+    class DeferringChain(FakeChain):
+        def submit_consensus(self, *args):
+            raise budget.SendDeferred("tick budget too short for a send (15s left)")
+
+    pub = FakePub()
+    summary = _run(_detail(), FakeCoord(), chain=DeferringChain(), publisher=pub)
+    result = summary["results"][0]
+    assert result == {"conditionId": CID, "ok": True, "submitted": False, "reason": "budget", "deferred": "send"}
+    assert summary["ok"] is True and pub.research == [] and pub.resolved == []
+
+
+def test_fallback_send_deferred_propagates_not_send_failed():
+    import budget
+
+    class DeferringChain(FakeChain):
+        def submit_attestation(self, *args):
+            raise budget.SendDeferred("tick budget too short for a send (15s left)")
+
+    pub = FakePub()
+    summary = _run(_detail(), _split(), chain=DeferringChain(), publisher=pub, policy="attest")
+    result = summary["results"][0]
+    assert result["reason"] == "budget" and result["deferred"] == "send" and "txError" not in result
+    assert pub.research == []
+
+
+class _FakeW3:
+    def __init__(self):
+        self.timeouts = []
+        self.sent = []
+        self.eth = self
+
+    def get_transaction_count(self, *args):
+        return 7
+
+    @property
+    def gas_price(self):
+        return 1
+
+    def send_raw_transaction(self, raw):
+        self.sent.append(raw)
+        return b"\x11" * 32
+
+    def wait_for_transaction_receipt(self, txh, timeout):
+        self.timeouts.append(timeout)
+        return {"status": 1}
+
+
+class _FakeFn:
+    def call(self, *args):
+        return None
+
+    def build_transaction(self, tx):
+        return {**tx, "to": "0x" + "22" * 20, "data": "0x", "value": 0}
+
+
+def test_send_receipt_wait_bounded_by_tick_budget():
+    import budget
+
+    account = Account.from_key(OPERATOR_KEY)
+    w3 = _FakeW3()
+    budget.start(0)
+    try:
+        chain_mod._send(w3, account, _FakeFn(), 100_000, "submitConsensus")
+    finally:
+        budget.clear()
+    assert w3.timeouts == [chain_mod.RECEIPT_TIMEOUT]
+    budget.start(60)
+    try:
+        chain_mod._send(w3, account, _FakeFn(), 100_000, "submitConsensus")
+        assert 45 < w3.timeouts[-1] <= 50  # min(180, remaining - 10)
+        budget._deadline[0] = budget.time.monotonic() + 25
+        with pytest.raises(budget.SendDeferred):
+            chain_mod._send(w3, account, _FakeFn(), 100_000, "submitConsensus")
+    finally:
+        budget.clear()
+    assert len(w3.sent) == 2  # the deferred send never broadcast
+
+
+def test_operator_view_includes_paused_markets():
+    import httpx
+
+    paused_card = {"primary": {"conditionId": CID, "question": QUESTION, "marketType": 0, "paused": True}, "children": []}
+    urls = []
+
+    def operator_get(url):
+        urls.append(url)
+        return [paused_card]
+
+    def public_get(url):
+        if url == "http://api.test/api/v1/markets":
+            return []  # the public list hides paused markets
+        return _detail()
+
+    coord = FakeCoord()
+    summary = resolve_run.run(
+        http_get=public_get, operator_get=operator_get, coordinator_factory=lambda: coord, chain=FakeChain(), publisher=FakePub(), now=100
+    )
+    assert urls == ["http://api.test/api/v1/markets?includePaused=1"]
+    assert summary["marketsView"] == "operator" and summary["results"][0]["submitted"] is True
+
+    def rejecting(url):
+        request = httpx.Request("GET", url)
+        raise httpx.HTTPStatusError("422", request=request, response=httpx.Response(422, request=request))
+
+    summary = resolve_run.run(
+        http_get=public_get, operator_get=rejecting, coordinator_factory=lambda: FakeCoord(), chain=FakeChain(), publisher=FakePub(), now=100
+    )
+    assert summary["marketsView"] == "public" and summary["results"] == []
+
+    def server_error(url):
+        request = httpx.Request("GET", url)
+        raise httpx.HTTPStatusError("503", request=request, response=httpx.Response(503, request=request))
+
+    with pytest.raises(httpx.HTTPStatusError):
+        resolve_run.run(http_get=public_get, operator_get=server_error, chain=FakeChain(), publisher=FakePub(), now=100)
+
+
+def test_operator_view_default_sends_operator_jwt(monkeypatch):
+    import httpx
+
+    from resolve import markets as markets_mod
+
+    seen = {}
+
+    class Client:
+        def __init__(self, timeout):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def get(self, url, headers):
+            seen["url"], seen["auth"] = url, headers.get("Authorization", "")
+            return httpx.Response(200, json=[], request=httpx.Request("GET", url))
+
+    monkeypatch.setattr(markets_mod, "mint_operator_jwt", lambda: "tok")
+    monkeypatch.setattr(markets_mod.httpx, "Client", Client)
+    assert markets_mod.operator_get_json("http://api.test/api/v1/markets?includePaused=1") == []
+    assert seen == {"url": "http://api.test/api/v1/markets?includePaused=1", "auth": "Bearer tok"}
+
+    def no_jwt():
+        raise RuntimeError("JWT_SECRET required to publish scores")
+
+    # Missing JWT config falls back to the public list.
+    monkeypatch.setattr(markets_mod, "mint_operator_jwt", no_jwt)
+    cards, view = markets_mod.market_cards("http://api.test", lambda url: [], markets_mod.operator_get_json)
+    assert (cards, view) == ([], "public")

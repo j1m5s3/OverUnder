@@ -177,6 +177,91 @@ class CliTests(unittest.TestCase):
         self.assertEqual(json.loads(sync.mobile_path(CHAIN, self.root).read_text(encoding="utf-8")), stale_mobile())
 
 
+    # deploy_ci.py uploads for a successful v2 broadcast, a simulation and a failed migration.
+    def v2_upload(self, **overrides) -> dict:
+        data = {
+            "chainId": CHAIN,
+            "MockUSDC": addr(1),
+            "ConditionalTokens": addr(3),
+            "FeeVault": addr(4),
+            "ConsensusOracle": addr(5),
+            "Exchange": addr(6),
+            "MarketAMM": addr(70),
+            "MarketFactory": addr(80),
+            "MarketAMMLegacy": addr(7),
+            "MarketFactoryLegacy": addr(8),
+            "deployBlock": 123,
+            "imported": ["0x" + "a" * 64],
+            "permissionless": True,
+            "closeGate": True,
+            "simulated": False,
+        }
+        data.update(overrides)
+        return {k: v for k, v in data.items() if v is not None}
+
+    def assert_refused(self, source: dict, *needles: str) -> None:
+        upload = self.root / "artifact" / "84532.json"
+        self.write(upload, source)
+        self.write(sync.mobile_path(CHAIN, self.root), stale_mobile())
+        for extra in ((), ("--check",)):
+            code, out, err = self.run_main(str(CHAIN), "--source", str(upload), *extra)
+            self.assertEqual(code, 1, (extra, out, err))
+            self.assertIn("refusing", err)
+            self.assertIn("--force", err)
+            self.assertIn("Nothing written", err)
+            for needle in needles:
+                self.assertIn(needle, err)
+        self.assertEqual(json.loads(sync.mobile_path(CHAIN, self.root).read_text(encoding="utf-8")), stale_mobile())
+
+    def test_successful_v2_broadcast_upload_is_written(self):
+        upload = self.root / "artifact" / "84532.json"
+        self.write(upload, self.v2_upload())
+        self.write(sync.mobile_path(CHAIN, self.root), stale_mobile())
+        code, _, err = self.run_main(str(CHAIN), "--source", str(upload))
+        self.assertEqual(code, 0, err)
+        written = json.loads(sync.mobile_path(CHAIN, self.root).read_text(encoding="utf-8"))
+        self.assertEqual((written["MarketAMM"], written["MarketFactory"]), (addr(70), addr(80)))
+        self.assertNotIn("MarketAMMLegacy", written)
+
+    def test_refuses_simulation_markers(self):
+        self.assert_refused(self.v2_upload(simulated=True), "simulated=True")
+        self.assert_refused(self.v2_upload(simulated="true"), "simulated")
+        self.assert_refused(self.v2_upload(dryRun=1), "dryRun")
+        self.assert_refused(contracts_file(fork="https://fork.example"), "fork")
+        # Core uploads carry `simulated` too.
+        self.assert_refused(contracts_file(simulated=True, deployBlock=5), "simulated")
+
+    def test_refuses_failed_or_partial_migration(self):
+        failed = self.v2_upload(migrationFailed=True, completedSteps=["deploy MarketAMM"], MarketFactory=None, deployBlock=None)
+        self.assert_refused(failed, "migrationFailed", "completedSteps", "lacks MarketFactory, deployBlock")
+        self.assert_refused(self.v2_upload(orphans={"MarketFactory": addr(99)}), "orphans")
+
+    def test_refuses_v2_payload_without_every_v2_key_or_with_legacy_as_new(self):
+        self.assert_refused(self.v2_upload(deployBlock=None), "lacks deployBlock")
+        self.assert_refused(self.v2_upload(MarketFactoryLegacy=None), "lacks MarketFactoryLegacy")
+        self.assert_refused(self.v2_upload(MarketAMM=addr(7).upper().replace("0X", "0x")), "MarketAMM equals MarketAMMLegacy")
+
+    def test_false_markers_and_pre_v2_files_are_accepted(self):
+        # contracts/deployments files from deploy.py have no v2 or simulation keys at all.
+        self.assertEqual(sync.unsafe_reasons(contracts_file()), [])
+        self.assertEqual(sync.unsafe_reasons(self.v2_upload(simulated="false", migrationFailed=False, dryRun=0)), [])
+
+    def test_force_writes_a_flagged_source_with_a_warning(self):
+        upload = self.root / "artifact" / "84532.json"
+        self.write(upload, self.v2_upload(simulated=True))
+        self.write(sync.mobile_path(CHAIN, self.root), stale_mobile())
+        code, _, err = self.run_main(str(CHAIN), "--source", str(upload), "--force")
+        self.assertEqual(code, 0, err)
+        self.assertIn("warning: --force", err)
+        written = json.loads(sync.mobile_path(CHAIN, self.root).read_text(encoding="utf-8"))
+        self.assertEqual(written["MarketAMM"], addr(70))
+        # --force does not bypass the structural checks.
+        self.write(upload, self.v2_upload(simulated=True, MockUSDC=None))
+        code, _, err = self.run_main(str(CHAIN), "--source", str(upload), "--force")
+        self.assertEqual(code, 2)
+        self.assertIn("MockUSDC", err)
+
+
 def _tracked(path: Path) -> bool:
     try:
         result = subprocess.run(

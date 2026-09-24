@@ -8,10 +8,10 @@ pointers:
   - "[contracts/src/ConsensusOracle.vy : L37-38]"
   - "[contracts/src/ConsensusOracle.vy : L136-161]"
   - "[contracts/src/ConsensusOracle.vy : L197-226]"
-  - "[oracles/consensus/coordinator.py : L31-55]"
-  - "[oracles/resolve/fallback.py : L1-151]"
-  - "[oracles/resolve/run.py : L243-287]"
-  - "[oracles/resolve/chain.py : L228-255]"
+  - "[oracles/consensus/coordinator.py : L31-57]"
+  - "[oracles/resolve/fallback.py : L1-156]"
+  - "[oracles/resolve/run.py : L290-335]"
+  - "[oracles/resolve/chain.py : L234-261]"
   - "[backend/app/oracle/router.py : L78-97]"
 ---
 
@@ -28,9 +28,9 @@ Amended 2026-09-23. The 24 h fallback now runs in the `overunder-oracle` job, se
 - `arbitrate`: also sends the operator's `resolveArbitrated` when there is no on-chain agent majority or when votes force arbitration. Only the sports resolver does this; the general resolver never arbitrates ([ADR-0012](0012-loosely-gated-user-listing.md)).
 - `manual`: never sends.
 
-[oracles/resolve/fallback.py : L1-151] [oracles/resolve/run.py : L243-287] [oracles/resolve/chain.py : L228-255]
+[oracles/resolve/fallback.py : L1-156] [oracles/resolve/run.py : L290-335] [oracles/resolve/chain.py : L234-261]
 
-The off-chain `POST /api/v1/oracle/attest` is operator-only. The status API tags research-only rows `kind: research` and leaves them out of `unanimous`. [backend/app/oracle/router.py : L78-97] [backend/app/oracle/router.py : L124-152]
+The off-chain `POST /api/v1/oracle/attest` is operator-only. The status API tags research-only rows `kind: research` and leaves them out of `unanimous`. [backend/app/oracle/router.py : L78-97] [backend/app/oracle/router.py : L124-151]
 
 ## Context
 
@@ -40,8 +40,8 @@ Human UMA disputes are slow and expensive for sports props. A single LLM oracle 
 
 - Exactly three agent EOAs. Unanimous `submitConsensus` resolves immediately. [contracts/src/ConsensusOracle.vy : L144-161]
 - If not unanimous, wait `WINDOW = 86400`. `resolveFallback` requires 2/3 agent majority. If voted weight ≥2/3 opposes that majority, revert and require `resolveArbitrated` (operator). [contracts/src/ConsensusOracle.vy : L37-38] [contracts/src/ConsensusOracle.vy : L197-226]
-- Off-chain coordinator collects research and signatures. [oracles/consensus/coordinator.py : L31-55]
-- Attestations carry agent signatures, and any sender may relay them; the job relays with the operator key. [contracts/src/ConsensusOracle.vy : L136-141] [oracles/resolve/fallback.py : L47-151]
+- Off-chain coordinator collects research and signatures. [oracles/consensus/coordinator.py : L31-57]
+- Attestations carry agent signatures, and any sender may relay them; the job relays with the operator key. [contracts/src/ConsensusOracle.vy : L136-141] [oracles/resolve/fallback.py : L48-156]
 
 ## Consequences
 

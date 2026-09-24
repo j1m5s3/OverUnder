@@ -2,11 +2,15 @@
 // load it directly.
 //
 // The API returns every attestation row in insertion order:
-// [{agent, outcome, summary, evidenceHash, createdAt}]. An agent can have
-// several rows (research retries before the final report), and outcome 2 means
-// the agent could not determine the result, so the panel shows each agent's
-// latest row and only calls it unanimous when three agents' latest rows agree
-// on YES (0) or NO (1).
+// [{agent, outcome, summary, evidenceHash, createdAt, kind}]. Rows with
+// kind "research" are working notes (retries, low-confidence agreement, a failed
+// consensus send); they can carry real 0/1 outcomes but never settle anything,
+// so they are dropped here, as the server does for its own `unanimous` flag and
+// as the mobile app does. A missing kind means a resolution report (rows written
+// before the field existed). An agent can still have several resolution rows,
+// and outcome 2 means the agent could not determine the result, so the panel
+// shows each agent's latest resolution row and only calls it unanimous when
+// three agents' latest rows agree on YES (0) or NO (1).
 
 export type Attestation = {
   agent: string;
@@ -14,6 +18,7 @@ export type Attestation = {
   summary?: string | null;
   evidenceHash?: string | null;
   createdAt?: string | null;
+  kind?: string | null;
 };
 
 export type OracleVote = { voter: string; outcome: number; weight: number };
@@ -40,11 +45,17 @@ export function outcomeLabel(outcome: number): string {
   return "undetermined";
 }
 
+/** True for research rows; a missing or empty kind counts as a resolution report. */
+export function isResearch(row: Attestation): boolean {
+  return typeof row.kind === "string" && row.kind.trim().toLowerCase() === "research";
+}
+
 export function summarizeOracleStatus(status: OracleStatus | null | undefined): OracleSummary {
   const rows = Array.isArray(status?.attestations) ? status!.attestations! : [];
   const byAgent = new Map<string, Attestation>();
   for (const row of rows) {
     if (!row || typeof row.agent !== "string" || !row.agent) continue;
+    if (isResearch(row)) continue;
     const key = row.agent.toLowerCase();
     // Insertion order: a later row replaces the agent's earlier one.
     byAgent.delete(key);

@@ -28,15 +28,17 @@ class Coordinator:
             "gamma": os.getenv("AGENT_GAMMA_KEY", "").strip(),
         }
 
-    def run(self, question: str, context: str | None = None, as_of: str | None = None) -> dict:
-        """`context` is untrusted data fenced in the prompt; `as_of` is trusted job guidance.
+    def run(
+        self, question: str, context: str | None = None, as_of: str | None = None, kickoff: str | None = None
+    ) -> dict:
+        """`context` is untrusted data fenced in the prompt; `as_of` and `kickoff` are trusted job guidance.
 
-        Outcome 2 means an agent could not verify a final result (undetermined).
+        `kickoff` (sports) pins research to the game on that date: a live agent whose
+        game_date does not match reports outcome 2. Outcome 2 means an agent could not
+        verify a final result (undetermined).
         """
-        if context is None and as_of is None:
-            reports = [(a.name, a.research(question)) for a in self.agents]
-        else:
-            reports = [(a.name, a.research(question, context=context, as_of=as_of)) for a in self.agents]
+        extra = {k: v for k, v in (("context", context), ("as_of", as_of), ("kickoff", kickoff)) if v is not None}
+        reports = [(a.name, a.research(question, **extra)) for a in self.agents]
         outcomes = {name: att.outcome for name, att in reports}
         unanimous = len(set(outcomes.values())) == 1
         return {

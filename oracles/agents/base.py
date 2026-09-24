@@ -96,4 +96,6 @@ def hits_from_search(search, query: str) -> list[SearchHit]:
 class Agent(Protocol):
     name: str
 
-    def research(self, question: str, context: str | None = None, as_of: str | None = None) -> Attestation: ...
+    def research(
+        self, question: str, context: str | None = None, as_of: str | None = None, kickoff: str | None = None
+    ) -> Attestation: ...

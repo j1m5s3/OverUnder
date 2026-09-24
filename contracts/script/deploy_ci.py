@@ -6,6 +6,9 @@ Usage (cwd contracts/):
   python script/deploy_ci.py --target verify|v2|core [--broadcast] --out DIR [--summary FILE]
       [--api-url URL] [--legacy-cids CIDS] [--min-seed-usdc N] [--listing-cooldown S] [--no-permissionless]
       [--no-close-gate]
+  --permissionless is on by default: the v2 migration opens user listing on Base Sepolia (ADR-0012; the
+  factory is constructed closed and the migration calls setPermissionless). --no-permissionless keeps it
+  allowlist-only.
   --in-process runs on the local boa EVM (tests only).
 A broadcast (v2, core) refuses to start while the operator has pending transactions: the oracle job and the
 API sign with the same key, so pause overunder-oracle-tick first (deploy-contracts.yml does).
@@ -79,7 +82,8 @@ OPTIONAL_NAMES = ["RevenueToken", "OverUnderPaymaster", "EntryPoint", "SimpleAcc
 V2_VARS = ("MarketAMM", "MarketFactory", "deployBlock")
 V2_RESULT_KEYS = ("MarketAMM", "MarketFactory", "MarketAMMLegacy", "MarketFactoryLegacy", "imported", "deployBlock")
 MIN_BALANCE_WEI = {"core": 7 * 10**16, "v2": 5 * 10**15}
-# MarketFactory v2 setListingConfig defaults (fee recipient is the FeeVault). Same values as the contract
+# MarketFactory v2 setListingConfig defaults. The fee recipient is left to migrate_v2, which reads the legacy
+# AMM's on-chain feeVault() (preflight_v2 also checks FEE_VAULT_ADDRESS against it). Same values as the contract
 # constructor and deploy_v2.LISTING_DEFAULTS (a test pins the parity); minSeedUsdc and listingCooldown come
 # from the CLI. The 1 h per-creator cooldown is the only per-address rate limit on user listing.
 LISTING_DEFAULTS = {"listingFeeUsdc": 0, "minLeadTime": 3600, "maxHorizon": 90 * 86400, "listingCooldown": 3600}
@@ -331,6 +335,9 @@ def preflight_v2(op: str, core: dict[str, str], allow_v2_source: bool = False) -
     row("factory.oracle() == ORACLE_ADDRESS", core["ConsensusOracle"], factory.oracle())
     row("factory.amm() == AMM_ADDRESS", core["MarketAMM"], factory.amm())
     row("amm.factory() == FACTORY_ADDRESS", core["MarketFactory"], amm.factory())
+    # The new AMM and the listing fee recipient both use the legacy AMM's feeVault(); a stale repo var would
+    # otherwise go unnoticed in the payload, the summary and later core/verify runs.
+    row("amm.feeVault() == FEE_VAULT_ADDRESS", core["FeeVault"], amm.feeVault())
     return rows
 
 
@@ -555,7 +562,12 @@ def main(argv: list[str] | None = None, env: dict[str, str] | None = None, http_
         default=LISTING_DEFAULTS["listingCooldown"],
         help="v2: seconds between user listings per creator (0 disables the rate limit)",
     )
-    ap.add_argument("--permissionless", action=argparse.BooleanOptionalAction, default=True)
+    ap.add_argument(
+        "--permissionless",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="v2: open user listing to everyone (default on for the Base Sepolia migration, ADR-0012)",
+    )
     ap.add_argument("--close-gate", action=argparse.BooleanOptionalAction, default=True)
     ap.add_argument(
         "--allow-v2-source",
@@ -623,12 +635,9 @@ def main(argv: list[str] | None = None, env: dict[str, str] | None = None, http_
             rows = preflight_v2(op, {k: core[k] for k in CORE_NAMES}, allow_v2_source=args.allow_v2_source)
             if all(r[3] for r in rows):
                 known, skipped = filter_legacy(core["MarketFactory"], cids)
-                listing = dict(
-                    LISTING_DEFAULTS,
-                    minSeedUsdc=args.min_seed_usdc,
-                    listingCooldown=args.listing_cooldown,
-                    feeRecipient=core["FeeVault"],
-                )
+                # No feeRecipient: migrate_v2 defaults it to the legacy AMM's on-chain feeVault().
+                listing = dict(LISTING_DEFAULTS, minSeedUsdc=args.min_seed_usdc, listingCooldown=args.listing_cooldown)
+                fee_vault = str(_at("MarketAMM", core["MarketAMM"]).feeVault())
                 start = head_block(rpc, args.in_process) + 1
                 deployments = v2_deployments(core, op, chain)
                 try:
@@ -645,7 +654,13 @@ def main(argv: list[str] | None = None, env: dict[str, str] | None = None, http_
                     warnings.append(f"migrate_v2 did not return {', '.join(missing)}; check the addresses below by hand.")
                 if not failed:
                     payload.setdefault("deployBlock", start)
-                payload.update({"listing": listing, "permissionless": args.permissionless, "closeGate": args.close_gate})
+                payload.update(
+                    {
+                        "listing": dict(listing, feeRecipient=fee_vault),
+                        "permissionless": args.permissionless,
+                        "closeGate": args.close_gate,
+                    }
+                )
         if payload is not None:
             payload["chainId"] = chain
             payload["simulated"] = not args.broadcast

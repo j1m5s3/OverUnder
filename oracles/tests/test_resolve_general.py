@@ -679,3 +679,97 @@ def test_fallback_persists_only_on_chain_supporters():
     _run(cards=_one(), coord=coord, chain=chain, pub=pub, now=CLOSE + WINDOW)
     assert chain.fallbacks == [USER]
     assert [r["agent"] for r in pub.atts[0][1]] == ["alpha", "beta"]
+
+
+# --- PR #30 review fixes: research errors, tx errors, send budget, paused markets ---
+
+
+class _RaisingCoord(FakeCoord):
+    def __init__(self, fail_questions=(), **kwargs):
+        super().__init__(**kwargs)
+        self.fail_questions = set(fail_questions)
+
+    def run(self, question, context=None, as_of=None, kickoff=None):
+        if question in self.fail_questions:
+            self.runs.append(question)
+            raise RuntimeError("cursor agent outcome must be 0, 1 or 2, got '1'")
+        return super().run(question, context=context, as_of=as_of, kickoff=kickoff)
+
+
+def test_research_error_rotates_to_newer_market_and_records_marker(monkeypatch):
+    """The review repro: cap 1, the oldest market's research raises every tick."""
+    monkeypatch.setenv("OU_GENERAL_RESOLVE_MAX_MARKETS", "1")
+    old_q, new_q = "Will the bill pass the Senate?", "Will it snow in Denver on Oct 1?"
+    cards = [
+        {"primary": _market(POLITICS, old_q, 0, close=CLOSE - 10), "children": []},
+        {"primary": _market(USER, new_q, 2), "children": []},
+    ]
+    coord = _RaisingCoord(fail_questions={old_q})
+    pub = FakePub()
+    summary = _run(cards=cards, coord=coord, pub=pub)
+    first, second = summary["results"]
+    assert first["conditionId"] == POLITICS and first["reason"] == "research error"
+    assert second["conditionId"] == USER and second["submitted"] is True
+    assert summary["researchErrors"] == 1
+    ((cid, reason, reports),) = pub.research
+    assert (cid, reason, reports[0]["agent"], reports[0]["outcome"]) == (POLITICS, "research error", "oracle-job", 2)
+
+    # Next tick: the failure marker puts the old market on the 1h error cooldown.
+    from datetime import datetime, timezone
+
+    stamp = datetime.fromtimestamp(NOW - 60, tz=timezone.utc).isoformat()
+    status = {f"http://api.test/api/v1/oracle/{POLITICS}/status": {"attestations": [{"agent": "oracle-job", "createdAt": stamp}]}}
+    coord2 = _RaisingCoord(fail_questions={old_q})
+    summary = _run(cards=cards[:1], coord=coord2, extra=status)
+    assert summary["results"][0]["reason"] == "research cooldown"
+    assert summary["results"][0]["retryAt"] == NOW - 60 + 3600 and coord2.runs == []
+
+
+def test_send_failure_not_recorded_as_research():
+    pub = FakePub()
+    summary = _run(cards=_one(), chain=FakeChain(close=CLOSE, now=NOW, fail_submit=True), pub=pub)
+    assert summary["results"][0]["txError"] is True
+    assert pub.research == []
+
+
+def test_fallback_send_failure_not_recorded_as_research():
+    pub = FakePub()
+    coord = FakeCoord(reports=[report("alpha", 1), report("beta", 1), report("gamma", 0)])
+    summary = _run(cards=_one(), coord=coord, chain=_past_window_chain(fail_attest=True), pub=pub, now=CLOSE + WINDOW)
+    assert summary["results"][0]["txError"] is True
+    assert pub.research == []
+
+
+def test_send_deferred_for_budget_is_not_recorded():
+    import budget
+
+    class DeferringChain(FakeChain):
+        def submit_consensus(self, *args):
+            raise budget.SendDeferred("tick budget too short for a send (15s left)")
+
+    pub = FakePub()
+    summary = _run(cards=_one(), chain=DeferringChain(close=CLOSE, now=NOW), pub=pub)
+    result = summary["results"][0]
+    assert result["reason"] == "budget" and result["deferred"] == "send" and result["ok"] is True
+    assert summary["ok"] is True and pub.research == []
+
+
+def test_general_reads_operator_view_with_paused_markets():
+    urls = []
+
+    def operator_get(url):
+        urls.append(url)
+        return _one(paused=True)
+
+    payloads = {"http://api.test/api/v1/markets": [], **_final_parent()}
+    summary = general.run(
+        http_get=payloads.__getitem__,
+        operator_get=operator_get,
+        coordinator_factory=FakeCoord,
+        chain=FakeChain(close=CLOSE, now=NOW),
+        publisher=FakePub(),
+        now=NOW,
+    )
+    assert urls == ["http://api.test/api/v1/markets?includePaused=1"]
+    assert summary["marketsView"] == "operator"
+    assert summary["results"][0]["conditionId"] == USER and summary["results"][0]["submitted"] is True
