@@ -81,6 +81,43 @@
     "type": "event"
   },
   {
+    "name": "LiquidityRemoved",
+    "inputs": [
+      {
+        "name": "provider",
+        "type": "address",
+        "indexed": true
+      },
+      {
+        "name": "conditionId",
+        "type": "bytes32",
+        "indexed": true
+      },
+      {
+        "name": "lpBurned",
+        "type": "uint256",
+        "indexed": false
+      },
+      {
+        "name": "yesOut",
+        "type": "uint256",
+        "indexed": false
+      },
+      {
+        "name": "noOut",
+        "type": "uint256",
+        "indexed": false
+      },
+      {
+        "name": "usdcOut",
+        "type": "uint256",
+        "indexed": false
+      }
+    ],
+    "anonymous": false,
+    "type": "event"
+  },
+  {
     "stateMutability": "nonpayable",
     "type": "function",
     "name": "setFactory",
@@ -88,6 +125,18 @@
       {
         "name": "factory",
         "type": "address"
+      }
+    ],
+    "outputs": []
+  },
+  {
+    "stateMutability": "nonpayable",
+    "type": "function",
+    "name": "setCloseGate",
+    "inputs": [
+      {
+        "name": "enabled",
+        "type": "bool"
       }
     ],
     "outputs": []
@@ -104,6 +153,26 @@
       {
         "name": "usdcAmount",
         "type": "uint256"
+      }
+    ],
+    "outputs": []
+  },
+  {
+    "stateMutability": "nonpayable",
+    "type": "function",
+    "name": "seedPoolFor",
+    "inputs": [
+      {
+        "name": "conditionId",
+        "type": "bytes32"
+      },
+      {
+        "name": "usdcAmount",
+        "type": "uint256"
+      },
+      {
+        "name": "provider",
+        "type": "address"
       }
     ],
     "outputs": []
@@ -149,6 +218,23 @@
       {
         "name": "tokenAmount",
         "type": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256"
+      }
+    ]
+  },
+  {
+    "stateMutability": "view",
+    "type": "function",
+    "name": "priceYes",
+    "inputs": [
+      {
+        "name": "conditionId",
+        "type": "bytes32"
       }
     ],
     "outputs": [
@@ -240,7 +326,61 @@
   {
     "stateMutability": "view",
     "type": "function",
+    "name": "lpLocked",
+    "inputs": [
+      {
+        "name": "conditionId",
+        "type": "bytes32"
+      },
+      {
+        "name": "account",
+        "type": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256"
+      }
+    ]
+  },
+  {
+    "stateMutability": "nonpayable",
+    "type": "function",
+    "name": "removeLiquidity",
+    "inputs": [
+      {
+        "name": "conditionId",
+        "type": "bytes32"
+      },
+      {
+        "name": "lpAmount",
+        "type": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256"
+      }
+    ]
+  },
+  {
+    "stateMutability": "view",
+    "type": "function",
     "name": "AMM_FEE_BPS",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256"
+      }
+    ]
+  },
+  {
+    "stateMutability": "view",
+    "type": "function",
+    "name": "MIN_LP",
     "inputs": [],
     "outputs": [
       {
@@ -339,6 +479,18 @@
           {
             "name": "exists",
             "type": "bool"
+          },
+          {
+            "name": "liquidity",
+            "type": "uint256"
+          },
+          {
+            "name": "lpFees",
+            "type": "uint256"
+          },
+          {
+            "name": "closeTime",
+            "type": "uint256"
           }
         ]
       }
@@ -348,6 +500,39 @@
     "stateMutability": "view",
     "type": "function",
     "name": "lpBalance",
+    "inputs": [
+      {
+        "name": "arg0",
+        "type": "bytes32"
+      },
+      {
+        "name": "arg1",
+        "type": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256"
+      }
+    ]
+  },
+  {
+    "stateMutability": "view",
+    "type": "function",
+    "name": "closeGate",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bool"
+      }
+    ]
+  },
+  {
+    "stateMutability": "view",
+    "type": "function",
+    "name": "seedLocked",
     "inputs": [
       {
         "name": "arg0",
