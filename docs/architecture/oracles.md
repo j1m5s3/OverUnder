@@ -3,7 +3,7 @@ title: Oracles
 status: MIXED
 area: oracles
 summary: One Cloud Run Job tick (lease, auth preflight, scores, resolve, resolve_general, schedule, listing) with MCP-only Cursor agents, dual-gate sports resolve, a general resolver, the ADR-0002 24h fallback (OU_FALLBACK_POLICY=attest), research cooldown and week-roll winner listing.
-last_verified: 2026-09-23
+last_verified: 2026-09-24
 pointers:
   - "[oracles/job.py : L1-68]"
   - "[oracles/job.py : L101-260]"
@@ -19,8 +19,11 @@ pointers:
   - "[oracles/agents/alpha.py : L9-31]"
   - "[oracles/consensus/coordinator.py : L31-86]"
   - "[oracles/consensus/fallback.py : L6-28]"
-  - "[oracles/resolve/chain.py : L79-155]"
-  - "[oracles/resolve/chain.py : L202-223]"
+  - "[oracles/resolve/chain.py : L86-162]"
+  - "[oracles/resolve/chain.py : L165-186]"
+  - "[oracles/resolve/chain.py : L212-235]"
+  - "[oracles/resolve/chain.py : L253-263]"
+  - "[oracles/chain_tx.py : L58-75]"
   - "[oracles/resolve/run.py : L55-92]"
   - "[oracles/resolve/run.py : L147-348]"
   - "[oracles/resolve/fallback.py : L17-182]"
@@ -75,9 +78,10 @@ Operational notes (2026-09-23): the Cursor account is out of quota until 2026-10
 
 ## Chain guard
 
-- [SHIPPED] `config_check` runs once per resolve stage: `CHAIN_ID` equals the RPC chain, code exists at `ORACLE_ADDRESS`, the three `AGENT_*_KEY` addresses are distinct registered agents and `OPERATOR_PRIVATE_KEY` is `oracle.operator()`. A mismatch sends nothing and fails the stage. [oracles/resolve/chain.py : L79-121]
-- [SHIPPED] The effective clock is max(wall clock, latest block timestamp), so a chain ahead of the wall clock never leaves a market "not closed" or signs an expired deadline. [oracles/resolve/chain.py : L153-155]
-- [SHIPPED] Each send waits for its receipt at most min(180 s, tick time left minus 10 s). When that leaves under 20 s it raises `SendDeferred` before signing or broadcasting. The resolvers report the market as `reason: budget, deferred: send` and the next tick sends. [oracles/resolve/chain.py : L202-223] [oracles/budget.py : L115-145]
+- [SHIPPED] `config_check` runs once per resolve stage: `CHAIN_ID` equals the RPC chain, code exists at `ORACLE_ADDRESS`, the three `AGENT_*_KEY` addresses are distinct registered agents and `OPERATOR_PRIVATE_KEY` is `oracle.operator()`. A mismatch sends nothing and fails the stage. [oracles/resolve/chain.py : L86-128]
+- [SHIPPED] The effective clock is max(wall clock, latest block timestamp), so a chain ahead of the wall clock never leaves a market "not closed" or signs an expired deadline. [oracles/resolve/chain.py : L160-162]
+- [SHIPPED] Each send waits for its receipt at most min(180 s, tick time left minus 10 s). When that leaves under 20 s it raises `SendDeferred` before signing or broadcasting. The resolvers report the market as `reason: budget, deferred: send` and the next tick sends. [oracles/resolve/chain.py : L212-235] [oracles/budget.py : L115-145]
+- [SHIPPED] Base Flashblocks: a send returns only after a canonical receipt, never a pre-confirmation, and the whole wait stays within that budgeted timeout. The reads that decide the tick's next send (the `_send` preflight, `preflight_fallback` and the `fallback_state` oracle slots) are taken at the `pending` block, because `latest` lags a send whose receipt is only pre-confirmed; `fallback_state.now` stays the latest sealed timestamp. [oracles/chain_tx.py : L58-75] [oracles/resolve/chain.py : L165-186] [oracles/resolve/chain.py : L253-263]
 
 ## Dual-gate sports resolve
 

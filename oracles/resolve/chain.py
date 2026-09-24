@@ -5,6 +5,9 @@ resolveFallback / resolveArbitrated are only called by resolve/fallback.py
 under OU_FALLBACK_POLICY. Each send waits for its receipt at most
 min(RECEIPT_TIMEOUT, tick time left - 10s) and raises budget.SendDeferred, before
 broadcasting, when the tick budget cannot cover that wait (the next tick sends).
+That wait ends only at a canonical receipt, never a Flashblocks pre-confirmation
+(chain_tx.py), and the reads that decide the tick's next send (send preflight,
+preflight_fallback, fallback_state) are taken at the pending block.
 """
 
 from __future__ import annotations
@@ -18,12 +21,16 @@ from web3 import Web3
 from web3.exceptions import ContractLogicError
 
 import budget
+from chain_tx import wait_canonical_receipt
 
 _ABI_PATH = Path(__file__).resolve().parents[1] / "abi" / "ConsensusOracle.json"
 _CTF_ABI_PATH = Path(__file__).resolve().parents[1] / "abi" / "ConditionalTokens.json"
 
 AGENT_KEY_ENV = {"alpha": "AGENT_ALPHA_KEY", "beta": "AGENT_BETA_KEY", "gamma": "AGENT_GAMMA_KEY"}
 RECEIPT_TIMEOUT = 180
+# Block tag for reads that decide the next send of a tick: on Base, 'latest' lags a send
+# whose receipt is only a Flashblocks pre-confirmation.
+PENDING = "pending"
 
 _clients: dict[str, Web3] = {}
 
@@ -156,23 +163,26 @@ def chain_now() -> int:
 
 
 def fallback_state(condition_id: str) -> dict:
+    """Oracle slots at the pending block (they decide which attestations to send and are re-read
+    after a send in the same tick); `now` stays the latest sealed timestamp (conservative)."""
     w3, contract = _contract()
     cid = _cid_bytes(condition_id)
     fns = contract.functions
+    at = {"block_identifier": PENDING}
     agents = {}
     for i in range(3):
-        addr = fns.agents(i).call()
+        addr = fns.agents(i).call(**at)
         agents[str(addr).lower()] = {
-            "submitted": bool(fns.agentSubmitted(cid, addr).call()),
-            "outcome": int(fns.agentOutcome(cid, addr).call()),
+            "submitted": bool(fns.agentSubmitted(cid, addr).call(**at)),
+            "outcome": int(fns.agentOutcome(cid, addr).call(**at)),
         }
     return {
-        "resolved": bool(fns.resolved(cid).call()),
-        "closeTime": int(fns.closeTime(cid).call()),
+        "resolved": bool(fns.resolved(cid).call(**at)),
+        "closeTime": int(fns.closeTime(cid).call(**at)),
         "now": int(w3.eth.get_block("latest")["timestamp"]),
-        "window": int(fns.WINDOW().call()),
+        "window": int(fns.WINDOW().call(**at)),
         "agents": agents,
-        "votes": (int(fns.voteWeight(cid, 0).call()), int(fns.voteWeight(cid, 1).call())),
+        "votes": (int(fns.voteWeight(cid, 0).call(**at)), int(fns.voteWeight(cid, 1).call(**at))),
     }
 
 
@@ -203,7 +213,8 @@ def _send(w3: Web3, account, fn, gas: int, label: str) -> str:
     # Raises SendDeferred before anything is signed or broadcast.
     wait = budget.receipt_timeout(RECEIPT_TIMEOUT)
     try:
-        fn.call({"from": account.address})
+        # Pending: an earlier send of this tick may still be a pre-confirmation at 'latest'.
+        fn.call({"from": account.address}, block_identifier=PENDING)
     except ContractLogicError as exc:
         raise RuntimeError(f"{label} preflight reverted: {_reason(exc)}") from None
     tx = fn.build_transaction(
@@ -217,7 +228,8 @@ def _send(w3: Web3, account, fn, gas: int, label: str) -> str:
     )
     signed = account.sign_transaction(tx)
     txh = w3.eth.send_raw_transaction(signed.raw_transaction)
-    receipt = w3.eth.wait_for_transaction_receipt(txh, timeout=wait)
+    # Total wait (receipt, then canonical block) stays within the tick-budgeted `wait`.
+    receipt = wait_canonical_receipt(w3, txh, wait)
     if receipt["status"] != 1:
         raise RuntimeError(f"{label} transaction failed")
     return Web3.to_hex(txh)
@@ -242,7 +254,10 @@ def preflight_fallback(condition_id: str) -> tuple[bool, str]:
     account = _operator_account()
     _w3_client, contract = _contract()
     try:
-        contract.functions.resolveFallback(_cid_bytes(condition_id)).call({"from": account.address})
+        # Pending: this tick's attestations may still be pre-confirmations at 'latest'.
+        contract.functions.resolveFallback(_cid_bytes(condition_id)).call(
+            {"from": account.address}, block_identifier=PENDING
+        )
     except ContractLogicError as exc:
         return False, _reason(exc)
     return True, ""

@@ -3,13 +3,13 @@ title: Loosely gated user listing
 status: SHIPPED
 area: cross
 summary: MarketFactory v2 adds createPermissionlessMarket (type 2, sender-namespaced question id, criteria hash, seed, fee, close window, cooldown, permissionless flag or lister allowlist). The backend prepares and confirms listings and hides type 2 until confirmed. Web lists through a sponsored CDP batch. The general resolver settles user markets without arbitration.
-last_verified: 2026-09-23
+last_verified: 2026-09-24
 pointers:
   - "[contracts/src/MarketFactory.vy : L82-108]"
   - "[contracts/src/MarketFactory.vy : L161-199]"
   - "[contracts/src/MarketFactory.vy : L201-227]"
   - "[contracts/script/deploy_ci.py : L85-89]"
-  - "[contracts/script/deploy_ci.py : L311-341]"
+  - "[contracts/script/deploy_ci.py : L312-342]"
   - "[contracts/script/deploy_v2.py : L62-69]"
   - "[.github/workflows/deploy-contracts.yml : L27-42]"
   - "[backend/app/markets/listing.py : L237-362]"
@@ -66,7 +66,7 @@ On chain: MarketFactory v2
   - lead 3,600 s, horizon 7,776,000 s;
   - `listing_cooldown` 3,600 s, the only per-address rate limit;
   - `close_gate` true.
-  The local `deploy_v2.py` CLI uses the same default on 84532 and 31337 and keeps listing closed on any other chain unless `--permissionless` is passed. Local chain 31337 (`deploy.py`) opens listing with cooldown 0. [.github/workflows/deploy-contracts.yml : L27-42] [contracts/script/deploy_ci.py : L85-89] [contracts/script/deploy_ci.py : L311-341] [contracts/script/deploy_v2.py : L62-69]
+  The local `deploy_v2.py` CLI uses the same default on 84532 and 31337 and keeps listing closed on any other chain unless `--permissionless` is passed. Local chain 31337 (`deploy.py`) opens listing with cooldown 0. [.github/workflows/deploy-contracts.yml : L27-42] [contracts/script/deploy_ci.py : L85-89] [contracts/script/deploy_ci.py : L312-342] [contracts/script/deploy_v2.py : L62-69]
 
 Backend listing API
 - [SHIPPED] `GET /api/v1/markets/listing/config` reads the chain config (disabled on a v1 factory). `GET /eligibility` reports allowlist state, cooldown left and pending count. [backend/app/markets/listing.py : L237-285]
@@ -110,7 +110,7 @@ Resolution
   [oracles/resolve/general.py : L1-19] [oracles/resolve/general.py : L176-187] [oracles/resolve/general.py : L219-438] [oracles/resolve/cooldown.py : L24-121]
 
 Squatting
-- [SHIPPED] Operator NFL question ids are derived from the public schedule. With the `OU_QUESTION_ID_KEY` secret set, the listing job makes them HMAC-SHA256 under that key, so nobody can precompute them and prepare the condition first. Without the key they stay the legacy public sha256. The key must stay stable, because changing it changes every future id. A squatted create gets 409 `condition prepared outside this factory` and is reported under `squatted`, not as a stage error. [oracles/listing/questions.py : L21-26] [backend/app/markets/router.py : L447-457] [oracles/listing/run.py : L310-317]
+- [SHIPPED] Operator NFL question ids are derived from the public schedule. With the `OU_QUESTION_ID_KEY` secret set, the listing job makes them HMAC-SHA256 under that key, so nobody can precompute them and prepare the condition first. Without the key they stay the legacy public sha256. The key must stay stable, because changing it changes every future id. A squatted create gets 409 `condition prepared outside this factory` and is reported under `squatted`, not as a stage error. [oracles/listing/questions.py : L21-26] [backend/app/markets/router.py : L462-475] [oracles/listing/run.py : L310-317]
 
 ## Consequences
 

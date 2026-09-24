@@ -3,7 +3,7 @@ title: Three-agent oracle consensus
 status: SHIPPED
 area: oracles
 summary: Resolve on 3/3 agent signatures; after 24h use 2/3 agents plus token votes, else operator. The oracle job drives the fallback under OU_FALLBACK_POLICY (attest by default).
-last_verified: 2026-09-23
+last_verified: 2026-09-24
 pointers:
   - "[contracts/src/ConsensusOracle.vy : L37-38]"
   - "[contracts/src/ConsensusOracle.vy : L136-161]"
@@ -11,7 +11,7 @@ pointers:
   - "[oracles/consensus/coordinator.py : L31-57]"
   - "[oracles/resolve/fallback.py : L1-156]"
   - "[oracles/resolve/run.py : L290-335]"
-  - "[oracles/resolve/chain.py : L234-261]"
+  - "[oracles/resolve/chain.py : L246-276]"
   - "[backend/app/oracle/router.py : L78-97]"
 ---
 
@@ -28,7 +28,7 @@ Amended 2026-09-23. The 24 h fallback now runs in the `overunder-oracle` job, se
 - `arbitrate`: also sends the operator's `resolveArbitrated` when there is no on-chain agent majority or when votes force arbitration. Only the sports resolver does this; the general resolver never arbitrates ([ADR-0012](0012-loosely-gated-user-listing.md)).
 - `manual`: never sends.
 
-[oracles/resolve/fallback.py : L1-156] [oracles/resolve/run.py : L290-335] [oracles/resolve/chain.py : L234-261]
+[oracles/resolve/fallback.py : L1-156] [oracles/resolve/run.py : L290-335] [oracles/resolve/chain.py : L246-276]
 
 The off-chain `POST /api/v1/oracle/attest` is operator-only. The status API tags research-only rows `kind: research` and leaves them out of `unanimous`. [backend/app/oracle/router.py : L78-97] [backend/app/oracle/router.py : L124-151]
 

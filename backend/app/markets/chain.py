@@ -184,7 +184,8 @@ def market_row_from_struct(m: Any) -> dict[str, Any]:
     }
 
 
-def read_factory_market(factory: Any, cid: bytes) -> dict[str, Any] | None:
-    if not factory.functions.marketExists(cid).call():
+def read_factory_market(factory: Any, cid: bytes, block_identifier: str = "latest") -> dict[str, Any] | None:
+    """`markets(cid)` as a row, or None. Operator create reads at "pending" (Flashblocks, app/chain_tx.py)."""
+    if not factory.functions.marketExists(cid).call(block_identifier=block_identifier):
         return None
-    return market_row_from_struct(factory.functions.markets(cid).call())
+    return market_row_from_struct(factory.functions.markets(cid).call(block_identifier=block_identifier))

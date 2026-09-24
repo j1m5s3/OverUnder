@@ -224,7 +224,8 @@ def submit_handle_ops(
     tx = entry.functions.handleOps([op], operator.address).build_transaction(
         {
             "from": operator.address,
-            "nonce": w3.eth.get_transaction_count(operator.address),
+            # "pending": on Base, 'latest' lags a pre-confirmed operator tx (see app/chain_tx.py).
+            "nonce": w3.eth.get_transaction_count(operator.address, "pending"),
             "chainId": settings.chain_id,
             "gas": 2_000_000,
             "gasPrice": w3.eth.gas_price,

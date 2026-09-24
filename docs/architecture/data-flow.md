@@ -3,12 +3,12 @@ title: Data flow
 status: MIXED
 area: cross
 summary: End-to-end traces for seeded AMM swaps and the trading halt, user listing, oracle resolution with the 24h fallback, week-roll listing, the leftover CLOB relayer queue, and OU redeem.
-last_verified: 2026-09-23
+last_verified: 2026-09-24
 pointers:
   - "[contracts/src/MarketFactory.vy : L143-199]"
   - "[contracts/src/MarketAMM.vy : L126-157]"
   - "[contracts/src/MarketAMM.vy : L240-317]"
-  - "[backend/app/markets/router.py : L385-554]"
+  - "[backend/app/markets/router.py : L390-580]"
   - "[backend/app/markets/listing.py : L288-424]"
   - "[backend/app/markets/trading.py : L47-67]"
   - "[backend/app/amm/router.py : L46-86]"
@@ -38,7 +38,7 @@ pointers:
 
 ## Primary AMM swap
 
-1. [SHIPPED] Operator `POST /markets` (idempotent) submits `createPrimaryMarket` with a seed ≥ 10,000 base units; the factory registers closeTime on the oracle and seeds the pool with LP to the operator. [backend/app/markets/router.py : L385-554] [contracts/src/MarketFactory.vy : L143-199]
+1. [SHIPPED] Operator `POST /markets` (idempotent) submits `createPrimaryMarket` with a seed ≥ 10,000 base units; the factory registers closeTime on the oracle and seeds the pool with LP to the operator. [backend/app/markets/router.py : L390-580] [contracts/src/MarketFactory.vy : L143-199]
 2. [SHIPPED] MarketAMM v2 splits the seed 50/50, sets L = S/φ(0) and caches closeTime. [contracts/src/MarketAMM.vy : L126-157]
 3. [SHIPPED] Trader calls `GET /amm/{id}/quote`: 409 if halted, else `quoteBuy` or `quoteSell` (422 carries a revert reason). [backend/app/amm/router.py : L46-86]
 4. [SHIPPED] Web AmmSwap buy: batched CDP user op, USDC `approve` then `buyWithUSDC`; sell: CTF `setApprovalForAll` then `sellToUSDC`; `useCdpPaymaster: true`. [web/src/features/trade/AmmSwap.tsx : L244-367]
@@ -51,7 +51,7 @@ pointers:
 1. [SHIPPED] At closeTime the API reports `tradingOpen: false` and refuses quotes, sponsored trades and CLOB orders with 409 `market closed` (`market resolved` once resolved, whatever the flag). [backend/app/markets/trading.py : L47-67]
 2. [SHIPPED] Web and mobile flip the ticket to closed on a timer, a 409 or a `"market closed"` revert.
 3. [SHIPPED] MarketAMM v2 reverts direct `buyWithUSDC` / `sellToUSDC` / `addLiquidity` with `"market closed"` while `closeGate` is on; quotes and `removeLiquidity` keep working.
-4. [STUB] Until the Base Sepolia redeploy, the live v1 AMM has no gate, so direct contract calls can still trade after close.
+4. [STUB] Legacy pools imported into v2 stay on the v1 AMM (`MarketAMMLegacy`), which has no gate, so direct contract calls can still trade them after close.
 
 ## Wildcard AMM swap
 

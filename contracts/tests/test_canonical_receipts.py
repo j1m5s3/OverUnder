@@ -66,6 +66,36 @@ def test_reorged_block_is_not_canonical(monkeypatch):
         rpc.wait_for_tx_receipt(TX, 30)
 
 
+def test_transient_rpc_error_is_retried(monkeypatch):
+    monkeypatch.setattr(deploy.time, "sleep", lambda _s: None)
+
+    class FlakyRPC(FakeRPC):
+        def __init__(self):
+            super().__init__([PRECONF, CANONICAL])
+            self.failed = False
+
+        def fetch_uncached(self, method, params):
+            if method == "eth_getTransactionReceipt" and not self.failed:
+                self.failed = True
+                raise RuntimeError("429 Too Many Requests")
+            return super().fetch_uncached(method, params)
+
+    rpc = FlakyRPC()
+    deploy.require_canonical_receipts(_env(rpc))
+    assert rpc.wait_for_tx_receipt(TX, 30)["blockHash"] == SEALED
+    assert rpc.failed
+
+
+def test_titanoboa_still_exposes_the_hooked_rpc():
+    # The guard silently no-ops if titanoboa renames these; fail loudly on an upgrade instead.
+    from boa.network import NetworkEnv
+    from boa.rpc import EthereumRPC
+
+    assert hasattr(EthereumRPC, "wait_for_tx_receipt")
+    assert hasattr(EthereumRPC, "fetch_uncached")
+    assert "_rpc" in NetworkEnv.__init__.__code__.co_names
+
+
 def test_install_is_idempotent():
     rpc = FakeRPC([CANONICAL])
     env = _env(rpc)

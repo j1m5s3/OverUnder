@@ -2,8 +2,8 @@
 title: Architecture overview
 status: MIXED
 area: cross
-summary: Layered map of contracts, FastAPI, oracles, Next.js and Flutter with trust boundaries, market lifecycle (trading halt, resolution, fallback) and the pending Base Sepolia AMM + Factory redeploy.
-last_verified: 2026-09-23
+summary: Layered map of contracts, FastAPI, oracles, Next.js and Flutter with trust boundaries, market lifecycle (trading halt, resolution, fallback) and the Base Sepolia AMM + Factory v2 deployment (since 2026-09-24).
+last_verified: 2026-09-24
 pointers:
   - "[contracts/src/MarketFactory.vy : L143-150]"
   - "[contracts/src/MarketFactory.vy : L152-159]"
@@ -27,7 +27,7 @@ pointers:
 
 # Architecture overview
 
-OverUnder is a Base-chain prediction market. Collateral is USDC (6 decimals). Outcomes are binary YES/NO ERC-1155 positions. Every market trades on a seeded `MarketAMM`: in code that is MarketAMM v2, a static uniform-LVR pool (pm-AMM) that halts at closeTime; Base Sepolia runs the v1 CPMM until the post-merge redeploy. Resolution is a three-agent oracle. Book of record: [ADR-0007](../adr/0007-amm-first-uniform-lvr.md); MarketAMM v2: [ADR-0011](../adr/0011-pm-amm-v2-close-gate.md); user listing: [ADR-0012](../adr/0012-loosely-gated-user-listing.md).
+OverUnder is a Base-chain prediction market. Collateral is USDC (6 decimals). Outcomes are binary YES/NO ERC-1155 positions. Every market trades on a seeded `MarketAMM`: in code that is MarketAMM v2, a static uniform-LVR pool (pm-AMM) that halts at closeTime; Base Sepolia runs it (with MarketFactory v2) since 2026-09-24. Resolution is a three-agent oracle. Book of record: [ADR-0007](../adr/0007-amm-first-uniform-lvr.md); MarketAMM v2: [ADR-0011](../adr/0011-pm-amm-v2-close-gate.md); user listing: [ADR-0012](../adr/0012-loosely-gated-user-listing.md).
 
 ## Layers
 

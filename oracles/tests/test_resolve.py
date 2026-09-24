@@ -1073,11 +1073,15 @@ class _FakeW3:
 
     def wait_for_transaction_receipt(self, txh, timeout):
         self.timeouts.append(timeout)
-        return {"status": 1}
+        # Sealed and canonical (get_block below): chain_tx waits past Flashblocks pre-confirmations.
+        return {"status": 1, "blockNumber": 100, "blockHash": b"\xb1" * 32}
+
+    def get_block(self, number):
+        return {"number": number, "hash": b"\xb1" * 32}
 
 
 class _FakeFn:
-    def call(self, *args):
+    def call(self, *args, **kwargs):
         return None
 
     def build_transaction(self, tx):

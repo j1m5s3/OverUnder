@@ -3,7 +3,7 @@ title: Backend
 status: MIXED
 area: backend
 summary: FastAPI routers for auth, chain addresses, markets (idempotent create, user listing, trading halt, archive), AMM quotes, the leftover-CLOB relayer, oracle records, ramps, KYC, emissions, portfolio and the chain indexer.
-last_verified: 2026-09-23
+last_verified: 2026-09-24
 pointers:
   - "[backend/app/main.py : L27-61]"
   - "[backend/app/main.py : L64-96]"
@@ -17,11 +17,14 @@ pointers:
   - "[backend/app/chain/router.py : L36-48]"
   - "[backend/app/aa/router.py : L75-104]"
   - "[backend/app/aa/router.py : L168-222]"
-  - "[backend/app/markets/router.py : L39-72]"
-  - "[backend/app/markets/router.py : L177-229]"
-  - "[backend/app/markets/router.py : L248-296]"
-  - "[backend/app/markets/router.py : L385-554]"
-  - "[backend/app/markets/router.py : L623-660]"
+  - "[backend/app/markets/router.py : L44-77]"
+  - "[backend/app/markets/router.py : L182-234]"
+  - "[backend/app/markets/router.py : L253-301]"
+  - "[backend/app/markets/router.py : L390-580]"
+  - "[backend/app/markets/router.py : L421-440]"
+  - "[backend/app/markets/router.py : L457-497]"
+  - "[backend/app/markets/router.py : L649-686]"
+  - "[backend/app/chain_tx.py : L40-76]"
   - "[backend/app/markets/trading.py : L27-67]"
   - "[backend/app/markets/visibility.py : L28-42]"
   - "[backend/app/markets/visibility.py : L73-107]"
@@ -36,6 +39,7 @@ pointers:
   - "[backend/app/relayer/queue.py : L30-62]"
   - "[backend/app/relayer/worker.py : L1-21]"
   - "[backend/app/relayer/worker.py : L916-929]"
+  - "[backend/app/relayer/chain.py : L172-185]"
   - "[backend/app/relayer/router.py : L24-106]"
   - "[backend/app/oracle/router.py : L78-97]"
   - "[backend/app/oracle/router.py : L124-151]"
@@ -84,14 +88,15 @@ pointers:
 
 ## Markets
 
-- [SHIPPED] `GET /markets` returns EventCard[]: primaries are types 0 and 2 with nested wildcard children; orphan wildcards list alone; `?parentId=` stays a flat filter. Only visible markets: unpaused, and for type 2 a confirmed listing. `?includePaused=1` also lists paused and archived rows, only with an operator bearer JWT (401 without a token, 403 for a non-operator), so the oracle job can resolve a paused registered market; the public list is unchanged. [backend/app/markets/router.py : L177-229] [backend/app/markets/visibility.py : L28-42]
-- [SHIPPED] `MarketPublic` adds `tradingHaltsAt` (closeTime when the halt flag is on, else null), `tradingOpen` and `yesPriceMicros` (latest indexed PricePoint, one window query for the list). `MarketDetail` adds `creator` and `listing` for type 2. [backend/app/markets/router.py : L86-130]
-- [SHIPPED] `GET /markets/schedule` is public; operator `POST /markets/schedule` upserts NFL week rows (int fields bounded to int4). `listedConditionId` omitted keeps the stored link, a cid sets it, and an explicit `""` clears it so an orphaned game can be relisted. [backend/app/markets/router.py : L248-296]
-- [SHIPPED] `GET /markets/{id}` (children always present, maybe `[]`) and `/history` return 404 for type-2 markets without a confirmed listing; paused markets still resolve by id. [backend/app/markets/router.py : L299-338]
-- [SHIPPED] Operator `POST /markets/{id}/score` on sports primaries only (LiveScore with facts; null scores never become 0). [backend/app/markets/router.py : L341-382]
-- [SHIPPED] Operator `POST /markets` is idempotent: it derives the cid from `factory.oracle()` and the questionId and mirrors an existing factory market without a tx. Seed below `MIN_LP` (10,000 base units) is 422, `market_type` other than 0/1 is 400 ("user markets use /markets/listing"), and a condition prepared outside this factory is 409. Chain work runs in a worker thread under one operator-tx lock (pending nonce, receipt wait bounded by `OPERATOR_TX_TIMEOUT_SECONDS`); errors carry only the exception type. Creates are serialized per process (asyncio lock) and, on Postgres, by `pg_advisory_xact_lock` keyed by the questionId; `marketExists` is re-read under the operator lock, so a racing replay mirrors the first create instead of sending a second tx. The DB mirror inserts `ON CONFLICT DO NOTHING`, so a row the indexer inserted first is updated instead of causing a 500. [backend/app/markets/router.py : L385-554] [backend/app/markets/router.py : L39-72]
-- [SHIPPED] Operator `POST /markets/{id}/pause` calls factory `setPaused` off the event loop with `OPERATOR_RPC_TIMEOUT_SECONDS`. [backend/app/markets/router.py : L557-602]
-- [SHIPPED] Operator `POST /markets/{id}/archive` hides an orphaned row (DB only) when the configured ConsensusOracle has no closeTime for it; a registered market is 409 ("pause it on the factory instead"). Use it for the legacy markets from an older deployment. It also clears `listedConditionId` on schedule rows that point at the orphan. [backend/app/markets/router.py : L623-660]
+- [SHIPPED] `GET /markets` returns EventCard[]: primaries are types 0 and 2 with nested wildcard children; orphan wildcards list alone; `?parentId=` stays a flat filter. Only visible markets: unpaused, and for type 2 a confirmed listing. `?includePaused=1` also lists paused and archived rows, only with an operator bearer JWT (401 without a token, 403 for a non-operator), so the oracle job can resolve a paused registered market; the public list is unchanged. [backend/app/markets/router.py : L182-234] [backend/app/markets/visibility.py : L28-42]
+- [SHIPPED] `MarketPublic` adds `tradingHaltsAt` (closeTime when the halt flag is on, else null), `tradingOpen` and `yesPriceMicros` (latest indexed PricePoint, one window query for the list). `MarketDetail` adds `creator` and `listing` for type 2. [backend/app/markets/router.py : L91-135]
+- [SHIPPED] `GET /markets/schedule` is public; operator `POST /markets/schedule` upserts NFL week rows (int fields bounded to int4). `listedConditionId` omitted keeps the stored link, a cid sets it, and an explicit `""` clears it so an orphaned game can be relisted. [backend/app/markets/router.py : L253-301]
+- [SHIPPED] `GET /markets/{id}` (children always present, maybe `[]`) and `/history` return 404 for type-2 markets without a confirmed listing; paused markets still resolve by id. [backend/app/markets/router.py : L304-343]
+- [SHIPPED] Operator `POST /markets/{id}/score` on sports primaries only (LiveScore with facts; null scores never become 0). [backend/app/markets/router.py : L346-387]
+- [SHIPPED] Operator `POST /markets` is idempotent: it derives the cid from `factory.oracle()` and the questionId and mirrors an existing factory market without a tx. Seed below `MIN_LP` (10,000 base units) is 422, `market_type` other than 0/1 is 400 ("user markets use /markets/listing"), and a condition prepared outside this factory is 409. Chain work runs in a worker thread under one operator-tx lock (pending nonce, receipt wait bounded by `OPERATOR_TX_TIMEOUT_SECONDS`); errors carry only the exception type. Creates are serialized per process (asyncio lock) and, on Postgres, by `pg_advisory_xact_lock` keyed by the questionId; `marketExists` is re-read under the operator lock, so a racing replay mirrors the first create instead of sending a second tx. The DB mirror inserts `ON CONFLICT DO NOTHING`, so a row the indexer inserted first is updated instead of causing a 500. [backend/app/markets/router.py : L390-580] [backend/app/markets/router.py : L44-77]
+- [SHIPPED] Base Flashblocks: `_operator_tx` returns only a canonical receipt (its block hash is the canonical block at its height), never a pre-confirmation, and a faucet or approve receipt with status 0 is a 500. The create path reads `marketExists`, `outcomeSlots` and the operator's USDC balance and allowance at the `pending` block, because `latest` lags the previous create's txs until their block is sealed. An approve grants 100 seeds of headroom (`APPROVE_HEADROOM`; bounded, factory only), so back-to-back creates skip it. [backend/app/markets/router.py : L421-440] [backend/app/markets/router.py : L457-497] [backend/app/chain_tx.py : L40-76]
+- [SHIPPED] Operator `POST /markets/{id}/pause` calls factory `setPaused` off the event loop with `OPERATOR_RPC_TIMEOUT_SECONDS`. [backend/app/markets/router.py : L583-628]
+- [SHIPPED] Operator `POST /markets/{id}/archive` hides an orphaned row (DB only) when the configured ConsensusOracle has no closeTime for it; a registered market is 409 ("pause it on the factory instead"). Use it for the legacy markets from an older deployment. It also clears `listedConditionId` on schedule rows that point at the orphan. [backend/app/markets/router.py : L649-686]
 
 ## User listing (OU-T010)
 
@@ -122,6 +127,7 @@ Decision: [ADR-0011](../adr/0011-pm-amm-v2-close-gate.md) (on-chain gate plus th
 - [SHIPPED] `DELETE /orders/{hash}` rolls back pending jobs, lists in-flight ones, and returns `offchainOnly`, `onchainCancelRequired` and `cancelOrderArgs` once the signature may be public (the maker must call `Exchange.cancelOrder`). `GET /orderbook/{cid}` adds `tradingOpen` and `haltReason`. [backend/app/orderbook/router.py : L167-233]
 - [SHIPPED] Queue: `relayer_ready` needs `RELAYER_ENABLED`, a parseable `RELAYER_PRIVATE_KEY` and a configured Exchange; the key alone never enables anything. Each match inserts a new `RelayJob`. With the relayer off, orders still verify and match, and fills stay `offchain` with no tx. [backend/app/relayer/queue.py : L30-62]
 - [SHIPPED] Worker state machine `pending → sending → sent → confirmed | failed`: the signed tx, nonce and fees are committed before broadcast and the same bytes are re-broadcast after a crash; EIP-1559 fees capped by `RELAYER_MAX_FEE_PER_GAS_WEI` with ≥10% bumps; receipts need the matching `OrderFilled` log; a failed job rolls back its optimistic fills and retires the side that failed preflight. [backend/app/relayer/worker.py : L1-21]
+- [SHIPPED] `get_receipt` returns None for a Flashblocks pre-confirmation (zero block hash, block not sealed) or any receipt whose block is not canonical, so the worker keeps treating the tx as unmined until its block is sealed. [backend/app/relayer/chain.py : L172-185] [backend/app/chain_tx.py : L40-56]
 - [SHIPPED] Invariants: a job that signed a tx is never re-signed on a fresh nonce on one ambiguous "nonce too low"; preflight counts funds other in-flight jobs will spend (`busy:` defers); jobs matched at or after closeTime roll back; stored and logged errors are redacted (RPC URLs carry keys).
 - [SHIPPED] A Postgres advisory lock (`RELAYER_LEADER_LOCK_KEY`) elects one sending instance; the background loop starts only with both flags and a ready relayer. On Cloud Run it needs `--no-cpu-throttling --min-instances=1`, or an operator calls `POST /relayer/tick`. The relayer EOA needs Base Sepolia ETH. [backend/app/relayer/worker.py : L916-929]
 - [SHIPPED] Tunables (code defaults; deploy-gcp passes only the two flags): `RELAYER_POLL_SECONDS`, `_BATCH_SIZE`, `_MAX_ATTEMPTS`, `_RETRY_BACKOFF_SECONDS`, `_RESUBMIT_AFTER_SECONDS`, `_FEE_BUMP_BPS`, `_MAX_FEE_PER_GAS_WEI`, `_PRIORITY_FEE_WEI`, `_GAS_BUFFER_BPS`, `_GAS_LIMIT_CAP`, `_CONFIRMATIONS`, `_MIN_EXPIRY_SECONDS`, `_PREFLIGHT_ON_POST`, `_LEADER_LOCK_KEY`, `_RPC_TIMEOUT_SECONDS`, `_LOG_LOOKBACK_BLOCKS`, `_MAX_OPEN_ORDERS_PER_MAKER`. `RELAYER_PRIVATE_KEY` is shared with `/emissions/distribute` through one nonce manager. [backend/app/config.py : L107-130]
@@ -164,7 +170,7 @@ Decision: [ADR-0011](../adr/0011-pm-amm-v2-close-gate.md) (on-chain gate plus th
 - [SHIPPED] A failed range holds the checkpoint; `advance_checkpoint` only moves forward. All RPC runs in threads with `INDEXER_RPC_TIMEOUT_SECONDS`; logs carry exception types only. [backend/app/indexer/listener.py : L262-388]
 - [SHIPPED] Price history: `PoolSeeded` stores 0.5; each `Swap` stores the pool price from `pools(cid)` at that block: pm-AMM `Φ((no − yes) / L)` from index 4, or the CPMM mid `no / (yes + no)` for a v1 pool. Points are unique per (condition, block, log index). [backend/app/indexer/listener.py : L121-185]
 - [SHIPPED] Type-2 `MarketCreated` upserts a MarketListing (`indexed`) and marks it `confirmed` only when the criteria hash matches and the same review as `/confirm` passes, else `rejected`. [backend/app/indexer/listener.py : L454-523]
-- [SHIPPED] `GET /markets/{id}/history` returns ordered `PricePoint[]`, `[]` when empty. [backend/app/markets/router.py : L299-314]
+- [SHIPPED] `GET /markets/{id}/history` returns ordered `PricePoint[]`, `[]` when empty. [backend/app/markets/router.py : L304-319]
 - [STUB] Only `AMM_ADDRESS` is indexed; legacy-AMM swaps stop being indexed after the v2 swap.
 - [PHASE2] CTF balance snapshots and OU NAV history.
 

@@ -3,9 +3,9 @@ title: Phase 1 MVP
 status: MIXED
 area: roadmap
 summary: Vertical slice shipped on Anvil — seeded AMM on all market types (a CPMM then; MarketAMM v2 is now a static pm-AMM), three-agent oracle, OU NAV, Next.js AMM ticket.
-last_verified: 2026-09-23
+last_verified: 2026-09-24
 pointers:
-  - "[contracts/script/deploy.py : L116-198]"
+  - "[contracts/script/deploy.py : L160-242]"
   - "[scripts/e2e_local.py : L27-113]"
   - "[scripts/run_stack.cmd : L1-56]"
   - "[backend/app/main.py : L27-61]"
@@ -19,7 +19,7 @@ Scope: one operator can list a seeded primary, a generator can seed a wildcard, 
 
 ## Shipped
 
-- [SHIPPED] Vyper protocol deploy as one graph. [contracts/script/deploy.py : L116-198]
+- [SHIPPED] Vyper protocol deploy as one graph. [contracts/script/deploy.py : L160-242]
 - [SHIPPED] boa tests for AMM, oracle, vault, factory required seed; leftover Exchange tests stay in `test_exchange.py`.
 - [SHIPPED] `scripts/e2e_local.py` happy path (seeded AMM buy+sell) plus fallback. [scripts/e2e_local.py : L27-113]
 - [SHIPPED] FastAPI routers, factory-backed `POST /markets`, `/health`.

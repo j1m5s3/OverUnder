@@ -83,4 +83,4 @@ See [docs/runbooks/local-dev.md](docs/runbooks/local-dev.md) for details, and [d
 - **Exchange** (`Exchange.vy`): the leftover CLOB overlay. The production relayer (OU-T003) is off by default.
 - **Shared**: all of the above use `ConditionalTokens.vy`, `ConsensusOracle.vy` and `FeeVault.vy`.
 
-Book of record: [docs/adr/0007-amm-first-uniform-lvr.md](docs/adr/0007-amm-first-uniform-lvr.md). Base Sepolia runs the v1 contracts until the AMM + Factory v2 redeploy described in the operations runbook.
+Book of record: [docs/adr/0007-amm-first-uniform-lvr.md](docs/adr/0007-amm-first-uniform-lvr.md). Base Sepolia runs MarketAMM v2 and MarketFactory v2 since 2026-09-24; the live addresses are in the operations runbook.

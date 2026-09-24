@@ -3,13 +3,13 @@ title: Dual-gate sports resolve and week-roll listing
 status: SHIPPED
 area: oracles
 summary: Sports primaries auto-submit only when a LiveScore final matches unanimous research. Next-week winner primaries are listed once every week-N game is final, postponed, cancelled or stale past a grace period. Wildcards and non-sports markets go to a separate general resolver.
-last_verified: 2026-09-23
+last_verified: 2026-09-24
 pointers:
   - "[oracles/resolve/run.py : L147-348]"
   - "[oracles/resolve/run.py : L55-110]"
   - "[oracles/resolve/markets.py : L39-63]"
   - "[oracles/resolve/winner.py : L26-48]"
-  - "[oracles/resolve/chain.py : L102-121]"
+  - "[oracles/resolve/chain.py : L109-128]"
   - "[oracles/resolve/cooldown.py : L1-138]"
   - "[oracles/resolve/general.py : L99-157]"
   - "[oracles/listing/run.py : L35-107]"
@@ -44,7 +44,7 @@ Week gate and listing
 Resolve
 - Markets whose on-chain `closeTime` is 0 (created on another oracle) are skipped as `not registered`. [oracles/resolve/run.py : L208-212]
 - Both resolvers read the operator market list (`includePaused=1`, operator JWT), so a paused registered market still resolves. On a 4xx they fall back to the public list. [oracles/resolve/markets.py : L39-63]
-- A config guard checks the chain id, oracle code, and agent and operator addresses against the env before any send. [oracles/resolve/chain.py : L102-121]
+- A config guard checks the chain id, oracle code, and agent and operator addresses against the env before any send. [oracles/resolve/chain.py : L109-128]
 - Timing uses max(wall clock, chain timestamp). [oracles/resolve/run.py : L180-188]
 - Markets are processed oldest closeTime first. Markets already resolved on chain are mirrored into the DB from the CTF payout. [oracles/resolve/run.py : L55-110]
 - Research gets the kickoff (closeTime), and the score scout prompt names it too. Both require a `game_date`. A research verdict for another date becomes outcome 2, and a played or cancelled score report for another date is rejected. So both gates cannot agree on an earlier meeting of the same teams. [oracles/resolve/run.py : L244-255] [oracles/agents/cursor_runtime.py : L173-199] [oracles/scores/scout.py : L230-240]
@@ -60,7 +60,7 @@ Score scouts can post a final box score without settling the market. `Coordinato
 
 ## Decision
 
-- [SHIPPED] Dual-gate auto-resolve in `oracles/resolve/` requires four things: LiveScore `status == final`, closeTime passed, a score-derived winner equal to the unanimous `Coordinator.run` result, and a passing config guard. It then calls `sign_unanimous` + `submitConsensus`. It fails closed on ties, missing scores, research mismatch, missing `AGENT_*_KEY`, not-registered markets, config mismatch, or markets already resolved. [oracles/resolve/run.py : L147-348] [oracles/resolve/chain.py : L102-121]
+- [SHIPPED] Dual-gate auto-resolve in `oracles/resolve/` requires four things: LiveScore `status == final`, closeTime passed, a score-derived winner equal to the unanimous `Coordinator.run` result, and a passing config guard. It then calls `sign_unanimous` + `submitConsensus`. It fails closed on ties, missing scores, research mismatch, missing `AGENT_*_KEY`, not-registered markets, config mismatch, or markets already resolved. [oracles/resolve/run.py : L147-348] [oracles/resolve/chain.py : L109-128]
 - [SHIPPED] User “done” maps to existing LiveScore `final`. No `done` status.
 - [SHIPPED] Score scout still never submits consensus. `Coordinator.run` still never submits. [oracles/consensus/coordinator.py : L31-57]
 - [SHIPPED] The schedule scout extracts the current and next NFL week, and the operator `POST /markets/schedule` persists it. Listing waits until every week-W game is final, postponed, cancelled or stale past the grace period, then calls the operator `POST /markets` for week W+1 winner primaries with `close_time = kickoff`. [oracles/listing/run.py : L172-379]

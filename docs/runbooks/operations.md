@@ -2,8 +2,8 @@
 title: Production operations runbook
 status: SHIPPED
 area: cross
-summary: Base Sepolia / GCP operations — deploy order and pre-broadcast checklist for the AMM + Factory v2 redeploy (main-only confirmed broadcast, scheduler resume, indexer cutover), CI, secrets, repo vars and oracle tunables, market audit and overdue-market handling, archiving orphans, fallback and research cooldown knobs, Cursor quota, relayer enablement, CDP Portal paymaster allowlist, readiness-deadline handling.
-last_verified: 2026-09-23
+summary: Base Sepolia / GCP operations — live v2 addresses (since 2026-09-24), Base Flashblocks pre-confirmation receipts, deploy order and pre-broadcast checklist for the AMM + Factory v2 redeploy (main-only confirmed broadcast, scheduler resume, indexer cutover), CI, secrets, repo vars and oracle tunables, market audit and overdue-market handling, archiving orphans, fallback and research cooldown knobs, Cursor quota, relayer enablement, CDP Portal paymaster allowlist, readiness-deadline handling.
+last_verified: 2026-09-24
 pointers:
   - "[.github/workflows/deploy-contracts.yml : L1-55]"
   - "[.github/workflows/deploy-contracts.yml : L79-112]"
@@ -17,18 +17,22 @@ pointers:
   - "[.github/workflows/deploy-gcp.yml : L637-671]"
   - "[.github/workflows/ci.yml : L17-128]"
   - "[infra/gcp/deploy_wait.sh : L1-35]"
+  - "[contracts/script/deploy.py : L33-72]"
   - "[contracts/script/deploy_ci.py : L65-84]"
-  - "[contracts/script/deploy_ci.py : L311-341]"
-  - "[contracts/script/deploy_ci.py : L443-456]"
+  - "[contracts/script/deploy_ci.py : L181]"
+  - "[contracts/script/deploy_ci.py : L312-342]"
+  - "[contracts/script/deploy_ci.py : L444-457]"
   - "[contracts/script/deploy_v2.py : L178-268]"
+  - "[contracts/script/deploy_v2.py : L384]"
+  - "[backend/app/chain_tx.py : L1-12]"
   - "[scripts/audit_markets.py : L72-138]"
   - "[scripts/audit_markets.py : L1372-1409]"
   - "[scripts/sync_mobile_deployments.py : L1-28]"
   - "[scripts/sync_mobile_deployments.py : L84-101]"
   - "[backend/app/indexer/listener.py : L188-202]"
   - "[backend/app/indexer/listener.py : L331-371]"
-  - "[backend/app/markets/router.py : L557-602]"
-  - "[backend/app/markets/router.py : L623-660]"
+  - "[backend/app/markets/router.py : L583-628]"
+  - "[backend/app/markets/router.py : L649-686]"
   - "[backend/app/relayer/router.py : L55-106]"
   - "[backend/app/relayer/queue.py : L30-38]"
   - "[backend/app/aa/router.py : L18-24]"
@@ -46,11 +50,29 @@ pointers:
 
 Scope: Base Sepolia (chain 84532), GCP project `overunder-509107`, region `us-central1`, repo `j1m5s3/OverUnder`. The full reference for secrets, IAM, error lines and env vars is [infra/gcp/README.md](../../infra/gcp/README.md). Local work is in [local-dev.md](local-dev.md). This file gives the order of operations and the knobs.
 
-Never print, echo or commit a secret value. Secret payloads go only into pipes (`printf %s … | gcloud … --data-file=-`). No contract addresses are recorded here: take them from the workflow run summary.
+Never print, echo or commit a secret value. Secret payloads go only into pipes (`printf %s … | gcloud … --data-file=-`). Apart from the live v2 pair under [Live deployment](#live-deployment-base-sepolia), no contract addresses are recorded here: take them from the workflow run summary.
+
+## Live deployment (Base Sepolia)
+
+[SHIPPED] Base Sepolia runs MarketAMM v2 and MarketFactory v2 since 2026-09-24, deployed by `deploy-contracts.yml` run 35960788761.
+
+| Item | Value |
+|---|---|
+| MarketAMM v2 | `0xc2cA0Ac545f87b0301B71fFd5BBCa82e1019CC77` |
+| MarketFactory v2 | `0x93967Bc3bed8705988109Ee52c7E076a43724a6E` |
+| deployBlock (`INDEXER_START_BLOCK`) | `47230282` |
+
+- [SHIPPED] `0x615e9038A9AEB4862289080d835A8ABFB11FF500` and `0x07Bbd3805BFACdd2059551cB07ABCe95Cfd22Fb8` are orphan v2 AMM deploys left by the two broadcasts that failed on pre-confirmation receipts (see [below](#base-flashblocks-pre-confirmation-receipts)). Nothing is wired to them; leave them unused.
+
+## Base Flashblocks pre-confirmation receipts
+
+- [SHIPPED] Base Sepolia RPCs return a Flashblocks pre-confirmation receipt (block hash all zeros, block not sealed) as soon as a tx is included, while `eth_call` at `latest` still reads the previous sealed block.
+- [SHIPPED] Broadcasts: titanoboa used the first non-null receipt and crashed reading it, so the first two v2 migrations failed right after their AMM deploy (the orphans above). `deploy.py`, `deploy_ci.py` and `deploy_v2.py` now poll until the receipt's block hash is the canonical block at its height, retrying transient RPC errors such as 429 until the deadline (at least 180 s). [contracts/script/deploy.py : L33-72] [contracts/script/deploy_ci.py : L181] [contracts/script/deploy_v2.py : L384]
+- [SHIPPED] Operator writes: about 1 in 4 operator creates reverted because the next create read a stale allowance at `latest`. API operator txs and oracle job sends now wait for canonical receipts, reads that decide a follow-up tx use the `pending` block, create approves 100 seeds of headroom, and the relayer treats a pre-confirmation as unmined. Details: [backend.md](../architecture/backend.md#markets) and [oracles.md](../architecture/oracles.md#chain-guard). [backend/app/chain_tx.py : L1-12]
 
 ## Deploy order (AMM + Factory v2 redeploy, then the app)
 
-This is an ops procedure that runs after the branch merges. It is not done until the run summaries say so.
+This is an ops procedure that runs after the branch merges. It is not done until the run summaries say so. It ran for Base Sepolia on 2026-09-24 ([Live deployment](#live-deployment-base-sepolia)); the steps stay here for the next redeploy.
 
 1. Merge the PR into `main` once CI is green (`ci.yml`, below).
 2. Run `deploy-contracts.yml` with `target=verify`. It is read-only and every row must say "yes" [.github/workflows/deploy-contracts.yml : L1-55].
@@ -65,7 +87,7 @@ gh workflow run deploy-contracts.yml --ref main -R j1m5s3/OverUnder -f target=v2
    - The first step, before checkout, refuses the broadcast unless the run is on `refs/heads/main` and `confirm` is exactly `BROADCAST <target>`. A refused run sends nothing and fails with `Broadcast refused` [.github/workflows/deploy-contracts.yml : L79-112].
    - The contracts test suite runs as a gate.
    - The workflow pauses `overunder-oracle-tick` and waits up to 20 min for running `overunder-oracle` executions [.github/workflows/deploy-contracts.yml : L183-291].
-   - `deploy_ci.py` refuses to send while the operator has pending transactions. It also refuses if the repo vars already point at a v2 pair or `oracle.factory() != FACTORY_ADDRESS`. The operator needs at least 0.005 ETH [contracts/script/deploy_ci.py : L311-341].
+   - `deploy_ci.py` refuses to send while the operator has pending transactions. It also refuses if the repo vars already point at a v2 pair or `oracle.factory() != FACTORY_ADDRESS`. The operator needs at least 0.005 ETH [contracts/script/deploy_ci.py : L312-342].
    - `migrate_v2` deploys AMM v2, then Factory v2. It imports the legacy cids the old factory knows and cuts the shared oracle over [contracts/script/deploy_v2.py : L178-268].
    - After success the scheduler stays paused until step 8. If the run fails or is cancelled, the workflow resumes it.
 5. Copy the `gh variable set` lines from the run summary. The `GITHUB_TOKEN` cannot write repo vars. The keys come from [contracts/script/deploy_ci.py : L65-84].
@@ -80,7 +102,7 @@ gh variable set INDEXER_START_BLOCK --body <deployBlock from summary> -R j1m5s3/
    - The new pair has no row yet, so the new API starts it at `INDEXER_START_BLOCK` (the v2 deploy block) whatever the old pair's checkpoint says.
    - The old API revision can keep advancing the old pair's row until the cutover without affecting the new one. Events of the new contracts between the deploy block and the cutover, including direct `createPermissionlessMarket` calls, are indexed. Replays are idempotent.
    - Once a pair has a row, `INDEXER_START_BLOCK` only fast-forwards it and never rewinds it [backend/app/indexer/listener.py : L188-202]. If step 8 ran with the variable unset, the new row started near head. Fix: set the variable, delete that pair's row from `indexer_checkpoints` (operator SQL on `overunder-pg`), and redeploy the API.
-6. Sync the deployment files from the uploaded artifact `contracts-84532-v2-broadcast-<run>`. The summary prints these commands with the run id filled in [contracts/script/deploy_ci.py : L443-456].
+6. Sync the deployment files from the uploaded artifact `contracts-84532-v2-broadcast-<run>`. The summary prints these commands with the run id filled in [contracts/script/deploy_ci.py : L444-457].
    - `mobile/assets/deployments/84532.json` is generated. Never edit it by hand.
    - The sync script exits 1 and writes nothing for a source that is not a finished deployment [scripts/sync_mobile_deployments.py : L84-101]:
      - a simulation (`simulated`, `dryRun` or `fork` set; the `-simulate-` artifact always has `simulated: true`)
@@ -259,7 +281,7 @@ Known state on 2026-09-23 (before the v2 redeploy):
 
 ## Archive orphaned markets
 
-`POST /api/v1/markets/{condition_id}/archive` is operator-only and DB-only (no transaction) [backend/app/markets/router.py : L623-660]:
+`POST /api/v1/markets/{condition_id}/archive` is operator-only and DB-only (no transaction) [backend/app/markets/router.py : L649-686]:
 
 - It hides the row: `paused=true`, and `GET /api/v1/markets` leaves out paused rows.
 - It only works when the configured ConsensusOracle has no closeTime for the cid.
@@ -273,7 +295,7 @@ curl -fsS -X POST -H "Authorization: Bearer $OPERATOR_JWT" "$OU_API_URL/api/v1/m
 - Responses:
   - 200: archived
   - 404: unknown cid
-  - 409: the market is registered here; pause it on the factory instead with `POST /api/v1/markets/{condition_id}/pause`, which sends an operator tx [backend/app/markets/router.py : L557-602]
+  - 409: the market is registered here; pause it on the factory instead with `POST /api/v1/markets/{condition_id}/pause`, which sends an operator tx [backend/app/markets/router.py : L583-628]
   - 503: chain unavailable
 - User listings whose `listing` is not `confirmed` are hidden from `GET /markets` but stay tradable on chain. Review them with the operator-only `GET /api/v1/markets/listing/review`, then pause or arbitrate them.
 

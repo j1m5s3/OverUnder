@@ -15,6 +15,7 @@ from web3 import Web3
 from web3.exceptions import ContractLogicError, TransactionNotFound
 from web3.providers.rpc.utils import REQUEST_RETRY_ALLOWLIST, ExceptionRetryConfiguration
 
+from app.chain_tx import is_canonical
 from app.config import get_settings
 from app.contract_addresses import load_abi
 
@@ -169,11 +170,17 @@ class Web3ChainClient:
         return Web3.to_hex(h).lower()
 
     async def get_receipt(self, tx_hash: str) -> dict | None:
+        """The receipt once its block is canonical; None while there is none or it is only a Flashblocks
+        pre-confirmation (zero blockHash, block not sealed), so the worker keeps treating the tx as unmined."""
+
         def _get():
             try:
-                return _receipt_dict(self.w3.eth.get_transaction_receipt(tx_hash))
+                r = self.w3.eth.get_transaction_receipt(tx_hash)
             except TransactionNotFound:
                 return None
+            if not is_canonical(self.w3, r):
+                return None
+            return _receipt_dict(r)
 
         return await asyncio.to_thread(_get)
 

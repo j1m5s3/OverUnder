@@ -1,6 +1,6 @@
 # OverUnder JIT index — living graph after lifecycle hardening + Phase 2 completion (T003, T008–T010)
 
-last_verified: 2026-09-23
+last_verified: 2026-09-24
 
 ## Subsystems
 
@@ -23,11 +23,11 @@ last_verified: 2026-09-23
 - [contracts/src/ConsensusOracle.vy : L196-226] - resolveFallback / resolveArbitrated (job calls them under OU_FALLBACK_POLICY)
 - [contracts/src/FeeVault.vy] - OU NAV redeem + 24h cooldown
 - [contracts/src/OverUnderPaymaster.vy : L322-355] - leftover validatePaymasterUserOp (app uses CDP, ADR-0010)
-- [contracts/script/deploy.py : L150-180] - 84532 canonical EP / 31337 MockEntryPoint; 31337 opens permissionless listing; addFactory + deposit
-- [contracts/script/deploy.py : L74-89] - in-memory fork cache for 31337 (restarted anvils)
+- [contracts/script/deploy.py : L194-224] - 84532 canonical EP / 31337 MockEntryPoint; 31337 opens permissionless listing; addFactory + deposit
+- [contracts/script/deploy.py : L118-133] - in-memory fork cache for 31337 (restarted anvils)
 - [contracts/script/deploy_v2.py : L178-268] - migrate_v2: checks first, deploy AMM v2 + Factory v2, import legacy, cut oracle over
-- [contracts/script/deploy_ci.py : L311-341] - preflight_v2: code at addresses, operator owns factory/oracle, refuses v2 -> v2
-- [contracts/script/deploy_ci.py : L548-699] - deploy-contracts CLI: verify | v2 | core, simulate vs broadcast, balance floor, summary
+- [contracts/script/deploy_ci.py : L312-342] - preflight_v2: code at addresses, operator owns factory/oracle, refuses v2 -> v2
+- [contracts/script/deploy_ci.py : L549-700] - deploy-contracts CLI: verify | v2 | core, simulate vs broadcast, balance floor, summary
 - [backend/app/main.py : L27-61] - lifespan: run_migrations, indexer task, maybe_start_relayer
 - [backend/app/db.py : L242-272] - lock_migrations + run_migrations: one locked schema entry point (Postgres advisory xact lock)
 - [backend/app/config.py : L46-155] - Settings: TRADING_HALT_AT_CLOSE, RPC timeouts, INDEXER_*, RELAYER_* (off by default)
@@ -37,9 +37,9 @@ last_verified: 2026-09-23
 - [backend/app/indexer/listener.py : L454-523] - index user listings (MarketCreated type 2) with listing review
 - [backend/app/markets/trading.py : L32-67] - halts_at / trading_open / trading_halt_reason
 - [backend/app/markets/visibility.py : L28-49] - type 2 public only when listing confirmed; paused hidden
-- [backend/app/markets/router.py : L177-229] - EventCard list (types 0 and 2 are primaries)
-- [backend/app/markets/router.py : L385-413] - operator create_market, idempotent when the factory already has the cid
-- [backend/app/markets/router.py : L557-660] - operator pause (factory tx) and archive (DB-only, only when oracle closeTime == 0)
+- [backend/app/markets/router.py : L182-234] - EventCard list (types 0 and 2 are primaries)
+- [backend/app/markets/router.py : L390-418] - operator create_market, idempotent when the factory already has the cid
+- [backend/app/markets/router.py : L583-686] - operator pause (factory tx) and archive (DB-only, only when oracle closeTime == 0)
 - [backend/app/markets/listing.py : L237-424] - listing config / eligibility / prepare / confirm
 - [backend/app/markets/listing.py : L492-526] - operator listing review (hidden type-2 markets)
 - [backend/app/markets/listing_gates.py : L58-167] - question/criteria/close/seed/pending gates; duplicate rule
@@ -72,8 +72,8 @@ last_verified: 2026-09-23
 - [oracles/agents/cursor_runtime.py : L302-384] - _run_agent budget watchdog; prompt_json surfaces run errors
 - [oracles/consensus/coordinator.py : L31-57] - Coordinator.run research-only (confidence per report)
 - [oracles/consensus/coordinator.py : L68-86] - sign_one (fallback) / sign_unanimous (chain-clock deadline)
-- [oracles/resolve/chain.py : L102-121] - config_check: chain id, oracle code, agent keys registered, operator
-- [oracles/resolve/chain.py : L158-261] - fallback_state; preflighted sends (consensus, attestation, fallback, arbitrate)
+- [oracles/resolve/chain.py : L109-128] - config_check: chain id, oracle code, agent keys registered, operator
+- [oracles/resolve/chain.py : L165-276] - fallback_state; preflighted sends (consensus, attestation, fallback, arbitrate)
 - [oracles/resolve/run.py : L77-92] - dual-gate owns only "<team> win?" sports primaries
 - [oracles/resolve/run.py : L147-348] - dual gate: not-registered skip, mirror, oldest first, fallback
 - [oracles/resolve/fallback.py : L48-156] - run_fallback: attest matching agents, resolveFallback, arbitrate
@@ -129,7 +129,7 @@ last_verified: 2026-09-23
 - 2026-09-23 user decisions: OU_FALLBACK_POLICY=attest default (arbitrate, manual selectable); trading halts at closeTime on chain (closeGate default true) and in UI/API (TRADING_HALT_AT_CLOSE=true); targeted AMM + Factory redeploy via deploy-contracts.yml (verify, then v2), then repo vars, then deploy-gcp
 - 2026-09-23 authority: agents may push, open PRs, dispatch the repo's workflows and change GCP resources with gcloud (supersedes the earlier "agents never push/dispatch/run gcloud/send tx"); never print, log or commit a secret value
 - 2026-09-23 oracle runtime: OU_CURSOR_RUNTIME=local with tools=["mcp"]; run errors surfaced; cursor-sdk==1.0.32 pinned. Old cloud mode silently ran local agents with the full toolset
-- Base Sepolia runs v1 AMM/Factory until the ops redeploy; addresses come from the deploy-contracts run summary, never from docs
+- Base Sepolia runs v2 AMM/Factory since 2026-09-24 (live pair in docs/runbooks/operations.md); a new deploy's addresses come from the deploy-contracts run summary
 - T005 retargeted to Cursor agents
 - Exchange remains deployed leftover overlay; relayer off by default
 - 2026-09-20 Stage 4: mock pytest does not need cursor_sdk; live smoke skipif no key
@@ -165,4 +165,5 @@ last_verified: 2026-09-23
 - [.cursor/jit_history/2026-09-20-cursor-runtime-scouts.md] — archived Cursor-runtime scouts plan
 - [.cursor/jit_history/2026-09-21-ai-resolve-nfl-listing.md] — archived AI resolve + NFL listing plan
 - [.cursor/jit_history/2026-09-21-ou-t001-paymaster.md] — archived T001 paymaster closeout
-- [.cursor/JIT_PLAN.md] — ACTIVE: lifecycle hardening + Phase 2 completion (2026-09-23); steps 15 ship and 16 ops pending
+- [.cursor/jit_history/2026-09-24-lifecycle-phase2-completion.md] — shipped lifecycle hardening + Phase 2 (T003, T008–T010); v2 contracts live on 84532 (MarketAMM 0xc2cA…CC77, MarketFactory 0x9396…4a6E)
+- [.cursor/JIT_PLAN.md] — SHIPPED 2026-09-24 (archived copy in jit_history); next slice starts here

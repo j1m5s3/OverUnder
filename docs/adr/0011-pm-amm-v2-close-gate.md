@@ -3,7 +3,7 @@ title: MarketAMM v2 static pm-AMM with close gate
 status: MIXED
 area: contracts
 summary: MarketAMM v2 replaces the CPMM with a static pm-AMM (price = Phi((no-yes)/L)), keeps the 100 bps 50/50 fee, gives seed LP to the provider (locked until close), halts trading at closeTime on chain, and reaches Base Sepolia through a targeted AMM+Factory redeploy. Dynamic L_t is OU-T015.
-last_verified: 2026-09-23
+last_verified: 2026-09-24
 pointers:
   - "[contracts/src/MarketAMM.vy : L1-12]"
   - "[contracts/src/MarketAMM.vy : L60-78]"
@@ -19,11 +19,11 @@ pointers:
   - "[contracts/src/MarketFactory.vy : L136-141]"
   - "[contracts/src/MarketFactory.vy : L229-241]"
   - "[contracts/script/deploy_v2.py : L178-268]"
-  - "[contracts/script/deploy_ci.py : L311-341]"
+  - "[contracts/script/deploy_ci.py : L312-342]"
   - "[.github/workflows/deploy-contracts.yml : L1-55]"
   - "[backend/app/indexer/listener.py : L136-155]"
   - "[backend/app/markets/trading.py : L47-67]"
-  - "[backend/app/markets/router.py : L623-660]"
+  - "[backend/app/markets/router.py : L649-686]"
   - "[contracts/tests/test_amm_pm.py : L680-719]"
   - "[contracts/tests/test_amm_pm.py : L389-441]"
 ---
@@ -68,9 +68,9 @@ Trading halt at closeTime
 - [SHIPPED] The API and UI enforce the same halt behind `TRADING_HALT_AT_CLOSE` (default true; deploy-gcp passes true). Quotes, `/aa/cdp-send` trades and CLOB `POST /orders` return 409 (`market closed`, `market resolved` or `listing not confirmed`), and web and mobile disable the ticket. [backend/app/markets/trading.py : L47-67] [backend/app/amm/router.py : L60-63] [web/src/features/trade/tradingWindow.ts : L29-47]
 
 Redeploy
-- [SHIPPED] The redeploy is targeted. `migrate_v2` checks everything first and sends nothing if a check fails: operator ownership, `oracle.factory()` still pointing at the legacy factory, and no earlier migration or v2 source pair. It then deploys AMM v2 and Factory v2 next to the legacy pair, configures them, cuts the shared oracle over with `oracle.setFactory`, and copies legacy factory rows (paused flag included) with `importLegacyMarkets` in chunks of 25 (`IMPORT_CHUNK`; 25 rows with 256-byte questions cost about 8.0M gas, half the 2^24 per-transaction cap). CTF, ConsensusOracle, FeeVault, USDC and Exchange are reused, so existing condition ids keep resolving. The new AMM takes the legacy AMM's on-chain `feeVault()`, and `preflight_v2` refuses a `FEE_VAULT_ADDRESS` repo var that differs from it. [contracts/script/deploy_v2.py : L178-268] [contracts/script/deploy_ci.py : L311-341] [contracts/src/MarketFactory.vy : L229-241]
+- [SHIPPED] The redeploy is targeted. `migrate_v2` checks everything first and sends nothing if a check fails: operator ownership, `oracle.factory()` still pointing at the legacy factory, and no earlier migration or v2 source pair. It then deploys AMM v2 and Factory v2 next to the legacy pair, configures them, cuts the shared oracle over with `oracle.setFactory`, and copies legacy factory rows (paused flag included) with `importLegacyMarkets` in chunks of 25 (`IMPORT_CHUNK`; 25 rows with 256-byte questions cost about 8.0M gas, half the 2^24 per-transaction cap). CTF, ConsensusOracle, FeeVault, USDC and Exchange are reused, so existing condition ids keep resolving. The new AMM takes the legacy AMM's on-chain `feeVault()`, and `preflight_v2` refuses a `FEE_VAULT_ADDRESS` repo var that differs from it. [contracts/script/deploy_v2.py : L178-268] [contracts/script/deploy_ci.py : L312-342] [contracts/src/MarketFactory.vy : L229-241]
 - [SHIPPED] The CI path is `deploy-contracts.yml`, run by manual dispatch in this order: `verify` → `v2` (fork simulation) → `v2` with broadcast. A broadcast pauses the oracle scheduler first because it signs with the shared operator key. After it: set the `AMM_ADDRESS`, `FACTORY_ADDRESS` and `INDEXER_START_BLOCK` repo vars, run `deploy-gcp.yml`, resume the scheduler and re-verify. Also allowlist the new contracts in the CDP Portal paymaster and regenerate the mobile asset with `scripts/sync_mobile_deployments.py`. The runbook is in `infra/gcp/README.md` (contract deployment). [.github/workflows/deploy-contracts.yml : L1-55] [contracts/script/deploy_ci.py : L64-82]
-- [SHIPPED] There is no legacy-AMM routing. The API, indexer, web and mobile read only `AMM_ADDRESS`. Legacy pools stay on the old AMM; imported legacy markets still resolve and redeem through the shared oracle and CTF, but the app cannot quote or trade them (quotes revert `no pool`). Rows created on an older oracle (on-chain `closeTime` 0) are hidden with the operator-only `POST /api/v1/markets/{cid}/archive`. [backend/app/markets/router.py : L623-660]
+- [SHIPPED] There is no legacy-AMM routing. The API, indexer, web and mobile read only `AMM_ADDRESS`. Legacy pools stay on the old AMM; imported legacy markets still resolve and redeem through the shared oracle and CTF, but the app cannot quote or trade them (quotes revert `no pool`). Rows created on an older oracle (on-chain `closeTime` 0) are hidden with the operator-only `POST /api/v1/markets/{cid}/archive`. [backend/app/markets/router.py : L649-686]
 - [PHASE2] Dynamic pm-AMM liquidity L_t = L0·√((T − t)/(T − t0)), which makes expected LVR uniform in both price and time, is tracked as OU-T015 in [TODOS.md](../TODOS.md).
 
 ## Consequences

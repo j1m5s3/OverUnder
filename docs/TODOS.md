@@ -3,7 +3,7 @@ title: TODO registry
 status: MIXED
 area: cross
 summary: Machine-parseable gaps. OU-T001–T013 are done. Open lifecycle gaps are OU-T014 (invalid/refund outcome), OU-T015 (dynamic pm-AMM L_t) and OU-T016 (smart-account makers and on-chain cancel for the leftover CLOB).
-last_verified: 2026-09-23
+last_verified: 2026-09-24
 pointers:
   - "[backend/app/orderbook/router.py : L94-164]"
   - "[backend/app/relayer/worker.py : L1-21]"
@@ -195,7 +195,7 @@ todos:
       - "[oracles/scores/scout.py : L332-371]"
       - "[oracles/scores/publish.py : L15-52]"
       - "[oracles/scores/job.py : L120-172]"
-      - "[backend/app/markets/router.py : L341-382]"
+      - "[backend/app/markets/router.py : L346-387]"
       - "[web/src/features/markets/MatchupHero.tsx : L1-75]"
   - id: OU-T012
     title: Dual-gate sports auto-resolve
@@ -219,7 +219,7 @@ todos:
       - "[oracles/schedule/scout.py : L147-202]"
       - "[oracles/listing/run.py : L85-97]"
       - "[oracles/listing/run.py : L172-379]"
-      - "[backend/app/markets/router.py : L232-296]"
+      - "[backend/app/markets/router.py : L237-301]"
       - "[oracles/job.py : L136-177]"
   - id: OU-T014
     title: Invalid/refund outcome for cancelled or ambiguous markets
