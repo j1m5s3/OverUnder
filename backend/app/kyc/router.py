@@ -1,14 +1,15 @@
+import math
 from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.router import get_current_user
 from app.config import get_settings
 from app.db import get_db
-from app.models import KycRecord, RampTx
+from app.models import KycRecord, RampTx, User
 
 router = APIRouter(prefix="/kyc", tags=["kyc"])
 settings = get_settings()
@@ -16,7 +17,7 @@ settings = get_settings()
 
 async def enforce_kyc_gate(
     notional_usdc: float,
-    user: dict,
+    user: User,
     db: AsyncSession,
 ) -> None:
     """Enforce KYC gate: raise 403 if KYC required but not passed.
@@ -25,8 +26,12 @@ async def enforce_kyc_gate(
     - notional ≥ threshold (default $500/day) OR restricted jurisdiction → require KYC
     - Operator JWT cannot bypass fiat KYC
     - Raises HTTPException(403) if KYC status not in {pass, not_required}
+    - Raises HTTPException(400) for a non-finite or non-positive amount: NaN would make
+      `volume >= threshold` False and a negative one would cancel recorded volume
     """
-    address = user["address"]
+    if not isinstance(notional_usdc, (int, float)) or not math.isfinite(notional_usdc) or notional_usdc <= 0:
+        raise HTTPException(status_code=400, detail="Invalid amount")
+    address = user.address
 
     # Get KYC record
     result = await db.execute(select(KycRecord).where(KycRecord.address == address))
@@ -91,7 +96,7 @@ class KycSessionResponse(BaseModel):
 
 
 class KycCheckRequest(BaseModel):
-    notional_usdc: float
+    notional_usdc: float = Field(gt=0, allow_inf_nan=False)
 
 
 class KycCheckResponse(BaseModel):
@@ -103,7 +108,7 @@ class KycCheckResponse(BaseModel):
 @router.post("/session", response_model=KycSessionResponse)
 async def kyc_session(
     req: KycSessionRequest,
-    user: dict = Depends(get_current_user),
+    user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Create or update KYC session for the authenticated user.
@@ -111,7 +116,7 @@ async def kyc_session(
     This endpoint does NOT store government IDs or documents.
     It only stores status enum and jurisdiction.
     """
-    address = user["address"]
+    address = user.address
 
     # Check if record exists
     result = await db.execute(select(KycRecord).where(KycRecord.address == address))
@@ -147,11 +152,11 @@ async def kyc_session(
 
 @router.get("/status", response_model=KycSessionResponse)
 async def kyc_status(
-    user: dict = Depends(get_current_user),
+    user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Get KYC status for the authenticated user."""
-    address = user["address"]
+    address = user.address
 
     result = await db.execute(select(KycRecord).where(KycRecord.address == address))
     record = result.scalar_one_or_none()
@@ -173,7 +178,7 @@ async def kyc_status(
 @router.post("/check", response_model=KycCheckResponse)
 async def kyc_check(
     req: KycCheckRequest,
-    user: dict = Depends(get_current_user),
+    user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Check if KYC is required based on notional amount and jurisdiction.
@@ -183,7 +188,7 @@ async def kyc_check(
     - Operator JWT cannot bypass fiat KYC
     - Returns allowed=True if KYC status is 'pass' or 'not_required'
     """
-    address = user["address"]
+    address = user.address
 
     # Get KYC record
     result = await db.execute(select(KycRecord).where(KycRecord.address == address))

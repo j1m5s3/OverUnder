@@ -4,6 +4,7 @@ import json
 import os
 import pytest
 from datetime import datetime, timedelta
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from app.config import get_settings
@@ -18,7 +19,7 @@ async def test_moonpay_session_enforces_kyc_gate_pending_over_threshold():
     from sqlalchemy.ext.asyncio import AsyncSession
 
     # Mock dependencies
-    mock_user = {"address": "0x1234567890123456789012345678901234567890"}
+    mock_user = SimpleNamespace(address="0x1234567890123456789012345678901234567890")
     mock_db = AsyncMock(spec=AsyncSession)
 
     # Mock KYC record with pending status
@@ -36,7 +37,7 @@ async def test_moonpay_session_enforces_kyc_gate_pending_over_threshold():
     async def mock_execute(query):
         result = MagicMock()
         # First call returns KYC record
-        if "KycRecord" in str(query):
+        if "kyc_records" in str(query):
             result.scalar_one_or_none = MagicMock(return_value=kyc_record)
         # Second call returns recent transactions
         else:
@@ -49,7 +50,11 @@ async def test_moonpay_session_enforces_kyc_gate_pending_over_threshold():
     req = MoonPaySessionRequest(usdc_amount="300")
 
     # Mock settings
-    with patch("app.kyc.router.settings") as mock_settings:
+    with patch("app.kyc.router.settings") as mock_settings, patch(
+        "app.ramps.router.settings"
+    ) as mock_ramps_settings:
+        mock_ramps_settings.moonpay_api_key = "test_key"
+        mock_ramps_settings.moonpay_secret = "test_secret"
         mock_settings.kyc_threshold_usdc = 500.0
         mock_settings.kyc_restricted_jurisdictions = ""
 
@@ -71,7 +76,7 @@ async def test_moonpay_session_allows_kyc_pass():
     from sqlalchemy.ext.asyncio import AsyncSession
 
     # Mock dependencies
-    mock_user = {"address": "0x1234567890123456789012345678901234567890"}
+    mock_user = SimpleNamespace(address="0x1234567890123456789012345678901234567890")
     mock_db = AsyncMock(spec=AsyncSession)
 
     # Mock KYC record with pass status
@@ -88,7 +93,7 @@ async def test_moonpay_session_allows_kyc_pass():
     # Mock DB queries
     async def mock_execute(query):
         result = MagicMock()
-        if "KycRecord" in str(query):
+        if "kyc_records" in str(query):
             result.scalar_one_or_none = MagicMock(return_value=kyc_record)
         else:
             result.scalars = MagicMock(return_value=MagicMock(all=MagicMock(return_value=[tx1])))
@@ -121,7 +126,7 @@ async def test_moonpay_session_allows_below_threshold():
     from sqlalchemy.ext.asyncio import AsyncSession
 
     # Mock dependencies
-    mock_user = {"address": "0x1234567890123456789012345678901234567890"}
+    mock_user = SimpleNamespace(address="0x1234567890123456789012345678901234567890")
     mock_db = AsyncMock(spec=AsyncSession)
 
     # No KYC record
@@ -130,7 +135,7 @@ async def test_moonpay_session_allows_below_threshold():
     # Mock DB queries
     async def mock_execute(query):
         result = MagicMock()
-        if "KycRecord" in str(query):
+        if "kyc_records" in str(query):
             result.scalar_one_or_none = MagicMock(return_value=None)
         else:
             result.scalars = MagicMock(return_value=MagicMock(all=MagicMock(return_value=[])))
@@ -163,7 +168,7 @@ async def test_moonpay_session_enforces_restricted_jurisdiction():
     from sqlalchemy.ext.asyncio import AsyncSession
 
     # Mock dependencies
-    mock_user = {"address": "0x1234567890123456789012345678901234567890"}
+    mock_user = SimpleNamespace(address="0x1234567890123456789012345678901234567890")
     mock_db = AsyncMock(spec=AsyncSession)
 
     # Mock KYC record with restricted jurisdiction and pending status
@@ -174,7 +179,7 @@ async def test_moonpay_session_enforces_restricted_jurisdiction():
     # Mock DB queries
     async def mock_execute(query):
         result = MagicMock()
-        if "KycRecord" in str(query):
+        if "kyc_records" in str(query):
             result.scalar_one_or_none = MagicMock(return_value=kyc_record)
         else:
             result.scalars = MagicMock(return_value=MagicMock(all=MagicMock(return_value=[])))
@@ -186,7 +191,11 @@ async def test_moonpay_session_enforces_restricted_jurisdiction():
     req = MoonPaySessionRequest(usdc_amount="50")
 
     # Mock settings with US as restricted
-    with patch("app.kyc.router.settings") as mock_settings:
+    with patch("app.kyc.router.settings") as mock_settings, patch(
+        "app.ramps.router.settings"
+    ) as mock_ramps_settings:
+        mock_ramps_settings.moonpay_api_key = "test_key"
+        mock_ramps_settings.moonpay_secret = "test_secret"
         mock_settings.kyc_threshold_usdc = 500.0
         mock_settings.kyc_restricted_jurisdictions = "US,CN"
 

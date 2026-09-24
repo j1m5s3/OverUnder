@@ -2,39 +2,1766 @@
   "openapi": "3.1.0",
   "info": { "title": "OverUnder API", "version": "0.1.0" },
   "paths": {
-    "/health": { "get": { "responses": { "200": { "description": "ok" } } } },
-    "/api/v1/auth/nonce/{address}": { "get": { "responses": { "200": { "description": "nonce" } } } },
-    "/api/v1/auth/siwe": { "post": { "responses": { "200": { "description": "jwt" } } } },
-    "/api/v1/auth/cdp": { "post": { "responses": { "200": { "description": "jwt from CDP access token" } } } },
-    "/api/v1/auth/cdp/email": { "post": { "responses": { "200": { "description": "flowId" } } } },
-    "/api/v1/auth/cdp/verify": { "post": { "responses": { "200": { "description": "jwt" } } } },
+    "/api/v1/auth/nonce/{address}": {
+      "get": {
+        "tags": ["auth"],
+        "summary": "Nonce",
+        "operationId": "nonce_api_v1_auth_nonce__address__get",
+        "parameters": [
+          { "name": "address", "in": "path", "required": true, "schema": { "type": "string", "title": "Address" } }
+        ],
+        "responses": {
+          "200": { "description": "Successful Response", "content": { "application/json": { "schema": {} } } },
+          "422": {
+            "description": "Validation Error",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } } }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/siwe": {
+      "post": {
+        "tags": ["auth"],
+        "summary": "Siwe",
+        "operationId": "siwe_api_v1_auth_siwe_post",
+        "requestBody": {
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SiweVerify" } } },
+          "required": true
+        },
+        "responses": {
+          "200": { "description": "Successful Response", "content": { "application/json": { "schema": {} } } },
+          "422": {
+            "description": "Validation Error",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } } }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/cdp": {
+      "post": {
+        "tags": ["auth"],
+        "summary": "Cdp Session",
+        "operationId": "cdp_session_api_v1_auth_cdp_post",
+        "requestBody": {
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CdpAccessToken" } } },
+          "required": true
+        },
+        "responses": {
+          "200": { "description": "Successful Response", "content": { "application/json": { "schema": {} } } },
+          "422": {
+            "description": "Validation Error",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } } }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/cdp/email": {
+      "post": {
+        "tags": ["auth"],
+        "summary": "Cdp Email",
+        "operationId": "cdp_email_api_v1_auth_cdp_email_post",
+        "requestBody": {
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CdpEmailStart" } } },
+          "required": true
+        },
+        "responses": {
+          "200": { "description": "Successful Response", "content": { "application/json": { "schema": {} } } },
+          "422": {
+            "description": "Validation Error",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } } }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/cdp/verify": {
+      "post": {
+        "tags": ["auth"],
+        "summary": "Cdp Verify",
+        "operationId": "cdp_verify_api_v1_auth_cdp_verify_post",
+        "requestBody": {
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CdpEmailVerify" } } },
+          "required": true
+        },
+        "responses": {
+          "200": { "description": "Successful Response", "content": { "application/json": { "schema": {} } } },
+          "422": {
+            "description": "Validation Error",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } } }
+          }
+        }
+      }
+    },
+    "/api/v1/chain/addresses": {
+      "get": {
+        "tags": ["chain"],
+        "summary": "Chain Addresses",
+        "operationId": "chain_addresses_api_v1_chain_addresses_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ChainAddresses" } } }
+          }
+        }
+      }
+    },
+    "/api/v1/markets/listing/config": {
+      "get": {
+        "tags": ["listing"],
+        "summary": "Listing Config",
+        "operationId": "listing_config_api_v1_markets_listing_config_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ListingConfigPublic" } } }
+          }
+        }
+      }
+    },
+    "/api/v1/markets/listing/eligibility": {
+      "get": {
+        "tags": ["listing"],
+        "summary": "Listing Eligibility",
+        "operationId": "listing_eligibility_api_v1_markets_listing_eligibility_get",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": { "anyOf": [{ "type": "string" }, { "type": "null" }], "title": "Authorization" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/EligibilityPublic" } } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } } }
+          }
+        }
+      }
+    },
+    "/api/v1/markets/listing/prepare": {
+      "post": {
+        "tags": ["listing"],
+        "summary": "Listing Prepare",
+        "operationId": "listing_prepare_api_v1_markets_listing_prepare_post",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": { "anyOf": [{ "type": "string" }, { "type": "null" }], "title": "Authorization" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ListingPrepareIn" } } }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ListingPreparePublic" } } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } } }
+          }
+        }
+      }
+    },
+    "/api/v1/markets/listing/confirm": {
+      "post": {
+        "tags": ["listing"],
+        "summary": "Listing Confirm",
+        "operationId": "listing_confirm_api_v1_markets_listing_confirm_post",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": { "anyOf": [{ "type": "string" }, { "type": "null" }], "title": "Authorization" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ListingConfirmIn" } } }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/MarketPublic" } } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } } }
+          }
+        }
+      }
+    },
+    "/api/v1/markets/listing/review": {
+      "get": {
+        "tags": ["listing"],
+        "summary": "Listing Review",
+        "description": "Operator view of type-2 markets that exist but are not public (indexed, prepared or rejected).\n\nThey are hidden from GET /markets, so the general resolver never sees them,\nyet they stay tradable directly on the AMM: the operator factory-pauses them\n(POST /markets/{id}/pause) and arbitrates.",
+        "operationId": "listing_review_api_v1_markets_listing_review_get",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": { "anyOf": [{ "type": "string" }, { "type": "null" }], "title": "Authorization" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": { "$ref": "#/components/schemas/ListingReviewPublic" },
+                  "title": "Response Listing Review Api V1 Markets Listing Review Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } } }
+          }
+        }
+      }
+    },
     "/api/v1/markets": {
       "get": {
-        "parameters": [{ "name": "parentId", "in": "query", "schema": { "type": "string" } }],
-        "responses": { "200": { "description": "EventCard[] of primaries with nested children; orphan wildcards listed alone; parentId returns flat MarketPublic[]" } }
+        "tags": ["markets"],
+        "summary": "List Markets",
+        "operationId": "list_markets_api_v1_markets_get",
+        "parameters": [
+          {
+            "name": "parentId",
+            "in": "query",
+            "required": false,
+            "schema": { "anyOf": [{ "type": "string" }, { "type": "null" }], "title": "Parentid" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    { "type": "array", "items": { "$ref": "#/components/schemas/EventCard" } },
+                    { "type": "array", "items": { "$ref": "#/components/schemas/MarketPublic" } }
+                  ],
+                  "title": "Response List Markets Api V1 Markets Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } } }
+          }
+        }
       },
-      "post": { "responses": { "200": { "description": "created" } } }
+      "post": {
+        "tags": ["markets"],
+        "summary": "Create Market",
+        "operationId": "create_market_api_v1_markets_post",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": { "anyOf": [{ "type": "string" }, { "type": "null" }], "title": "Authorization" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CreateMarketIn" } } }
+        },
+        "responses": {
+          "200": { "description": "Successful Response", "content": { "application/json": { "schema": {} } } },
+          "422": {
+            "description": "Validation Error",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } } }
+          }
+        }
+      }
     },
     "/api/v1/markets/schedule": {
-      "get": { "responses": { "200": { "description": "NflScheduleGame[]" } } },
-      "post": { "responses": { "200": { "description": "upserted schedule" } } }
+      "get": {
+        "tags": ["markets"],
+        "summary": "Get Schedule",
+        "operationId": "get_schedule_api_v1_markets_schedule_get",
+        "parameters": [
+          {
+            "name": "season",
+            "in": "query",
+            "required": false,
+            "schema": { "anyOf": [{ "type": "integer" }, { "type": "null" }], "title": "Season" }
+          },
+          {
+            "name": "week",
+            "in": "query",
+            "required": false,
+            "schema": { "anyOf": [{ "type": "integer" }, { "type": "null" }], "title": "Week" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": { "$ref": "#/components/schemas/ScheduleGamePublic" },
+                  "title": "Response Get Schedule Api V1 Markets Schedule Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } } }
+          }
+        }
+      },
+      "post": {
+        "tags": ["markets"],
+        "summary": "Upsert Schedule",
+        "operationId": "upsert_schedule_api_v1_markets_schedule_post",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": { "anyOf": [{ "type": "string" }, { "type": "null" }], "title": "Authorization" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "array",
+                "items": { "$ref": "#/components/schemas/ScheduleGameIn" },
+                "title": "Games"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": { "$ref": "#/components/schemas/ScheduleGamePublic" },
+                  "title": "Response Upsert Schedule Api V1 Markets Schedule Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } } }
+          }
+        }
+      }
     },
-    "/api/v1/markets/{condition_id}": { "get": { "responses": { "200": { "description": "MarketDetail with children[]" } } } },
-    "/api/v1/markets/{condition_id}/pause": { "post": { "responses": { "200": { "description": "paused" } } } },
-    "/api/v1/orders": { "post": { "responses": { "200": { "description": "posted" } } } },
-    "/api/v1/orders/{order_hash}": { "delete": { "responses": { "200": { "description": "cancelled" } } } },
-    "/api/v1/orderbook/{condition_id}": { "get": { "responses": { "200": { "description": "book" } } } },
-    "/api/v1/trades/{condition_id}": { "get": { "responses": { "200": { "description": "trades" } } } },
-    "/api/v1/amm/{market_id}/quote": { "get": { "responses": { "200": { "description": "quote" } } } },
-    "/api/v1/aa/cdp-send": { "post": { "responses": { "200": { "description": "sponsored user operation" } } } },
-    "/api/v1/aa/userop": { "post": { "responses": { "410": { "description": "gone; use CDP" } } } },
-    "/api/v1/ramps/onramp-url": { "get": { "responses": { "200": { "description": "url" } } } },
-    "/api/v1/ramps/offramp-url": { "get": { "responses": { "200": { "description": "url" } } } },
-    "/api/v1/oracle/attest": { "post": { "responses": { "200": { "description": "ok" } } } },
-    "/api/v1/oracle/resolved": { "post": { "responses": { "200": { "description": "mirrored resolved" } } } },
-    "/api/v1/oracle/{market_id}/status": { "get": { "responses": { "200": { "description": "status" } } } },
-    "/api/v1/oracle/vote": { "post": { "responses": { "200": { "description": "ok" } } } },
-    "/api/v1/portfolio/{address}": { "get": { "responses": { "200": { "description": "portfolio" } } } },
-    "/api/v1/fee-vault/nav": { "get": { "responses": { "200": { "description": "nav" } } } }
+    "/api/v1/markets/{condition_id}/history": {
+      "get": {
+        "tags": ["markets"],
+        "summary": "Get Market History",
+        "operationId": "get_market_history_api_v1_markets__condition_id__history_get",
+        "parameters": [
+          {
+            "name": "condition_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Condition Id" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": { "$ref": "#/components/schemas/PricePointPublic" },
+                  "title": "Response Get Market History Api V1 Markets  Condition Id  History Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } } }
+          }
+        }
+      }
+    },
+    "/api/v1/markets/{condition_id}": {
+      "get": {
+        "tags": ["markets"],
+        "summary": "Get Market",
+        "operationId": "get_market_api_v1_markets__condition_id__get",
+        "parameters": [
+          {
+            "name": "condition_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Condition Id" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/MarketDetail" } } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } } }
+          }
+        }
+      }
+    },
+    "/api/v1/markets/{condition_id}/score": {
+      "post": {
+        "tags": ["markets"],
+        "summary": "Upsert Score",
+        "operationId": "upsert_score_api_v1_markets__condition_id__score_post",
+        "parameters": [
+          {
+            "name": "condition_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Condition Id" }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": { "anyOf": [{ "type": "string" }, { "type": "null" }], "title": "Authorization" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/LiveScoreIn" } } }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/LiveScorePublic" } } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } } }
+          }
+        }
+      }
+    },
+    "/api/v1/markets/{condition_id}/pause": {
+      "post": {
+        "tags": ["markets"],
+        "summary": "Pause Market",
+        "operationId": "pause_market_api_v1_markets__condition_id__pause_post",
+        "parameters": [
+          {
+            "name": "condition_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Condition Id" }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": { "anyOf": [{ "type": "string" }, { "type": "null" }], "title": "Authorization" }
+          }
+        ],
+        "responses": {
+          "200": { "description": "Successful Response", "content": { "application/json": { "schema": {} } } },
+          "422": {
+            "description": "Validation Error",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } } }
+          }
+        }
+      }
+    },
+    "/api/v1/markets/{condition_id}/archive": {
+      "post": {
+        "tags": ["markets"],
+        "summary": "Archive Market",
+        "description": "Hide an orphaned row created on an older deployment (DB only, no tx).\n\nAllowed only when the configured ConsensusOracle has no closeTime for the\ncondition, i.e. it can never resolve here. Registered markets must be\npaused on the factory instead (POST /markets/{id}/pause). Idempotent.",
+        "operationId": "archive_market_api_v1_markets__condition_id__archive_post",
+        "parameters": [
+          {
+            "name": "condition_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Condition Id" }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": { "anyOf": [{ "type": "string" }, { "type": "null" }], "title": "Authorization" }
+          }
+        ],
+        "responses": {
+          "200": { "description": "Successful Response", "content": { "application/json": { "schema": {} } } },
+          "422": {
+            "description": "Validation Error",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } } }
+          }
+        }
+      }
+    },
+    "/api/v1/orders": {
+      "post": {
+        "tags": ["orderbook"],
+        "summary": "Post Order",
+        "operationId": "post_order_api_v1_orders_post",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": { "anyOf": [{ "type": "string" }, { "type": "null" }], "title": "Authorization" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/OrderIn" } } }
+        },
+        "responses": {
+          "200": { "description": "Successful Response", "content": { "application/json": { "schema": {} } } },
+          "422": {
+            "description": "Validation Error",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } } }
+          }
+        }
+      }
+    },
+    "/api/v1/orders/{order_hash}": {
+      "delete": {
+        "tags": ["orderbook"],
+        "summary": "Cancel",
+        "operationId": "cancel_api_v1_orders__order_hash__delete",
+        "parameters": [
+          {
+            "name": "order_hash",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Order Hash" }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": { "anyOf": [{ "type": "string" }, { "type": "null" }], "title": "Authorization" }
+          }
+        ],
+        "responses": {
+          "200": { "description": "Successful Response", "content": { "application/json": { "schema": {} } } },
+          "422": {
+            "description": "Validation Error",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } } }
+          }
+        }
+      }
+    },
+    "/api/v1/orderbook/{condition_id}": {
+      "get": {
+        "tags": ["orderbook"],
+        "summary": "Book",
+        "operationId": "book_api_v1_orderbook__condition_id__get",
+        "parameters": [
+          {
+            "name": "condition_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Condition Id" }
+          }
+        ],
+        "responses": {
+          "200": { "description": "Successful Response", "content": { "application/json": { "schema": {} } } },
+          "422": {
+            "description": "Validation Error",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } } }
+          }
+        }
+      }
+    },
+    "/api/v1/trades/{condition_id}": {
+      "get": {
+        "tags": ["orderbook"],
+        "summary": "Trades",
+        "operationId": "trades_api_v1_trades__condition_id__get",
+        "parameters": [
+          {
+            "name": "condition_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "title": "Condition Id" }
+          }
+        ],
+        "responses": {
+          "200": { "description": "Successful Response", "content": { "application/json": { "schema": {} } } },
+          "422": {
+            "description": "Validation Error",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } } }
+          }
+        }
+      }
+    },
+    "/api/v1/relayer/jobs/{job_id}": {
+      "get": {
+        "tags": ["relayer"],
+        "summary": "Get Job",
+        "operationId": "get_job_api_v1_relayer_jobs__job_id__get",
+        "parameters": [
+          { "name": "job_id", "in": "path", "required": true, "schema": { "type": "integer", "title": "Job Id" } },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": { "anyOf": [{ "type": "string" }, { "type": "null" }], "title": "Authorization" }
+          }
+        ],
+        "responses": {
+          "200": { "description": "Successful Response", "content": { "application/json": { "schema": {} } } },
+          "422": {
+            "description": "Validation Error",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } } }
+          }
+        }
+      }
+    },
+    "/api/v1/relayer/jobs": {
+      "get": {
+        "tags": ["relayer"],
+        "summary": "List Jobs",
+        "operationId": "list_jobs_api_v1_relayer_jobs_get",
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": { "anyOf": [{ "type": "string" }, { "type": "null" }], "title": "Status" }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "integer", "maximum": 200, "minimum": 1, "default": 50, "title": "Limit" }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": { "anyOf": [{ "type": "string" }, { "type": "null" }], "title": "Authorization" }
+          }
+        ],
+        "responses": {
+          "200": { "description": "Successful Response", "content": { "application/json": { "schema": {} } } },
+          "422": {
+            "description": "Validation Error",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } } }
+          }
+        }
+      }
+    },
+    "/api/v1/relayer/status": {
+      "get": {
+        "tags": ["relayer"],
+        "summary": "Status",
+        "operationId": "status_api_v1_relayer_status_get",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": { "anyOf": [{ "type": "string" }, { "type": "null" }], "title": "Authorization" }
+          }
+        ],
+        "responses": {
+          "200": { "description": "Successful Response", "content": { "application/json": { "schema": {} } } },
+          "422": {
+            "description": "Validation Error",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } } }
+          }
+        }
+      }
+    },
+    "/api/v1/relayer/tick": {
+      "post": {
+        "tags": ["relayer"],
+        "summary": "Tick",
+        "description": "One worker pass: the manual / serverless drain when the background loop is off.",
+        "operationId": "tick_api_v1_relayer_tick_post",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": { "anyOf": [{ "type": "string" }, { "type": "null" }], "title": "Authorization" }
+          }
+        ],
+        "responses": {
+          "200": { "description": "Successful Response", "content": { "application/json": { "schema": {} } } },
+          "422": {
+            "description": "Validation Error",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } } }
+          }
+        }
+      }
+    },
+    "/api/v1/amm/{market_id}/quote": {
+      "get": {
+        "tags": ["amm"],
+        "summary": "Quote",
+        "operationId": "quote_api_v1_amm__market_id__quote_get",
+        "parameters": [
+          { "name": "market_id", "in": "path", "required": true, "schema": { "type": "string", "title": "Market Id" } },
+          {
+            "name": "buy_yes",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "boolean", "default": true, "title": "Buy Yes" }
+          },
+          {
+            "name": "usdc_in",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "exclusiveMaximum": 115792089237316195423570985008687907853269984665640564039457584007913129639936,
+              "default": 1000000,
+              "title": "Usdc In"
+            }
+          },
+          {
+            "name": "sell_yes",
+            "in": "query",
+            "required": false,
+            "schema": { "anyOf": [{ "type": "boolean" }, { "type": "null" }], "title": "Sell Yes" }
+          },
+          {
+            "name": "token_amount",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0,
+                  "exclusiveMaximum": 115792089237316195423570985008687907853269984665640564039457584007913129639936
+                },
+                { "type": "null" }
+              ],
+              "title": "Token Amount"
+            }
+          }
+        ],
+        "responses": {
+          "200": { "description": "Successful Response", "content": { "application/json": { "schema": {} } } },
+          "422": {
+            "description": "Validation Error",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } } }
+          }
+        }
+      }
+    },
+    "/api/v1/ramps/moonpay/session": {
+      "post": {
+        "tags": ["ramps"],
+        "summary": "Moonpay Session",
+        "description": "Sign MoonPay widget URL with secret for the authenticated user's address.\n\nEnforces KYC gate: returns 403 if notional ≥ threshold or restricted jurisdiction\nand KYC status not in {pass, not_required}.",
+        "operationId": "moonpay_session_api_v1_ramps_moonpay_session_post",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": { "anyOf": [{ "type": "string" }, { "type": "null" }], "title": "Authorization" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/MoonPaySessionRequest" } } }
+        },
+        "responses": {
+          "200": { "description": "Successful Response", "content": { "application/json": { "schema": {} } } },
+          "422": {
+            "description": "Validation Error",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } } }
+          }
+        }
+      }
+    },
+    "/api/v1/ramps/moonpay/webhook": {
+      "post": {
+        "tags": ["ramps"],
+        "summary": "Moonpay Webhook",
+        "description": "Verify MoonPay webhook signature and upsert RampTx.",
+        "operationId": "moonpay_webhook_api_v1_ramps_moonpay_webhook_post",
+        "responses": {
+          "200": { "description": "Successful Response", "content": { "application/json": { "schema": {} } } }
+        }
+      }
+    },
+    "/api/v1/ramps/onramp-url": {
+      "get": {
+        "tags": ["ramps"],
+        "summary": "Onramp Url",
+        "operationId": "onramp_url_api_v1_ramps_onramp_url_get",
+        "parameters": [
+          { "name": "address", "in": "query", "required": true, "schema": { "type": "string", "title": "Address" } },
+          {
+            "name": "usdc_amount",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "string", "default": "100", "title": "Usdc Amount" }
+          }
+        ],
+        "responses": {
+          "200": { "description": "Successful Response", "content": { "application/json": { "schema": {} } } },
+          "422": {
+            "description": "Validation Error",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } } }
+          }
+        }
+      }
+    },
+    "/api/v1/ramps/offramp-url": {
+      "get": {
+        "tags": ["ramps"],
+        "summary": "Offramp Url",
+        "operationId": "offramp_url_api_v1_ramps_offramp_url_get",
+        "parameters": [
+          { "name": "address", "in": "query", "required": true, "schema": { "type": "string", "title": "Address" } }
+        ],
+        "responses": {
+          "200": { "description": "Successful Response", "content": { "application/json": { "schema": {} } } },
+          "422": {
+            "description": "Validation Error",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } } }
+          }
+        }
+      }
+    },
+    "/api/v1/kyc/session": {
+      "post": {
+        "tags": ["kyc"],
+        "summary": "Kyc Session",
+        "description": "Create or update KYC session for the authenticated user.\n\nThis endpoint does NOT store government IDs or documents.\nIt only stores status enum and jurisdiction.",
+        "operationId": "kyc_session_api_v1_kyc_session_post",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": { "anyOf": [{ "type": "string" }, { "type": "null" }], "title": "Authorization" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/KycSessionRequest" } } }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/KycSessionResponse" } } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } } }
+          }
+        }
+      }
+    },
+    "/api/v1/kyc/status": {
+      "get": {
+        "tags": ["kyc"],
+        "summary": "Kyc Status",
+        "description": "Get KYC status for the authenticated user.",
+        "operationId": "kyc_status_api_v1_kyc_status_get",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": { "anyOf": [{ "type": "string" }, { "type": "null" }], "title": "Authorization" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/KycSessionResponse" } } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } } }
+          }
+        }
+      }
+    },
+    "/api/v1/kyc/check": {
+      "post": {
+        "tags": ["kyc"],
+        "summary": "Kyc Check",
+        "description": "Check if KYC is required based on notional amount and jurisdiction.\n\nGate logic:\n- notional ≥ threshold (default $500/day) OR restricted jurisdiction → require KYC\n- Operator JWT cannot bypass fiat KYC\n- Returns allowed=True if KYC status is 'pass' or 'not_required'",
+        "operationId": "kyc_check_api_v1_kyc_check_post",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": { "anyOf": [{ "type": "string" }, { "type": "null" }], "title": "Authorization" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/KycCheckRequest" } } }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/KycCheckResponse" } } }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } } }
+          }
+        }
+      }
+    },
+    "/api/v1/emissions/distribute": {
+      "post": {
+        "tags": ["emissions"],
+        "summary": "Distribute",
+        "description": "Distribute OU emissions from treasury to recipients.\n\nOperator-only. Calls EmissionsDistributor.distribute which transfers from treasury.\nNever mints. Program IDs: 0=LP, 1=maker, 2=agent, 3=quest.\nSigns with RELAYER_PRIVATE_KEY through the relayer's shared NonceManager (above the in-flight nonce\nfloor) so it never races the CLOB worker for a nonce. The contract has no idempotency key, so every\nsigned tx is recorded write-ahead: a retry of the same payload (and idempotencyKey) returns the\nrecorded distribution instead of paying twice, and an ambiguous broadcast answers 202 with its hash.",
+        "operationId": "distribute_api_v1_emissions_distribute_post",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": { "anyOf": [{ "type": "string" }, { "type": "null" }], "title": "Authorization" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/DistributeRequest" } } }
+        },
+        "responses": {
+          "200": { "description": "Successful Response", "content": { "application/json": { "schema": {} } } },
+          "422": {
+            "description": "Validation Error",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } } }
+          }
+        }
+      }
+    },
+    "/api/v1/emissions/distributions/{distribution_id}": {
+      "get": {
+        "tags": ["emissions"],
+        "summary": "Get Distribution",
+        "description": "Poll a distribution: moves sending/sent on from its receipt.",
+        "operationId": "get_distribution_api_v1_emissions_distributions__distribution_id__get",
+        "parameters": [
+          {
+            "name": "distribution_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "integer", "title": "Distribution Id" }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": { "anyOf": [{ "type": "string" }, { "type": "null" }], "title": "Authorization" }
+          }
+        ],
+        "responses": {
+          "200": { "description": "Successful Response", "content": { "application/json": { "schema": {} } } },
+          "422": {
+            "description": "Validation Error",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } } }
+          }
+        }
+      }
+    },
+    "/api/v1/oracle/attest": {
+      "post": {
+        "tags": ["oracle"],
+        "summary": "Attest",
+        "description": "Persist one agent report (the oracle job sends its operator JWT).",
+        "operationId": "attest_api_v1_oracle_attest_post",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": { "anyOf": [{ "type": "string" }, { "type": "null" }], "title": "Authorization" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AttestIn" } } }
+        },
+        "responses": {
+          "200": { "description": "Successful Response", "content": { "application/json": { "schema": {} } } },
+          "422": {
+            "description": "Validation Error",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } } }
+          }
+        }
+      }
+    },
+    "/api/v1/oracle/resolved": {
+      "post": {
+        "tags": ["oracle"],
+        "summary": "Mark Resolved",
+        "operationId": "mark_resolved_api_v1_oracle_resolved_post",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": { "anyOf": [{ "type": "string" }, { "type": "null" }], "title": "Authorization" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ResolvedIn" } } }
+        },
+        "responses": {
+          "200": { "description": "Successful Response", "content": { "application/json": { "schema": {} } } },
+          "422": {
+            "description": "Validation Error",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } } }
+          }
+        }
+      }
+    },
+    "/api/v1/oracle/{market_id}/status": {
+      "get": {
+        "tags": ["oracle"],
+        "summary": "Status",
+        "operationId": "status_api_v1_oracle__market_id__status_get",
+        "parameters": [
+          { "name": "market_id", "in": "path", "required": true, "schema": { "type": "string", "title": "Market Id" } }
+        ],
+        "responses": {
+          "200": { "description": "Successful Response", "content": { "application/json": { "schema": {} } } },
+          "422": {
+            "description": "Validation Error",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } } }
+          }
+        }
+      }
+    },
+    "/api/v1/oracle/vote": {
+      "post": {
+        "tags": ["oracle"],
+        "summary": "Vote",
+        "description": "One vote per holder per market. voter = the caller; weight = their CTF YES+NO balance.",
+        "operationId": "vote_api_v1_oracle_vote_post",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": { "anyOf": [{ "type": "string" }, { "type": "null" }], "title": "Authorization" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/VoteIn" } } }
+        },
+        "responses": {
+          "200": { "description": "Successful Response", "content": { "application/json": { "schema": {} } } },
+          "422": {
+            "description": "Validation Error",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } } }
+          }
+        }
+      }
+    },
+    "/api/v1/portfolio/{address}": {
+      "get": {
+        "tags": ["portfolio"],
+        "summary": "Portfolio",
+        "operationId": "portfolio_api_v1_portfolio__address__get",
+        "parameters": [
+          { "name": "address", "in": "path", "required": true, "schema": { "type": "string", "title": "Address" } }
+        ],
+        "responses": {
+          "200": { "description": "Successful Response", "content": { "application/json": { "schema": {} } } },
+          "422": {
+            "description": "Validation Error",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } } }
+          }
+        }
+      }
+    },
+    "/api/v1/fee-vault/nav": {
+      "get": {
+        "tags": ["portfolio"],
+        "summary": "Nav",
+        "operationId": "nav_api_v1_fee_vault_nav_get",
+        "responses": {
+          "200": { "description": "Successful Response", "content": { "application/json": { "schema": {} } } }
+        }
+      }
+    },
+    "/api/v1/aa/userop": {
+      "post": {
+        "tags": ["aa"],
+        "summary": "Sponsor Userop",
+        "operationId": "sponsor_userop_api_v1_aa_userop_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [{ "$ref": "#/components/schemas/UserOpRequest" }, { "type": "null" }],
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Successful Response", "content": { "application/json": { "schema": {} } } },
+          "422": {
+            "description": "Validation Error",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } } }
+          }
+        }
+      }
+    },
+    "/api/v1/aa/cdp-send": {
+      "post": {
+        "tags": ["aa"],
+        "summary": "Cdp Send",
+        "operationId": "cdp_send_api_v1_aa_cdp_send_post",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": { "anyOf": [{ "type": "string" }, { "type": "null" }], "title": "Authorization" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CdpSendRequest" } } }
+        },
+        "responses": {
+          "200": { "description": "Successful Response", "content": { "application/json": { "schema": {} } } },
+          "422": {
+            "description": "Validation Error",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } } }
+          }
+        }
+      }
+    },
+    "/health": {
+      "get": {
+        "summary": "Health",
+        "operationId": "health_health_get",
+        "responses": {
+          "200": { "description": "Successful Response", "content": { "application/json": { "schema": {} } } }
+        }
+      }
+    },
+    "/openapi-export": {
+      "get": {
+        "summary": "Openapi Export",
+        "operationId": "openapi_export_openapi_export_get",
+        "responses": {
+          "200": { "description": "Successful Response", "content": { "application/json": { "schema": {} } } }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "AttestIn": {
+        "properties": {
+          "conditionId": { "type": "string", "maxLength": 66, "title": "Conditionid" },
+          "agent": { "type": "string", "maxLength": 42, "title": "Agent" },
+          "outcome": { "type": "integer", "maximum": 255.0, "minimum": 0.0, "title": "Outcome" },
+          "evidenceHash": { "type": "string", "maxLength": 66, "title": "Evidencehash" },
+          "summary": { "type": "string", "title": "Summary", "default": "" },
+          "evidenceJson": { "type": "string", "title": "Evidencejson", "default": "[]" },
+          "signature": { "type": "string", "title": "Signature", "default": "" }
+        },
+        "type": "object",
+        "required": ["conditionId", "agent", "outcome", "evidenceHash"],
+        "title": "AttestIn"
+      },
+      "CdpAccessToken": {
+        "properties": {
+          "accessToken": { "type": "string", "title": "Accesstoken" },
+          "address": { "anyOf": [{ "type": "string" }, { "type": "null" }], "title": "Address" }
+        },
+        "type": "object",
+        "required": ["accessToken"],
+        "title": "CdpAccessToken"
+      },
+      "CdpCall": {
+        "properties": {
+          "to": { "type": "string", "title": "To" },
+          "data": { "type": "string", "title": "Data" },
+          "value": { "anyOf": [{ "type": "integer" }, { "type": "string" }], "title": "Value", "default": 0 }
+        },
+        "type": "object",
+        "required": ["to", "data"],
+        "title": "CdpCall"
+      },
+      "CdpEmailStart": {
+        "properties": { "email": { "type": "string", "title": "Email" } },
+        "type": "object",
+        "required": ["email"],
+        "title": "CdpEmailStart"
+      },
+      "CdpEmailVerify": {
+        "properties": {
+          "flowId": { "type": "string", "title": "Flowid" },
+          "otp": { "type": "string", "title": "Otp" },
+          "address": { "anyOf": [{ "type": "string" }, { "type": "null" }], "title": "Address" }
+        },
+        "type": "object",
+        "required": ["flowId", "otp"],
+        "title": "CdpEmailVerify"
+      },
+      "CdpSendRequest": {
+        "properties": {
+          "calls": { "items": { "$ref": "#/components/schemas/CdpCall" }, "type": "array", "title": "Calls" },
+          "address": { "anyOf": [{ "type": "string" }, { "type": "null" }], "title": "Address" }
+        },
+        "type": "object",
+        "required": ["calls"],
+        "title": "CdpSendRequest"
+      },
+      "ChainAddresses": {
+        "properties": {
+          "chainId": { "type": "integer", "title": "Chainid" },
+          "MockUSDC": { "anyOf": [{ "type": "string" }, { "type": "null" }], "title": "Mockusdc" },
+          "ConditionalTokens": { "anyOf": [{ "type": "string" }, { "type": "null" }], "title": "Conditionaltokens" },
+          "MarketAMM": { "anyOf": [{ "type": "string" }, { "type": "null" }], "title": "Marketamm" },
+          "MarketFactory": { "anyOf": [{ "type": "string" }, { "type": "null" }], "title": "Marketfactory" },
+          "ConsensusOracle": { "anyOf": [{ "type": "string" }, { "type": "null" }], "title": "Consensusoracle" },
+          "FeeVault": { "anyOf": [{ "type": "string" }, { "type": "null" }], "title": "Feevault" },
+          "Exchange": { "anyOf": [{ "type": "string" }, { "type": "null" }], "title": "Exchange" }
+        },
+        "type": "object",
+        "required": ["chainId"],
+        "title": "ChainAddresses"
+      },
+      "CreateMarketIn": {
+        "properties": {
+          "question": { "type": "string", "maxLength": 512, "title": "Question" },
+          "resolution_criteria": { "type": "string", "title": "Resolution Criteria", "default": "" },
+          "close_time": { "type": "integer", "maximum": 2147483647.0, "minimum": 0.0, "title": "Close Time" },
+          "question_id": { "type": "string", "title": "Question Id", "description": "bytes32 hex" },
+          "parent_condition_id": { "type": "string", "title": "Parent Condition Id", "default": "" },
+          "seed_usdc": {
+            "type": "integer",
+            "exclusiveMaximum": 1.157920892373162e+77,
+            "minimum": 0.0,
+            "title": "Seed Usdc",
+            "default": 0
+          },
+          "market_type": { "type": "integer", "title": "Market Type", "default": 0 },
+          "suggested_probability": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Suggested Probability",
+            "default": 0.5
+          }
+        },
+        "type": "object",
+        "required": ["question", "close_time", "question_id"],
+        "title": "CreateMarketIn"
+      },
+      "DistributeRequest": {
+        "properties": {
+          "program": { "type": "integer", "title": "Program" },
+          "recipients": {
+            "items": { "$ref": "#/components/schemas/Recipient" },
+            "type": "array",
+            "title": "Recipients"
+          },
+          "idempotencyKey": { "type": "string", "title": "Idempotencykey", "default": "" }
+        },
+        "type": "object",
+        "required": ["program", "recipients"],
+        "title": "DistributeRequest"
+      },
+      "EligibilityPublic": {
+        "properties": {
+          "enabled": { "type": "boolean", "title": "Enabled" },
+          "allowed": { "type": "boolean", "title": "Allowed" },
+          "permissionless": { "type": "boolean", "title": "Permissionless", "default": false },
+          "cooldownRemaining": { "type": "integer", "title": "Cooldownremaining", "default": 0 },
+          "pending": { "type": "integer", "title": "Pending", "default": 0 },
+          "maxPending": { "type": "integer", "title": "Maxpending", "default": 5 },
+          "reason": { "anyOf": [{ "type": "string" }, { "type": "null" }], "title": "Reason" }
+        },
+        "type": "object",
+        "required": ["enabled", "allowed"],
+        "title": "EligibilityPublic"
+      },
+      "EventCard": {
+        "properties": {
+          "primary": { "$ref": "#/components/schemas/MarketPublic" },
+          "children": {
+            "items": { "$ref": "#/components/schemas/MarketPublic" },
+            "type": "array",
+            "title": "Children"
+          }
+        },
+        "type": "object",
+        "required": ["primary", "children"],
+        "title": "EventCard"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": { "items": { "$ref": "#/components/schemas/ValidationError" }, "type": "array", "title": "Detail" }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "KycCheckRequest": {
+        "properties": { "notional_usdc": { "type": "number", "exclusiveMinimum": 0.0, "title": "Notional Usdc" } },
+        "type": "object",
+        "required": ["notional_usdc"],
+        "title": "KycCheckRequest"
+      },
+      "KycCheckResponse": {
+        "properties": {
+          "allowed": { "type": "boolean", "title": "Allowed" },
+          "reason": { "type": "string", "title": "Reason", "default": "" },
+          "kyc_status": { "type": "string", "title": "Kyc Status", "default": "" }
+        },
+        "type": "object",
+        "required": ["allowed"],
+        "title": "KycCheckResponse"
+      },
+      "KycSessionRequest": {
+        "properties": { "jurisdiction": { "type": "string", "title": "Jurisdiction", "default": "" } },
+        "type": "object",
+        "title": "KycSessionRequest"
+      },
+      "KycSessionResponse": {
+        "properties": {
+          "status": { "type": "string", "title": "Status" },
+          "jurisdiction": { "type": "string", "title": "Jurisdiction" },
+          "updated_at": { "type": "string", "title": "Updated At" }
+        },
+        "type": "object",
+        "required": ["status", "jurisdiction", "updated_at"],
+        "title": "KycSessionResponse"
+      },
+      "ListingCall": {
+        "properties": {
+          "to": { "type": "string", "title": "To" },
+          "data": { "type": "string", "title": "Data" },
+          "value": { "type": "integer", "title": "Value", "default": 0 }
+        },
+        "type": "object",
+        "required": ["to", "data"],
+        "title": "ListingCall"
+      },
+      "ListingConfigPublic": {
+        "properties": {
+          "enabled": { "type": "boolean", "title": "Enabled" },
+          "permissionless": { "type": "boolean", "title": "Permissionless", "default": false },
+          "factory": { "anyOf": [{ "type": "string" }, { "type": "null" }], "title": "Factory" },
+          "usdc": { "anyOf": [{ "type": "string" }, { "type": "null" }], "title": "Usdc" },
+          "oracle": { "anyOf": [{ "type": "string" }, { "type": "null" }], "title": "Oracle" },
+          "chainId": { "type": "integer", "title": "Chainid" },
+          "minSeedUsdc": { "type": "integer", "title": "Minseedusdc", "default": 0 },
+          "listingFeeUsdc": { "type": "integer", "title": "Listingfeeusdc", "default": 0 },
+          "minLeadSeconds": { "type": "integer", "title": "Minleadseconds", "default": 0 },
+          "maxHorizonSeconds": { "type": "integer", "title": "Maxhorizonseconds", "default": 0 },
+          "cooldownSeconds": { "type": "integer", "title": "Cooldownseconds", "default": 0 },
+          "reason": { "anyOf": [{ "type": "string" }, { "type": "null" }], "title": "Reason" }
+        },
+        "type": "object",
+        "required": ["enabled", "chainId"],
+        "title": "ListingConfigPublic"
+      },
+      "ListingConfirmIn": {
+        "properties": {
+          "conditionId": { "type": "string", "title": "Conditionid" },
+          "resolutionCriteria": {
+            "anyOf": [{ "type": "string", "maxLength": 8192 }, { "type": "null" }],
+            "title": "Resolutioncriteria"
+          }
+        },
+        "type": "object",
+        "required": ["conditionId"],
+        "title": "ListingConfirmIn"
+      },
+      "ListingPrepareIn": {
+        "properties": {
+          "question": { "type": "string", "maxLength": 1024, "title": "Question" },
+          "resolutionCriteria": { "type": "string", "maxLength": 8192, "title": "Resolutioncriteria" },
+          "closeTime": {
+            "type": "integer",
+            "exclusiveMaximum": 1.8446744073709552e+19,
+            "minimum": 0.0,
+            "title": "Closetime"
+          },
+          "seedUsdc": {
+            "type": "integer",
+            "exclusiveMaximum": 9.223372036854776e+18,
+            "minimum": 0.0,
+            "title": "Seedusdc",
+            "description": "USDC base units (6 decimals)"
+          }
+        },
+        "type": "object",
+        "required": ["question", "resolutionCriteria", "closeTime", "seedUsdc"],
+        "title": "ListingPrepareIn"
+      },
+      "ListingPreparePublic": {
+        "properties": {
+          "conditionId": { "type": "string", "title": "Conditionid" },
+          "questionId": { "type": "string", "title": "Questionid" },
+          "salt": { "type": "string", "title": "Salt" },
+          "criteriaHash": { "type": "string", "title": "Criteriahash" },
+          "seedUsdc": { "type": "integer", "title": "Seedusdc" },
+          "listingFeeUsdc": { "type": "integer", "title": "Listingfeeusdc" },
+          "approveAmount": { "type": "integer", "title": "Approveamount" },
+          "calls": { "items": { "$ref": "#/components/schemas/ListingCall" }, "type": "array", "title": "Calls" }
+        },
+        "type": "object",
+        "required": [
+          "conditionId",
+          "questionId",
+          "salt",
+          "criteriaHash",
+          "seedUsdc",
+          "listingFeeUsdc",
+          "approveAmount",
+          "calls"
+        ],
+        "title": "ListingPreparePublic"
+      },
+      "ListingPublic": {
+        "properties": {
+          "creator": { "type": "string", "title": "Creator" },
+          "status": { "type": "string", "title": "Status" },
+          "seedUsdc": { "type": "integer", "title": "Seedusdc" },
+          "criteriaHash": { "type": "string", "title": "Criteriahash" }
+        },
+        "type": "object",
+        "required": ["creator", "status", "seedUsdc", "criteriaHash"],
+        "title": "ListingPublic"
+      },
+      "ListingReviewPublic": {
+        "properties": {
+          "conditionId": { "type": "string", "title": "Conditionid" },
+          "creator": { "type": "string", "title": "Creator" },
+          "status": { "type": "string", "title": "Status" },
+          "reason": { "type": "string", "title": "Reason", "default": "" },
+          "question": { "type": "string", "title": "Question" },
+          "closeTime": { "type": "integer", "title": "Closetime" },
+          "paused": { "type": "boolean", "title": "Paused" },
+          "resolved": { "type": "boolean", "title": "Resolved" },
+          "marketType": { "type": "integer", "title": "Markettype", "default": 2 }
+        },
+        "type": "object",
+        "required": ["conditionId", "creator", "status", "question", "closeTime", "paused", "resolved"],
+        "title": "ListingReviewPublic"
+      },
+      "LiveScoreIn": {
+        "properties": {
+          "homeLabel": { "type": "string", "maxLength": 128, "minLength": 1, "title": "Homelabel" },
+          "awayLabel": { "type": "string", "maxLength": 128, "minLength": 1, "title": "Awaylabel" },
+          "homeScore": {
+            "anyOf": [{ "type": "integer", "maximum": 2147483647.0, "minimum": 0.0 }, { "type": "null" }],
+            "title": "Homescore"
+          },
+          "awayScore": {
+            "anyOf": [{ "type": "integer", "maximum": 2147483647.0, "minimum": 0.0 }, { "type": "null" }],
+            "title": "Awayscore"
+          },
+          "status": {
+            "type": "string",
+            "enum": ["scheduled", "in_progress", "final", "postponed", "cancelled"],
+            "title": "Status",
+            "default": "scheduled"
+          },
+          "periodLabel": {
+            "anyOf": [{ "type": "string", "maxLength": 16 }, { "type": "null" }],
+            "title": "Periodlabel"
+          },
+          "facts": {
+            "anyOf": [{ "additionalProperties": true, "type": "object" }, { "type": "null" }],
+            "title": "Facts"
+          }
+        },
+        "type": "object",
+        "required": ["homeLabel", "awayLabel"],
+        "title": "LiveScoreIn"
+      },
+      "LiveScorePublic": {
+        "properties": {
+          "homeLabel": { "type": "string", "maxLength": 128, "minLength": 1, "title": "Homelabel" },
+          "awayLabel": { "type": "string", "maxLength": 128, "minLength": 1, "title": "Awaylabel" },
+          "homeScore": {
+            "anyOf": [{ "type": "integer", "maximum": 2147483647.0, "minimum": 0.0 }, { "type": "null" }],
+            "title": "Homescore"
+          },
+          "awayScore": {
+            "anyOf": [{ "type": "integer", "maximum": 2147483647.0, "minimum": 0.0 }, { "type": "null" }],
+            "title": "Awayscore"
+          },
+          "status": {
+            "type": "string",
+            "enum": ["scheduled", "in_progress", "final", "postponed", "cancelled"],
+            "title": "Status",
+            "default": "scheduled"
+          },
+          "periodLabel": {
+            "anyOf": [{ "type": "string", "maxLength": 16 }, { "type": "null" }],
+            "title": "Periodlabel"
+          },
+          "facts": {
+            "anyOf": [{ "additionalProperties": true, "type": "object" }, { "type": "null" }],
+            "title": "Facts"
+          },
+          "conditionId": { "type": "string", "title": "Conditionid" },
+          "updatedAt": { "type": "string", "format": "date-time", "title": "Updatedat" }
+        },
+        "type": "object",
+        "required": ["homeLabel", "awayLabel", "conditionId", "updatedAt"],
+        "title": "LiveScorePublic"
+      },
+      "MarketDetail": {
+        "properties": {
+          "conditionId": { "type": "string", "title": "Conditionid" },
+          "parentConditionId": { "anyOf": [{ "type": "string" }, { "type": "null" }], "title": "Parentconditionid" },
+          "question": { "type": "string", "title": "Question" },
+          "resolutionCriteria": { "type": "string", "title": "Resolutioncriteria", "default": "" },
+          "marketType": { "type": "integer", "title": "Markettype" },
+          "closeTime": { "type": "integer", "title": "Closetime" },
+          "paused": { "type": "boolean", "title": "Paused" },
+          "resolved": { "type": "boolean", "title": "Resolved" },
+          "payoutYes": { "type": "integer", "title": "Payoutyes", "default": 0 },
+          "payoutNo": { "type": "integer", "title": "Payoutno", "default": 0 },
+          "suggestedProbability": { "type": "number", "title": "Suggestedprobability", "default": 0.5 },
+          "tradingHaltsAt": { "anyOf": [{ "type": "integer" }, { "type": "null" }], "title": "Tradinghaltsat" },
+          "tradingOpen": { "type": "boolean", "title": "Tradingopen", "default": true },
+          "yesPriceMicros": { "anyOf": [{ "type": "integer" }, { "type": "null" }], "title": "Yespricemicros" },
+          "children": {
+            "items": { "$ref": "#/components/schemas/MarketPublic" },
+            "type": "array",
+            "title": "Children"
+          },
+          "score": { "anyOf": [{ "$ref": "#/components/schemas/LiveScorePublic" }, { "type": "null" }] },
+          "facts": {
+            "anyOf": [{ "additionalProperties": true, "type": "object" }, { "type": "null" }],
+            "title": "Facts"
+          },
+          "creator": { "anyOf": [{ "type": "string" }, { "type": "null" }], "title": "Creator" },
+          "listing": { "anyOf": [{ "$ref": "#/components/schemas/ListingPublic" }, { "type": "null" }] }
+        },
+        "type": "object",
+        "required": ["conditionId", "question", "marketType", "closeTime", "paused", "resolved", "children"],
+        "title": "MarketDetail"
+      },
+      "MarketPublic": {
+        "properties": {
+          "conditionId": { "type": "string", "title": "Conditionid" },
+          "parentConditionId": { "anyOf": [{ "type": "string" }, { "type": "null" }], "title": "Parentconditionid" },
+          "question": { "type": "string", "title": "Question" },
+          "resolutionCriteria": { "type": "string", "title": "Resolutioncriteria", "default": "" },
+          "marketType": { "type": "integer", "title": "Markettype" },
+          "closeTime": { "type": "integer", "title": "Closetime" },
+          "paused": { "type": "boolean", "title": "Paused" },
+          "resolved": { "type": "boolean", "title": "Resolved" },
+          "payoutYes": { "type": "integer", "title": "Payoutyes", "default": 0 },
+          "payoutNo": { "type": "integer", "title": "Payoutno", "default": 0 },
+          "suggestedProbability": { "type": "number", "title": "Suggestedprobability", "default": 0.5 },
+          "tradingHaltsAt": { "anyOf": [{ "type": "integer" }, { "type": "null" }], "title": "Tradinghaltsat" },
+          "tradingOpen": { "type": "boolean", "title": "Tradingopen", "default": true },
+          "yesPriceMicros": { "anyOf": [{ "type": "integer" }, { "type": "null" }], "title": "Yespricemicros" }
+        },
+        "type": "object",
+        "required": ["conditionId", "question", "marketType", "closeTime", "paused", "resolved"],
+        "title": "MarketPublic"
+      },
+      "MoonPaySessionRequest": {
+        "properties": { "usdc_amount": { "type": "string", "title": "Usdc Amount", "default": "100" } },
+        "type": "object",
+        "title": "MoonPaySessionRequest"
+      },
+      "OrderIn": {
+        "properties": {
+          "maker": { "type": "string", "title": "Maker" },
+          "isBuy": { "type": "boolean", "title": "Isbuy" },
+          "conditionId": { "type": "string", "title": "Conditionid" },
+          "outcome": { "type": "integer", "title": "Outcome" },
+          "price": { "type": "integer", "title": "Price" },
+          "amount": { "type": "integer", "title": "Amount" },
+          "salt": { "anyOf": [{ "type": "integer" }, { "type": "string" }], "title": "Salt" },
+          "nonce": { "type": "integer", "title": "Nonce" },
+          "expiry": { "type": "integer", "title": "Expiry" },
+          "signature": { "type": "string", "title": "Signature" },
+          "orderHash": { "type": "string", "title": "Orderhash" }
+        },
+        "type": "object",
+        "required": [
+          "maker",
+          "isBuy",
+          "conditionId",
+          "outcome",
+          "price",
+          "amount",
+          "salt",
+          "nonce",
+          "expiry",
+          "signature",
+          "orderHash"
+        ],
+        "title": "OrderIn"
+      },
+      "PricePointPublic": {
+        "properties": {
+          "conditionId": { "type": "string", "title": "Conditionid" },
+          "ts": { "type": "integer", "title": "Ts" },
+          "yesPriceMicros": { "type": "integer", "title": "Yespricemicros" }
+        },
+        "type": "object",
+        "required": ["conditionId", "ts", "yesPriceMicros"],
+        "title": "PricePointPublic"
+      },
+      "Recipient": {
+        "properties": {
+          "address": { "type": "string", "title": "Address" },
+          "amount": { "type": "string", "title": "Amount" }
+        },
+        "type": "object",
+        "required": ["address", "amount"],
+        "title": "Recipient"
+      },
+      "ResolvedIn": {
+        "properties": {
+          "conditionId": { "type": "string", "title": "Conditionid" },
+          "outcome": { "type": "integer", "title": "Outcome" }
+        },
+        "type": "object",
+        "required": ["conditionId", "outcome"],
+        "title": "ResolvedIn"
+      },
+      "ScheduleGameIn": {
+        "properties": {
+          "away": { "type": "string", "maxLength": 128, "minLength": 1, "title": "Away" },
+          "home": { "type": "string", "maxLength": 128, "minLength": 1, "title": "Home" },
+          "kickoff_unix": { "type": "integer", "maximum": 2147483647.0, "minimum": 0.0, "title": "Kickoff Unix" },
+          "week": { "type": "integer", "maximum": 2147483647.0, "minimum": 0.0, "title": "Week" },
+          "season": { "type": "integer", "maximum": 2147483647.0, "minimum": 0.0, "title": "Season" },
+          "status": {
+            "type": "string",
+            "enum": ["scheduled", "in_progress", "final", "postponed", "cancelled"],
+            "title": "Status",
+            "default": "scheduled"
+          },
+          "listedConditionId": { "type": "string", "title": "Listedconditionid", "default": "" }
+        },
+        "type": "object",
+        "required": ["away", "home", "kickoff_unix", "week", "season"],
+        "title": "ScheduleGameIn"
+      },
+      "ScheduleGamePublic": {
+        "properties": {
+          "away": { "type": "string", "maxLength": 128, "minLength": 1, "title": "Away" },
+          "home": { "type": "string", "maxLength": 128, "minLength": 1, "title": "Home" },
+          "kickoff_unix": { "type": "integer", "maximum": 2147483647.0, "minimum": 0.0, "title": "Kickoff Unix" },
+          "week": { "type": "integer", "maximum": 2147483647.0, "minimum": 0.0, "title": "Week" },
+          "season": { "type": "integer", "maximum": 2147483647.0, "minimum": 0.0, "title": "Season" },
+          "status": {
+            "type": "string",
+            "enum": ["scheduled", "in_progress", "final", "postponed", "cancelled"],
+            "title": "Status",
+            "default": "scheduled"
+          },
+          "listedConditionId": { "type": "string", "title": "Listedconditionid", "default": "" },
+          "id": { "type": "integer", "title": "Id" }
+        },
+        "type": "object",
+        "required": ["away", "home", "kickoff_unix", "week", "season", "id"],
+        "title": "ScheduleGamePublic"
+      },
+      "SiweVerify": {
+        "properties": {
+          "message": { "type": "string", "title": "Message" },
+          "signature": { "type": "string", "title": "Signature" },
+          "address": { "type": "string", "title": "Address" }
+        },
+        "type": "object",
+        "required": ["message", "signature", "address"],
+        "title": "SiweVerify"
+      },
+      "UserOpRequest": {
+        "properties": {
+          "sender": { "type": "string", "title": "Sender", "default": "" },
+          "nonce": { "type": "integer", "title": "Nonce", "default": 0 },
+          "initCode": { "type": "string", "title": "Initcode", "default": "0x" },
+          "callData": { "type": "string", "title": "Calldata", "default": "0x" },
+          "accountGasLimits": { "type": "string", "title": "Accountgaslimits", "default": "0x" },
+          "preVerificationGas": { "type": "integer", "title": "Preverificationgas", "default": 0 },
+          "gasFees": { "type": "string", "title": "Gasfees", "default": "0x" },
+          "paymasterAndData": { "type": "string", "title": "Paymasteranddata", "default": "0x" },
+          "signature": { "type": "string", "title": "Signature", "default": "0x" }
+        },
+        "type": "object",
+        "title": "UserOpRequest"
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": { "anyOf": [{ "type": "string" }, { "type": "integer" }] },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": { "type": "string", "title": "Message" },
+          "type": { "type": "string", "title": "Error Type" },
+          "input": { "title": "Input" },
+          "ctx": { "type": "object", "title": "Context" }
+        },
+        "type": "object",
+        "required": ["loc", "msg", "type"],
+        "title": "ValidationError"
+      },
+      "VoteIn": {
+        "properties": {
+          "conditionId": { "type": "string", "maxLength": 66, "title": "Conditionid" },
+          "outcome": { "type": "integer", "maximum": 1.0, "minimum": 0.0, "title": "Outcome" },
+          "voter": { "anyOf": [{ "type": "string" }, { "type": "null" }], "title": "Voter" },
+          "weight": { "anyOf": [{ "type": "integer" }, { "type": "null" }], "title": "Weight" }
+        },
+        "type": "object",
+        "required": ["conditionId", "outcome"],
+        "title": "VoteIn"
+      }
+    }
   }
 }

@@ -1,5 +1,7 @@
+import eth_abi
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from web3 import Web3
 
@@ -8,7 +10,8 @@ from app.auth.router import get_current_user
 from app.cdp import send_user_operation
 from app.config import get_settings
 from app.db import get_db
-from app.models import User
+from app.markets.trading import trading_halt_reason
+from app.models import MarketListing, User
 
 router = APIRouter(prefix="/aa", tags=["aa"])
 
@@ -17,6 +20,8 @@ SELECTOR_SET_APPROVAL = bytes.fromhex("a22cb465")
 SELECTOR_BUY_USDC = bytes.fromhex("a9c98025")
 SELECTOR_SELL_USDC = bytes.fromhex("d4bd65f0")
 SELECTOR_MATCH_ORDERS = bytes.fromhex("e9f2cd3e")
+# MarketFactory v2 createPermissionlessMarket(bytes32,uint256,string,bytes32,uint256)
+SELECTOR_CREATE_PERMISSIONLESS = bytes.fromhex("4e7d1a32")
 
 
 class UserOpRequest(BaseModel):
@@ -79,19 +84,80 @@ def _validate_call(to: str, call_data: bytes, value: int, settings) -> bool:
     amm = (settings.amm_address or "").lower()
     usdc = (settings.usdc_address or "").lower()
     ctf = (settings.ctf_address or "").lower()
+    factory = (settings.factory_address or "").lower()
     if not amm:
         return False
     if to_lower == usdc and selector == SELECTOR_APPROVE:
         if len(call_data) < 36:
             return False
-        return _extract_address(call_data, 4).lower() == amm
+        spenders = {amm, factory} if factory else {amm}
+        return _extract_address(call_data, 4).lower() in spenders
     if to_lower == ctf and selector == SELECTOR_SET_APPROVAL:
         if len(call_data) < 36:
             return False
         return _extract_address(call_data, 4).lower() == amm
     if to_lower == amm and selector in (SELECTOR_BUY_USDC, SELECTOR_SELL_USDC):
         return True
+    # User listing (OU-T010). Operator-only creates (createPrimaryMarket etc.) stay rejected.
+    if factory and to_lower == factory and selector == SELECTOR_CREATE_PERMISSIONLESS:
+        return True
     return False
+
+
+def _trade_condition_id(to: str, call_data: bytes, settings) -> str | None:
+    """Condition id of an AMM buy/sell call (first bytes32 argument), else None."""
+    amm = (settings.amm_address or "").lower()
+    if not amm or to.lower() != amm or len(call_data) < 36:
+        return None
+    if call_data[:4] not in (SELECTOR_BUY_USDC, SELECTOR_SELL_USDC):
+        return None
+    return "0x" + call_data[4:36].hex()
+
+
+def _listing_args(to: str, call_data: bytes, settings) -> dict | None:
+    """Decoded createPermissionlessMarket arguments for a factory call, else None."""
+    factory = (settings.factory_address or "").lower()
+    if not factory or to.lower() != factory or call_data[:4] != SELECTOR_CREATE_PERMISSIONLESS:
+        return None
+    try:
+        salt, close_time, question, crit_hash, seed = eth_abi.decode(
+            ["bytes32", "uint256", "string", "bytes32", "uint256"], call_data[4:]
+        )
+    except Exception:
+        raise HTTPException(400, "Invalid call data")
+    return {
+        "salt": "0x" + bytes(salt).hex(),
+        "closeTime": int(close_time),
+        "question": str(question),
+        "criteriaHash": "0x" + bytes(crit_hash).hex(),
+        "seedUsdc": int(seed),
+    }
+
+
+async def _require_prepared_listing(db: AsyncSession, user: User, args: dict) -> None:
+    """Only sponsor a listing exactly as /markets/listing/prepare validated it.
+
+    Defence in depth: the factory is permissionless and the web sends its batch
+    to CDP directly, so /confirm and the indexer re-run the gates regardless.
+    """
+    row = (
+        await db.execute(
+            select(MarketListing).where(
+                MarketListing.creator == user.address.lower(),
+                MarketListing.salt == args["salt"],
+                MarketListing.status == "prepared",
+            )
+        )
+    ).scalars().first()
+    if row is None:
+        raise HTTPException(403, "listing not prepared")
+    if (
+        row.question != args["question"]
+        or row.criteria_hash.lower() != args["criteriaHash"]
+        or int(row.close_time) != args["closeTime"]
+        or int(row.seed_usdc) != args["seedUsdc"]
+    ):
+        raise HTTPException(403, "listing differs from the prepared listing")
 
 
 @router.post("/userop")
@@ -109,6 +175,8 @@ async def cdp_send(
     if not body.calls:
         raise HTTPException(400, "calls required")
     payload_calls = []
+    trade_cids: list[str] = []
+    listings: list[dict] = []
     for call in body.calls:
         try:
             value = _value_int(call.value)
@@ -117,6 +185,12 @@ async def cdp_send(
             raise HTTPException(400, "Invalid call data")
         if not _validate_call(call.to, data, value, settings):
             raise HTTPException(403, "Operation not allowed")
+        cid = _trade_condition_id(call.to, data, settings)
+        if cid is not None:
+            trade_cids.append(cid)
+        listing = _listing_args(call.to, data, settings)
+        if listing is not None:
+            listings.append(listing)
         data_hex = call.data if call.data.startswith("0x") else "0x" + call.data
         payload_calls.append(
             {
@@ -125,6 +199,12 @@ async def cdp_send(
                 "data": data_hex,
             }
         )
+    for cid in dict.fromkeys(trade_cids):
+        reason = await trading_halt_reason(db, cid, settings)
+        if reason:
+            raise HTTPException(409, reason)
+    for listing in listings:
+        await _require_prepared_listing(db, user, listing)
     if not user.cdp_user_id:
         raise HTTPException(403, "CDP user required")
     try:

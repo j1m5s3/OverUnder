@@ -3,7 +3,7 @@ from httpx import ASGITransport, AsyncClient
 
 from app.db import Base, SessionLocal, engine
 from app.main import create_app
-from app.models import Market
+from app.models import Market, MarketListing
 
 PRIMARY = "0x" + "a1" * 32
 CHILD = "0x" + "a2" * 32
@@ -14,6 +14,11 @@ CHILD_OF_PAUSED = "0x" + "b2" * 32
 MISSING_PARENT = "0x" + "c1" * 32
 ORPHAN = "0x" + "c2" * 32
 LONELY = "0x" + "d1" * 32
+USER_LISTED = "0x" + "e7" * 32
+CHILD_OF_USER = "0x" + "e8" * 32
+USER_INDEXED = "0x" + "e9" * 32
+USER_REJECTED = "0x" + "ea" * 32
+USER_NO_LISTING = "0x" + "eb" * 32
 SEED_IDS = (
     PRIMARY,
     CHILD,
@@ -23,7 +28,21 @@ SEED_IDS = (
     CHILD_OF_PAUSED,
     ORPHAN,
     LONELY,
+    USER_LISTED,
+    CHILD_OF_USER,
+    USER_INDEXED,
+    USER_REJECTED,
+    USER_NO_LISTING,
 )
+LISTING_STATUS = {USER_LISTED: "confirmed", USER_INDEXED: "indexed", USER_REJECTED: "rejected"}
+
+
+async def _clean(session) -> None:
+    for existing in SEED_IDS:
+        for model in (Market, MarketListing):
+            row = await session.get(model, existing)
+            if row is not None:
+                await session.delete(row)
 
 
 def _row(
@@ -53,10 +72,7 @@ async def client():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     async with SessionLocal() as session:
-        for existing in SEED_IDS:
-            row = await session.get(Market, existing)
-            if row is not None:
-                await session.delete(row)
+        await _clean(session)
         session.add_all(
             [
                 _row(PRIMARY, question="Will the bill pass the Senate?"),
@@ -94,6 +110,20 @@ async def client():
                     parent_condition_id=MISSING_PARENT,
                 ),
                 _row(LONELY, question="Lonely primary with no children"),
+                _row(USER_LISTED, question="Will the Artemis II crew launch in 2026?", market_type=2),
+                _row(
+                    CHILD_OF_USER,
+                    question="Artemis II launch in September?",
+                    market_type=1,
+                    parent_condition_id=USER_LISTED,
+                ),
+                _row(USER_INDEXED, question="Will an unconfirmed listing stay hidden?", market_type=2),
+                _row(USER_REJECTED, question="Who is the best QB and should he feel underrated", market_type=2),
+                _row(USER_NO_LISTING, question="Will a listing with no row stay hidden?", market_type=2),
+                *[
+                    MarketListing(condition_id=cid, creator="0x" + "4a" * 20, status=status)
+                    for cid, status in LISTING_STATUS.items()
+                ],
             ]
         )
         await session.commit()
@@ -102,10 +132,7 @@ async def client():
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
         yield ac
     async with SessionLocal() as session:
-        for existing in SEED_IDS:
-            row = await session.get(Market, existing)
-            if row is not None:
-                await session.delete(row)
+        await _clean(session)
         await session.commit()
 
 
@@ -183,3 +210,32 @@ async def test_paused_parent_detail_uses_same_child_filter(client):
     cards = _cards_by_primary(listed.json())
     assert PAUSED_PARENT not in cards
     assert cards[CHILD_OF_PAUSED]["primary"]["conditionId"] == CHILD_OF_PAUSED
+
+
+@pytest.mark.asyncio
+async def test_user_listed_market_lists_as_primary_card(client):
+    listed = await client.get("/api/v1/markets")
+    cards = _cards_by_primary(listed.json())
+    card = cards[USER_LISTED]
+    assert card["primary"]["marketType"] == 2
+    assert [row["conditionId"] for row in card["children"]] == [CHILD_OF_USER]
+    assert CHILD_OF_USER not in cards
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cid", [USER_INDEXED, USER_REJECTED, USER_NO_LISTING])
+async def test_unconfirmed_user_listing_is_hidden_everywhere(client, cid):
+    cards = _cards_by_primary((await client.get("/api/v1/markets")).json())
+    assert cid not in cards
+    assert all(cid not in [c["conditionId"] for c in card["children"]] for card in cards.values())
+    flat = (await client.get("/api/v1/markets", params={"parentId": ""})).json()
+    assert cid not in {row["primary"]["conditionId"] for row in flat}
+    assert (await client.get(f"/api/v1/markets/{cid}")).status_code == 404
+    assert (await client.get(f"/api/v1/markets/{cid}/history")).status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_confirmed_user_listing_detail_is_public(client):
+    detail = await client.get(f"/api/v1/markets/{USER_LISTED}")
+    assert detail.status_code == 200
+    assert detail.json()["listing"]["status"] == "confirmed"

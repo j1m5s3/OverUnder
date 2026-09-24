@@ -1,5 +1,6 @@
 import hashlib
 import hmac
+from decimal import Decimal, InvalidOperation
 from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -11,10 +12,25 @@ from app.auth.router import get_current_user
 from app.config import get_settings
 from app.db import get_db
 from app.kyc.router import enforce_kyc_gate
-from app.models import RampTx
+from app.models import RampTx, User
 
 router = APIRouter(prefix="/ramps", tags=["ramps"])
 settings = get_settings()
+
+# Upper bound for one widget session (USD). Anything above is a client error, not a KYC question.
+MAX_SESSION_USDC = Decimal("1000000")
+
+
+def parse_usdc_amount(raw: str) -> Decimal:
+    """Finite, > 0 and <= MAX_SESSION_USDC, else 400. 'nan', 'inf' and negatives would
+    otherwise slip past the KYC volume sum (NaN >= threshold is False)."""
+    try:
+        amount = Decimal(str(raw).strip())
+    except (InvalidOperation, ValueError):
+        raise HTTPException(status_code=400, detail="Invalid amount")
+    if not amount.is_finite() or amount <= 0 or amount > MAX_SESSION_USDC:
+        raise HTTPException(status_code=400, detail="Invalid amount")
+    return amount
 
 
 class MoonPaySessionRequest(BaseModel):
@@ -32,7 +48,7 @@ class MoonPayWebhookPayload(BaseModel):
 @router.post("/moonpay/session")
 async def moonpay_session(
     req: MoonPaySessionRequest,
-    user: dict = Depends(get_current_user),
+    user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Sign MoonPay widget URL with secret for the authenticated user's address.
@@ -43,25 +59,23 @@ async def moonpay_session(
     if not settings.moonpay_api_key or not settings.moonpay_secret:
         raise HTTPException(status_code=503, detail="MoonPay not configured")
 
-    # Parse and validate amount
-    try:
-        notional_usdc = float(req.usdc_amount)
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid amount")
+    amount = parse_usdc_amount(req.usdc_amount)
 
     # Enforce KYC gate (raises 403 if fails)
-    await enforce_kyc_gate(notional_usdc, user, db)
+    await enforce_kyc_gate(float(amount), user, db)
 
-    address = user["address"]
+    address = user.address
 
     # Build MoonPay widget URL
     params = {
         "apiKey": settings.moonpay_api_key,
         "currencyCode": "usdc",
         "walletAddress": address,
-        "baseCurrencyAmount": req.usdc_amount,
+        "baseCurrencyAmount": format(amount.normalize(), "f"),
         "baseCurrencyCode": "usd",
         "network": "base",
+        # Signed with the rest: the widget cannot raise the amount the KYC gate just checked.
+        "lockAmount": "true",
     }
 
     query_string = urlencode(params)
