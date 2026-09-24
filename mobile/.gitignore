@@ -1,0 +1,12 @@
+# Flutter / Dart tooling (pubspec.lock stays committed: this is an app)
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+.pub-cache/
+.pub/
+build/
+
+# IDE
+*.iml
+.idea/

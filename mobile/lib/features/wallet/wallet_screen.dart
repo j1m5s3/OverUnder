@@ -92,6 +92,7 @@ class _WalletScreenState extends State<WalletScreen> {
     try {
       final result = await widget.apiClient.authCdpVerify(flowId, otp);
       widget.apiClient.setJwt(result['token'] as String);
+      if (!mounted) return;
       context.read<WalletProvider>().setSession(
             address: result['address'] as String,
             jwt: result['token'] as String,

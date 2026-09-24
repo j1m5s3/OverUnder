@@ -50,7 +50,7 @@ class AppTheme {
           surface: bgCard,
           error: no,
         ),
-        cardTheme: CardTheme(
+        cardTheme: CardThemeData(
           color: bgCard,
           elevation: 0,
           shape: RoundedRectangleBorder(

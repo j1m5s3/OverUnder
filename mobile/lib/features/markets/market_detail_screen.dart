@@ -4,8 +4,14 @@ import '../../models/models.dart';
 import '../../services/api_client.dart';
 import '../../providers/wallet_provider.dart';
 import '../../theme/app_theme.dart';
+import '../../utils/time.dart';
 import '../trade/amm_swap_widget.dart';
 import '../oracle/oracle_status_widget.dart';
+import 'market_tag.dart';
+
+String _shortAddress(String address) => address.length > 10
+    ? '${address.substring(0, 6)}...${address.substring(address.length - 4)}'
+    : address;
 
 class MarketDetailScreen extends StatefulWidget {
   final ApiClient apiClient;
@@ -40,11 +46,13 @@ class _MarketDetailScreenState extends State<MarketDetailScreen> {
 
     try {
       final market = await widget.apiClient.getMarket(widget.marketId);
+      if (!mounted) return;
       setState(() {
         _market = market;
         _loading = false;
       });
     } catch (e) {
+      if (!mounted) return;
       setState(() {
         _error = e.toString();
         _loading = false;
@@ -68,7 +76,7 @@ class _MarketDetailScreenState extends State<MarketDetailScreen> {
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      Text('Error: $_error', style: TextStyle(color: AppTheme.no)),
+                      Text('Error: $_error', style: const TextStyle(color: AppTheme.no)),
                       const SizedBox(height: AppTheme.spacingMd),
                       ElevatedButton(
                         onPressed: _loadMarket,
@@ -95,34 +103,59 @@ class _MarketDetailScreenState extends State<MarketDetailScreen> {
                               const SizedBox(height: AppTheme.spacingMd),
                               Row(
                                 children: [
-                                  if (_market!.isWildcard)
-                                    Container(
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: AppTheme.spacingSm,
-                                        vertical: AppTheme.spacingXs,
-                                      ),
-                                      decoration: BoxDecoration(
-                                        color: AppTheme.accent.withOpacity(0.2),
-                                        borderRadius: BorderRadius.circular(AppTheme.radiusSm),
-                                      ),
-                                      child: Text(
-                                        'Wildcard',
-                                        style: TextStyle(
-                                          color: AppTheme.accent,
-                                          fontSize: AppTheme.sizeSm,
-                                        ),
-                                      ),
+                                  Expanded(
+                                    child: Wrap(
+                                      spacing: AppTheme.spacingSm,
+                                      runSpacing: AppTheme.spacingXs,
+                                      children: marketTags(_market!, DateTime.now()),
                                     ),
-                                  const Spacer(),
+                                  ),
                                   Text(
-                                    'Prob: ${(_market!.suggestedProbability * 100).toStringAsFixed(1)}%',
-                                    style: TextStyle(
+                                    'Prob: ${(_market!.yesProbability * 100).toStringAsFixed(1)}%',
+                                    style: const TextStyle(
                                       color: AppTheme.textMuted,
                                       fontSize: AppTheme.sizeSm,
                                     ),
                                   ),
                                 ],
                               ),
+                              if (_market!.closeTime > 0) ...[
+                                const SizedBox(height: AppTheme.spacingSm),
+                                Text(
+                                  'Closes ${formatUnixSeconds(_market!.closeTime)}',
+                                  style: const TextStyle(
+                                    color: AppTheme.textMuted,
+                                    fontSize: AppTheme.sizeSm,
+                                  ),
+                                ),
+                              ],
+                              if (_market!.creator != null) ...[
+                                const SizedBox(height: AppTheme.spacingXs),
+                                Text(
+                                  'Listed by ${_shortAddress(_market!.creator!)}',
+                                  style: const TextStyle(
+                                    color: AppTheme.textMuted,
+                                    fontSize: AppTheme.sizeSm,
+                                  ),
+                                ),
+                              ],
+                              if (_market!.resolutionCriteria.isNotEmpty) ...[
+                                const SizedBox(height: AppTheme.spacingMd),
+                                Text(
+                                  'Resolution criteria',
+                                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                        fontWeight: AppTheme.weightBold,
+                                      ),
+                                ),
+                                const SizedBox(height: AppTheme.spacingXs),
+                                Text(
+                                  _market!.resolutionCriteria,
+                                  style: const TextStyle(
+                                    color: AppTheme.textMuted,
+                                    fontSize: AppTheme.sizeSm,
+                                  ),
+                                ),
+                              ],
                             ],
                           ),
                         ),
@@ -134,6 +167,7 @@ class _MarketDetailScreenState extends State<MarketDetailScreen> {
                           apiClient: widget.apiClient,
                           marketId: widget.marketId,
                           walletConnected: true,
+                          market: _market,
                         )
                       else
                         Card(
@@ -148,7 +182,7 @@ class _MarketDetailScreenState extends State<MarketDetailScreen> {
                                       ),
                                 ),
                                 const SizedBox(height: AppTheme.spacingMd),
-                                Text(
+                                const Text(
                                   'Connect wallet to trade',
                                   style: TextStyle(color: AppTheme.textMuted),
                                 ),

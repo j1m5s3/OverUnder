@@ -113,7 +113,7 @@ class _OracleStatusWidgetState extends State<OracleStatusWidget> {
                       ],
                     ),
                   ),
-                  if (_status!.reports.isNotEmpty) ...[
+                  if (_status!.attestations.isNotEmpty) ...[
                     const SizedBox(height: AppTheme.spacingMd),
                     Text(
                       'Agent Attestations',
@@ -123,7 +123,7 @@ class _OracleStatusWidgetState extends State<OracleStatusWidget> {
                       ),
                     ),
                     const SizedBox(height: AppTheme.spacingSm),
-                    ..._status!.reports.map((attestation) => Padding(
+                    ..._status!.attestations.map((attestation) => Padding(
                           padding: const EdgeInsets.only(bottom: AppTheme.spacingSm),
                           child: Container(
                             padding: const EdgeInsets.all(AppTheme.spacingSm),

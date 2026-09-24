@@ -5,6 +5,8 @@ publish_to: 'none'
 
 environment:
   sdk: '>=3.0.0 <4.0.0'
+  # CardThemeData (app_theme.dart) needs Flutter 3.27+.
+  flutter: '>=3.27.0'
 
 dependencies:
   flutter:
