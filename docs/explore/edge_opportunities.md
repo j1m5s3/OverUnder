@@ -3,12 +3,13 @@ title: Competitive edge vectors
 status: MIXED
 area: intent
 summary: Stance box plus literature on long-tail AMM vs CLOB vampire. Literature is not spec.
-last_verified: 2026-09-20
+last_verified: 2026-09-23
 pointers:
-  - "[docs/adr/0007-amm-first-uniform-lvr.md : L29-34]"
+  - "[docs/adr/0007-amm-first-uniform-lvr.md : L34-41]"
+  - "[contracts/src/MarketFactory.vy : L177-199]"
 ---
 
-> OverUnder stance ([ADR-0007](../adr/0007-amm-first-uniform-lvr.md)): **adopt** vector 1 (long-tail + permissionless AMM + AI wildcards). **Defer** vector 2 (prediction perpetuals) and vector 4 (B2B embed SDK) as unscheduled ideas. **Reject** vector 3 (CLOB vampire fee/rebate attack) — it fights the AMM-first decision. Literature below is not spec.
+> OverUnder stance ([ADR-0007](../adr/0007-amm-first-uniform-lvr.md)): **adopt** vector 1 (long-tail + permissionless AMM + AI wildcards). **Defer** vector 2 (prediction perpetuals) and vector 4 (B2B embed SDK) as unscheduled ideas. **Reject** vector 3 (CLOB vampire fee/rebate attack) — it fights the AMM-first decision. Vector 1 now has code: a static pm-AMM ([ADR-0011](../adr/0011-pm-amm-v2-close-gate.md)) and loosely gated user listing ([ADR-0012](../adr/0012-loosely-gated-user-listing.md)). Literature below is not spec.
 
 For a Polymarket "clone" to absorb meaningful market share, building identical infrastructure is not enough. A competitor cannot beat Polymarket at its own game because Polymarket has already achieved a "liquidity black hole" network effect, where deep order books naturally attract high-volume institutional traders. [1, 2] 
 To break this monopoly, a challenger must change the rules of the game. A clone could gain traction through four strategic vectors:

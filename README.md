@@ -1,30 +1,45 @@
 # OverUnder
 
-Prediction markets on Base: seeded CPMM on primaries and wildcards, leftover CLOB overlay, and AI-agent oracles.
+Prediction markets on Base. Every market trades on a seeded static pm-AMM (`MarketAMM`), and trading halts at `closeTime`. There are three kinds of market:
 
-MVP settlement is **USDC**. Oracles must reach **unanimous (3/3)** consensus to resolve; otherwise **agent majority + participant votes** after 24 hours. Protocol fees accrue to a vault; **OU** redeems for USDC at NAV.
+- operator primaries
+- wildcard children
+- user-listed markets, which are loosely gated: seed, lead time, horizon, cooldown and question rules
+
+A leftover EIP-712 CLOB overlay and AI-agent oracles complete the system.
+
+MVP settlement is **USDC**. Oracles must reach **unanimous (3/3)** consensus to resolve. Otherwise, after 24 hours, **agent majority + participant votes** decide. Protocol fees accrue to a vault; **OU** redeems for USDC at NAV.
 
 ## Stack
 
 | Layer | Tech |
 | --- | --- |
-| Contracts | Vyper, Moccasin, Anvil |
-| API | FastAPI |
-| Oracles | Python agents (Claude/GPT/Gemini + search) |
+| Contracts | Vyper, titanoboa (Moccasin project), Anvil |
+| API | FastAPI (SQLite locally, Postgres on Cloud Run) |
+| Oracles | Python Cloud Run Job: three Cursor-runtime agents (cursor-sdk) with a remote search MCP |
 | Web | Next.js, Tailwind, wagmi, Coinbase CDP hooks |
 | Mobile | Flutter — see `mobile/README.md` |
 
 ## Quickstart (local)
 
+Set up the env and containers, then the contracts (run each block from the repo root):
+
 ```bash
 cp .env.example .env
 cd infra && docker compose up -d
-cd ../contracts && uv pip install -e ".[dev]" || pip install -r requirements.txt
-moccasin test
+```
+
+```bash
+cd contracts && pip install -r requirements.txt
+python -m pytest tests -q
 python script/deploy.py
-cd ../backend && pip install -e .
-uvicorn app.main:app --reload
-cd ../web && npm install && npm run dev
+```
+
+Then the API and the web app, each in its own shell from the repo root:
+
+```bash
+cd backend && pip install -e . && uvicorn app.main:app --reload
+cd web && npm install && npm run dev
 ```
 
 ## Local stack (Windows)
@@ -33,23 +48,39 @@ cd ../web && npm install && npm run dev
 scripts\run_stack.cmd
 ```
 
-Opens Anvil (Docker or Foundry), deploys contracts, then starts the API (`:8000`) and web app (`:3000`). Stop with `scripts\stop_stack.cmd`.
+This starts Anvil (Docker or Foundry), deploys the contracts, then starts the API (`:8000`) and the web app (`:3000`). Stop it with `scripts\stop_stack.cmd`.
 
-
-Python 3.12 (Vyper wheels; not 3.14):
+Use Python 3.12, because Vyper ships wheels for it; 3.14 does not work. Create one venv for every Python package, from `contracts/`:
 
 ```bash
-cd contracts
 uv venv .venv --python 3.12
 uv pip install --python .venv -r requirements.txt
 uv pip install --python .venv -r ../backend/requirements.txt -r ../oracles/requirements.txt
-.\.venv\Scripts\python.exe -m pytest tests -q
-cd ../backend && ..\contracts\.venv\Scripts\python.exe -m pytest tests -q
-cd ../oracles && ..\contracts\.venv\Scripts\python.exe -m pytest tests -q
-cd .. && .\contracts\.venv\Scripts\python.exe scripts\e2e_local.py
 ```
 
+Run the Python suites from the repo root:
+
+```bash
+cd contracts && .\.venv\Scripts\python.exe -m pytest tests -q
+cd ../backend && ..\contracts\.venv\Scripts\python.exe -m pytest tests -q
+cd ../oracles && ..\contracts\.venv\Scripts\python.exe -m pytest tests -q
+```
+
+Then the scripts suite, the in-process e2e and the web checks, also from the repo root:
+
+```bash
+.\contracts\.venv\Scripts\python.exe -m unittest discover -s scripts/tests -v
+.\contracts\.venv\Scripts\python.exe scripts\e2e_local.py
+cd web && npm ci && npm run build && npm test
+```
+
+See [docs/runbooks/local-dev.md](docs/runbooks/local-dev.md) for details, and [docs/runbooks/operations.md](docs/runbooks/operations.md) for production deploys and market operations.
 
 ## Architecture
 
-Primary and wildcard markets trade on `MarketAMM.vy` (seeded CPMM). `Exchange.vy` remains deployed as leftover CLOB overlay. Both share `ConditionalTokens.vy`, `ConsensusOracle.vy`, and `FeeVault.vy`. Book of record: [docs/adr/0007-amm-first-uniform-lvr.md](docs/adr/0007-amm-first-uniform-lvr.md).
+- **MarketAMM** (`MarketAMM.vy`): static pm-AMM. The YES price is Φ((no − yes)/L). It charges a 100 bps fee, split 50/50 between the vault and LPs, and has an on-chain `closeGate`. See [docs/adr/0011-pm-amm-v2-close-gate.md](docs/adr/0011-pm-amm-v2-close-gate.md).
+- **MarketFactory** (`MarketFactory.vy`): creates operator primaries and wildcards, and exposes `createPermissionlessMarket` for user listings. Seed LP goes to whoever provides the seed.
+- **Exchange** (`Exchange.vy`): the leftover CLOB overlay. The production relayer (OU-T003) is off by default.
+- **Shared**: all of the above use `ConditionalTokens.vy`, `ConsensusOracle.vy` and `FeeVault.vy`.
+
+Book of record: [docs/adr/0007-amm-first-uniform-lvr.md](docs/adr/0007-amm-first-uniform-lvr.md). Base Sepolia runs the v1 contracts until the AMM + Factory v2 redeploy described in the operations runbook.

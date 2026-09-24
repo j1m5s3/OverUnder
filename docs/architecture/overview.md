@@ -2,64 +2,83 @@
 title: Architecture overview
 status: MIXED
 area: cross
-summary: Layered map of contracts, FastAPI, oracles, and Next.js with MVP trust boundaries.
-last_verified: 2026-09-21
+summary: Layered map of contracts, FastAPI, oracles, Next.js and Flutter with trust boundaries, market lifecycle (trading halt, resolution, fallback) and the pending Base Sepolia AMM + Factory redeploy.
+last_verified: 2026-09-23
 pointers:
-  - "[contracts/src/MarketFactory.vy : L82-89]"
-  - "[contracts/src/MarketFactory.vy : L92-99]"
-  - "[contracts/src/MarketAMM.vy : L122-159]"
-  - "[contracts/src/MarketAMM.vy : L162-201]"
-  - "[contracts/src/Exchange.vy : L128-159]"
-  - "[backend/app/main.py : L22-39]"
-  - "[oracles/consensus/coordinator.py : L27-43]"
-  - "[oracles/resolve/run.py : L33-119]"
-  - "[docs/adr/0008-cursor-runtime-oracles.md : L18-32]"
-  - "[docs/adr/0009-dual-gate-sports-resolve-and-week-listing.md : L18-32]"
-  - "[web/src/app/providers.tsx : L21-36]"
-  - "[docs/adr/0010-cdp-embedded-wallets.md : L28-39]"
+  - "[contracts/src/MarketFactory.vy : L143-150]"
+  - "[contracts/src/MarketFactory.vy : L152-159]"
+  - "[contracts/src/MarketFactory.vy : L177-199]"
+  - "[contracts/src/MarketAMM.vy : L1-12]"
+  - "[contracts/src/MarketAMM.vy : L115-119]"
+  - "[contracts/src/MarketAMM.vy : L69-72]"
+  - "[contracts/src/Exchange.vy : L94-100]"
+  - "[contracts/src/ConsensusOracle.vy : L120-127]"
+  - "[contracts/src/ConsensusOracle.vy : L144-161]"
+  - "[contracts/src/ConsensusOracle.vy : L220-226]"
+  - "[backend/app/main.py : L27-61]"
+  - "[backend/app/markets/trading.py : L42-58]"
+  - "[backend/app/orderbook/router.py : L94-164]"
+  - "[backend/app/relayer/worker.py : L1-24]"
+  - "[oracles/job.py : L1-19]"
+  - "[oracles/resolve/fallback.py : L47-151]"
+  - "[web/src/app/providers.tsx : L21-45]"
   - "[contracts/src/OverUnderPaymaster.vy : L322-355]"
 ---
 
 # Architecture overview
 
-OverUnder is a Base-chain prediction market. Collateral is USDC (6 decimals). Outcomes are binary YES/NO ERC-1155 positions. All markets trade on a seeded CPMM (`MarketAMM`). Resolution is a three-agent oracle. Book of record: [ADR-0007](../adr/0007-amm-first-uniform-lvr.md).
+OverUnder is a Base-chain prediction market. Collateral is USDC (6 decimals). Outcomes are binary YES/NO ERC-1155 positions. Every market trades on a seeded `MarketAMM`: in code that is MarketAMM v2, a static uniform-LVR pool (pm-AMM) that halts at closeTime; Base Sepolia runs the v1 CPMM until the post-merge redeploy. Resolution is a three-agent oracle. Book of record: [ADR-0007](../adr/0007-amm-first-uniform-lvr.md); MarketAMM v2: [ADR-0011](../adr/0011-pm-amm-v2-close-gate.md); user listing: [ADR-0012](../adr/0012-loosely-gated-user-listing.md).
 
 ## Layers
 
-- [SHIPPED] Vyper contracts under `contracts/src/` deploy as one graph: MockUSDC, ConditionalTokens, MarketFactory, Exchange, MarketAMM, ConsensusOracle, FeeVault, RevenueToken, OverUnderPaymaster, SimpleAccount + factory.
-- [SHIPPED] FastAPI under `backend/app/` exposes `/api/v1` plus `/health`.
-- [SHIPPED] Python oracles under `oracles/` research questions with Cursor agents and collect 3/3 attestations. Score scout auto-POSTs LiveScore on 3/3. Dual-gate sports auto-resolve and week-roll listing: [ADR-0009](../adr/0009-dual-gate-sports-resolve-and-week-listing.md). [docs/adr/0008-cursor-runtime-oracles.md : L18-32]
-- [SHIPPED] Next.js web under `web/` lists markets, executes AMM swaps, shows oracle status.
-- [SHIPPED] Flutter app under `mobile/` mirrors web feature modules. See [mobile/README.md](../../mobile/README.md).
+- [SHIPPED] Vyper contracts under `contracts/src/` deploy as one graph: MockUSDC, ConditionalTokens, MarketFactory, Exchange, MarketAMM (with `lib/NormalMath.vy`), ConsensusOracle, FeeVault, RevenueToken, OverUnderPaymaster, SimpleAccount + factory. `contracts/script/deploy_v2.py` swaps in MarketAMM v2 + MarketFactory v2 and reuses the rest.
+- [SHIPPED] FastAPI under `backend/app/` exposes `/api/v1` plus `/health`; startup runs one locked schema migration, the chain indexer and (when enabled) the CLOB relayer worker. [backend/app/main.py : L27-61]
+- [SHIPPED] Python oracles under `oracles/` run as one Cloud Run Job tick: scores → resolve → resolve_general → schedule → listing, after a single-flight lease and an operator auth preflight. [oracles/job.py : L1-19]
+- [SHIPPED] Next.js web under `web/` lists markets, executes AMM swaps, lists user markets at `/list`, shows oracle status.
+- [SHIPPED] Flutter app under `mobile/` mirrors the web markets, trade, wallet and oracle modules (no listing UI). See [mobile/README.md](../../mobile/README.md).
 
 ## Market types
 
-- [SHIPPED] Type 0 primary: operator-created via `createPrimaryMarket` with required seed. Trades on MarketAMM. [contracts/src/MarketFactory.vy : L82-89]
-- [SHIPPED] Type 1 wildcard: generator-created child with optional USDC seed into MarketAMM. [contracts/src/MarketFactory.vy : L92-99]
-- [SHIPPED] Exchange CLOB (`matchOrders`) remains deployed leftover overlay; it is not required to trade. [contracts/src/Exchange.vy : L128-159]
-- [PHASE2] Uniform-LVR default pool (OU-T008/T009), permissionless listing (OU-T010). A CLOB overlay may be scheduled later; it is not a required Phase 2 destination.
+- [SHIPPED] Type 0 primary: operator `createPrimaryMarket` with required seed; the operator owns the seed LP. [contracts/src/MarketFactory.vy : L143-150]
+- [SHIPPED] Type 1 wildcard: generator- or operator-created child (closes ≤ parent) with optional seed. [contracts/src/MarketFactory.vy : L152-159]
+- [SHIPPED] Type 2 user market: `createPermissionlessMarket` by an allowlisted lister, or anyone once `permissionless` is on; the lister owns the seed LP. The API shows it only after the listing is confirmed. [contracts/src/MarketFactory.vy : L177-199]
+- [SHIPPED] Exchange CLOB (`matchOrders`) remains deployed leftover overlay; it is not required to trade. Makers must be EOAs because Exchange uses `ecrecover` (OU-T016). [contracts/src/Exchange.vy : L94-100]
+- [PHASE2] Dynamic liquidity L_t (OU-T015).
 
-## Trust boundaries (MVP)
+## Market lifecycle
 
-- [SHIPPED] `operator` creates primaries, pauses markets, sets factory/generator, arbitrates after the window. [contracts/src/ConsensusOracle.vy : L219-226]
-- [SHIPPED] Off-chain matcher may call leftover `matchOrders` with `relayer_private_key`. Anyone who holds both EIP-712 signatures can settle; the relayer is convenience, not a unique privilege on-chain. This is not the happy path. [backend/app/orderbook/matcher.py : L88-136]
-- [SHIPPED] Three agent EOAs are the only attestors. Unanimous `submitConsensus` resolves immediately. [contracts/src/ConsensusOracle.vy : L144-161]
+- [SHIPPED] Trading halts at closeTime twice over: MarketAMM v2 reverts buys, sells and adds (`closeGate`, default on) and the API returns 409 for quotes, sponsored trades and CLOB orders (`TRADING_HALT_AT_CLOSE`, default true). Direct contract calls on a v1 AMM are not gated. [contracts/src/MarketAMM.vy : L115-119] [backend/app/markets/trading.py : L42-58]
+- [SHIPPED] Resolution: unanimous `submitConsensus` from the job (dual gate for sports winners, 3/3 plus a confidence floor elsewhere). [contracts/src/ConsensusOracle.vy : L144-161]
+- [SHIPPED] Past closeTime + 24 h the job's `OU_FALLBACK_POLICY` (default `attest`) has matching agents `submitAttestation`, then calls `resolveFallback`; `arbitrate` adds operator `resolveArbitrated`. [oracles/resolve/fallback.py : L47-151]
+- [STUB] Cancelled or unanswerable markets have no payout path: ConsensusOracle only reports [1,0] or [0,1] (OU-T014). [contracts/src/ConsensusOracle.vy : L120-127]
+
+## Trust boundaries
+
+- [SHIPPED] `operator` creates primaries, pauses markets, sets factory, generator, listing config and the AMM close gate, relays fallback attestations and arbitrates after the window. [contracts/src/ConsensusOracle.vy : L220-226]
+- [SHIPPED] The CLOB relayer (off by default) submits leftover `matchOrders` with `RELAYER_PRIVATE_KEY` only after verifying both EIP-712 signatures at the API edge; anyone holding both signatures could settle, so the relayer is a convenience, not an on-chain privilege. [backend/app/orderbook/router.py : L94-164] [backend/app/relayer/worker.py : L1-24]
+- [SHIPPED] Three agent EOAs are the only attestors. The job's config guard refuses to send when its keys do not match `oracle.agents(i)` and `operator()`.
 - [SHIPPED] User-facing auth is Coinbase CDP `validateAccessToken`; HS256 `sub` is the smart-account address. CDP users are not operators. [backend/app/auth/router.py : L144-173]
-- [SHIPPED] SIWE with `ecrecover` remains for operator/dev JWT. [backend/app/auth/router.py : L86-141]
-- [SHIPPED] Gasless user ops use CDP Paymaster (`useCdpPaymaster: true`). OverUnderPaymaster stays leftover in-tree. [docs/adr/0010-cdp-embedded-wallets.md : L28-39] [contracts/src/OverUnderPaymaster.vy : L322-355]
-- [PHASE2] Production leftover-CLOB relayer with nonce/gas policy.
+- [SHIPPED] SIWE with `ecrecover` remains for operator/dev JWT; the oracle job bootstraps its operator user through it. [backend/app/auth/router.py : L86-141]
+- [SHIPPED] Gasless user ops use CDP Paymaster (`useCdpPaymaster: true`). OverUnderPaymaster stays leftover in-tree. [web/src/app/providers.tsx : L21-45] [contracts/src/OverUnderPaymaster.vy : L322-355]
+- [SHIPPED] Research agents run locally with MCP-only tools by default (`OU_CURSOR_RUNTIME=local`, `tools=["mcp"]`), treat question and criteria text as untrusted, and job output is redacted.
 
 ## Settlement
 
-- [SHIPPED] AMM fee 100 bps split 50 vault / 50 LP on all markets. [contracts/src/MarketAMM.vy : L40]
+- [SHIPPED] AMM fee 100 bps: 50 bps to FeeVault, 50 bps to the pool's LP fee accumulator, on all markets. [contracts/src/MarketAMM.vy : L69-72]
 - [SHIPPED] Leftover CLOB taker fee 75 bps to FeeVault when Exchange matching is used. [contracts/src/Exchange.vy : L33]
+- [SHIPPED] Optional user-listing fee goes to `feeRecipient`; the deploy scripts set FeeVault as recipient and a fee of 0.
 - [SHIPPED] OU is 100M fixed supply; FeeVault NAV is `usdc_balance * 1e18 / ou_supply`. [contracts/src/FeeVault.vy : L44-50]
 - [SHIPPED] OU emissions transfer from treasury; they do not mint into FeeVault.
+
+## Deployment state
+
+- [SHIPPED] Code: MarketAMM v2 and MarketFactory v2 on branch `feat/lifecycle-phase2-completion`, with the `deploy-contracts.yml` workflow (targets verify, v2, core).
+- [SHIPPED] Base Sepolia still runs the v1 AMM + Factory until an operator runs that workflow after merge (verify, then v2). It reuses CTF, ConsensusOracle, FeeVault, USDC, Exchange and the paymaster, so existing condition ids keep resolving; repo vars and `deploy-gcp.yml` follow. Procedure: [runbooks/operations.md](../runbooks/operations.md).
 
 ## Read next
 
 - [SHIPPED] [contracts.md](contracts.md)
 - [SHIPPED] [backend.md](backend.md)
 - [SHIPPED] [oracles.md](oracles.md)
-- [SHIPPED] [web.md](web.md)
+- [SHIPPED] [web.md](web.md) (includes Mobile)
 - [SHIPPED] [data-flow.md](data-flow.md)
