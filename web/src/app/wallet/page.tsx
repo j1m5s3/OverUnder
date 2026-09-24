@@ -2,10 +2,11 @@
 
 import { useCurrentUser } from "@coinbase/cdp-hooks";
 import { RampCard } from "@/features/wallet/RampCard";
+import { smartAccountOf } from "@/features/wallet/account";
 
 export default function WalletPage() {
   const { currentUser } = useCurrentUser();
-  const address = currentUser?.evmSmartAccounts?.[0] || "";
+  const address = smartAccountOf(currentUser) ?? "";
   return (
     <div>
       <h1>Wallet</h1>

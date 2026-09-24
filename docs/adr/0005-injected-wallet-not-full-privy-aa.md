@@ -3,9 +3,9 @@ title: Injected wallet not full Privy AA
 status: MIXED
 area: web
 summary: Historical injected-wagmi and OverUnderPaymaster app path. User-facing wallets are superseded by ADR-0010 CDP embedded wallets.
-last_verified: 2026-09-21
+last_verified: 2026-09-23
 pointers:
-  - "[docs/adr/0010-cdp-embedded-wallets.md : L28-39]"
+  - "[docs/adr/0010-cdp-embedded-wallets.md : L38-49]"
   - "[contracts/src/OverUnderPaymaster.vy : L322-355]"
   - "[contracts/src/SimpleAccount.vy : L40-49]"
   - "[backend/app/auth/router.py : L86-141]"

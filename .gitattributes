@@ -1,0 +1,23 @@
+# Store text as LF in the index; working-tree endings follow core.autocrlf.
+* text=auto
+
+# Shell scripts run under bash (Actions runners, containers, Git Bash) and break on CRLF.
+*.sh text eol=lf
+
+# cmd.exe scripts need CRLF.
+*.cmd text eol=crlf
+*.bat text eol=crlf
+
+# Binary assets: never convert.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.webp binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.otf binary
+*.pdf binary
+*.zip binary

@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import os
 import re
+from collections import Counter
 from dataclasses import asdict, dataclass
 
 from agents.base import MockSearch, SearchHit, hits_from_search, should_use_mock
@@ -118,11 +120,53 @@ Omit bye weeks. Never invent URLs. kickoff_unix is UNIX seconds UTC.
     return games
 
 
+def mock_schedule_rows() -> list[str]:
+    """OU_MOCK_SCHEDULE rows ("2026 W3 Bills vs Dolphins kickoff 1800000000 scheduled", one per line or ';')."""
+    raw = os.getenv("OU_MOCK_SCHEDULE", "")
+    return [row.strip() for row in re.split(r"[;\n]", raw) if row.strip()]
+
+
 def scout(search=None, slot: str = "alpha") -> list[ScheduleGame]:
-    if search is not None or should_use_mock():
-        hits = hits_from_search(search or MockSearch([]), "NFL schedule this week and next week")
+    if search is not None:
+        hits = hits_from_search(search, "NFL schedule this week and next week")
         return _heuristic_extract(hits)
+    if should_use_mock():
+        # The default MockSearch text is a game recap, not a schedule; with no mock rows
+        # there is nothing to publish (instead of failing every mock tick).
+        rows = mock_schedule_rows()
+        if not rows:
+            return []
+        return _heuristic_extract(MockSearch(rows).search("NFL schedule this week and next week"))
     return _cursor_extract(slot)
+
+
+def _game_order(game: ScheduleGame) -> tuple:
+    return (game.season, game.week, game.kickoff_unix, game.away, game.home)
+
+
+def agreed_games(reports: list[list[ScheduleGame]]) -> tuple[list[ScheduleGame], list[ScheduleGame]]:
+    """Per-game 3/3: a row is agreed only if every report has the identical key.
+
+    Everything else is disputed, including a matchup that more than one agreed
+    row covers (the API upserts on season/week/home/away, so it would be ambiguous).
+    """
+    if not reports:
+        return [], []
+    by_key: dict[tuple, ScheduleGame] = {}
+    for games in reports:
+        for game in games:
+            by_key.setdefault(game.key(), game)
+    common = set.intersection(*({g.key() for g in games} for games in reports))
+
+    def matchup(key: tuple) -> tuple:
+        game = by_key[key]
+        return (game.season, game.week, game.away, game.home)
+
+    per_matchup = Counter(matchup(key) for key in common)
+    agreed = [by_key[key] for key in common if per_matchup[matchup(key)] == 1]
+    agreed_keys = {g.key() for g in agreed}
+    disputed = [game for key, game in by_key.items() if key not in agreed_keys]
+    return sorted(agreed, key=_game_order), sorted(disputed, key=_game_order)
 
 
 class ScheduleCoordinator:
@@ -140,18 +184,19 @@ class ScheduleCoordinator:
             reports = [scout(search=s) for s in self.searches]
         else:
             reports = [scout(slot=slot) for slot in self.slots]
-        keys = {frozenset(g.key() for g in games) for games in reports}
-        unanimous = len(keys) == 1
-        chosen = reports[0] if unanimous else None
-        if unanimous and chosen is not None:
+        agreed, disputed = agreed_games(reports)
+        if agreed:
             publisher = self.publisher
             if publisher is None:
                 from schedule.publish import publish_schedule
 
                 publisher = publish_schedule
-            publisher([g.as_api_body() for g in chosen])
+            publisher([g.as_api_body() for g in agreed])
         return {
-            "unanimous": unanimous,
-            "games": [asdict(g) for g in chosen] if chosen else None,
+            "ok": True,
+            "unanimous": not disputed,
+            "published": len(agreed),
+            "games": [asdict(g) for g in agreed] if agreed else None,
+            "disputed": [asdict(g) for g in disputed],
             "reports": [[asdict(g) for g in games] for games in reports],
         }

@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
-import '../models/models.dart';
-import '../services/api_client.dart';
-import '../theme/app_theme.dart';
+import '../../models/models.dart';
+import '../../services/api_client.dart';
+import '../../theme/app_theme.dart';
 import 'market_detail_screen.dart';
+import 'market_tag.dart';
 
 class MarketListScreen extends StatefulWidget {
   final ApiClient apiClient;
@@ -14,7 +15,7 @@ class MarketListScreen extends StatefulWidget {
 }
 
 class _MarketListScreenState extends State<MarketListScreen> {
-  List<Market> _markets = [];
+  List<EventCard> _cards = [];
   bool _loading = true;
   String? _error;
 
@@ -31,17 +32,31 @@ class _MarketListScreenState extends State<MarketListScreen> {
     });
 
     try {
-      final markets = await widget.apiClient.getMarkets();
+      final cards = await widget.apiClient.getEventCards();
+      if (!mounted) return;
       setState(() {
-        _markets = markets;
+        _cards = cards;
         _loading = false;
       });
     } catch (e) {
+      if (!mounted) return;
       setState(() {
         _error = e.toString();
         _loading = false;
       });
     }
+  }
+
+  void _openMarket(Market market) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => MarketDetailScreen(
+          apiClient: widget.apiClient,
+          marketId: market.conditionId,
+        ),
+      ),
+    );
   }
 
   @override
@@ -58,7 +73,7 @@ class _MarketListScreenState extends State<MarketListScreen> {
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      Text('Error: $_error', style: TextStyle(color: AppTheme.no)),
+                      Text('Error: $_error', style: const TextStyle(color: AppTheme.no)),
                       const SizedBox(height: AppTheme.spacingMd),
                       ElevatedButton(
                         onPressed: _loadMarkets,
@@ -69,113 +84,132 @@ class _MarketListScreenState extends State<MarketListScreen> {
                 )
               : RefreshIndicator(
                   onRefresh: _loadMarkets,
-                  child: ListView.builder(
-                    padding: const EdgeInsets.all(AppTheme.spacingMd),
-                    itemCount: _markets.length,
-                    itemBuilder: (context, index) {
-                      final market = _markets[index];
-                      return MarketCard(
-                        market: market,
-                        onTap: () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (context) => MarketDetailScreen(
-                                apiClient: widget.apiClient,
-                                marketId: market.conditionId,
+                  child: _cards.isEmpty
+                      ? ListView(
+                          padding: const EdgeInsets.all(AppTheme.spacingMd),
+                          children: const [
+                            Center(
+                              child: Text(
+                                'No markets yet',
+                                style: TextStyle(color: AppTheme.textMuted),
                               ),
                             ),
-                          );
-                        },
-                      );
-                    },
-                  ),
+                          ],
+                        )
+                      : ListView.builder(
+                          padding: const EdgeInsets.all(AppTheme.spacingMd),
+                          itemCount: _cards.length,
+                          itemBuilder: (context, index) {
+                            final card = _cards[index];
+                            return MarketCard(
+                              market: card.primary,
+                              wildcards: card.children,
+                              onTap: () => _openMarket(card.primary),
+                              onWildcardTap: _openMarket,
+                            );
+                          },
+                        ),
                 ),
     );
   }
 }
 
+/// An event card: the primary market with its wildcards listed underneath.
 class MarketCard extends StatelessWidget {
   final Market market;
   final VoidCallback onTap;
+  final List<Market> wildcards;
+  final ValueChanged<Market>? onWildcardTap;
 
   const MarketCard({
     super.key,
     required this.market,
     required this.onTap,
+    this.wildcards = const [],
+    this.onWildcardTap,
   });
 
   @override
   Widget build(BuildContext context) {
+    final now = DateTime.now();
+    final tags = marketTags(market, now);
+
     return Card(
       margin: const EdgeInsets.only(bottom: AppTheme.spacingMd),
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(AppTheme.radiusMd),
-        child: Padding(
-          padding: const EdgeInsets.all(AppTheme.spacingMd),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      market.question,
-                      style: Theme.of(context).textTheme.bodyLarge,
-                    ),
-                  ),
-                  if (market.isWildcard)
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: AppTheme.spacingSm,
-                        vertical: AppTheme.spacingXs,
-                      ),
-                      decoration: BoxDecoration(
-                        color: AppTheme.accent.withOpacity(0.2),
-                        borderRadius: BorderRadius.circular(AppTheme.radiusSm),
-                      ),
-                      child: Text(
-                        'Wildcard',
-                        style: TextStyle(
-                          color: AppTheme.accent,
-                          fontSize: AppTheme.sizeSm,
-                        ),
-                      ),
-                    ),
-                ],
-              ),
-              const SizedBox(height: AppTheme.spacingSm),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          InkWell(
+            onTap: onTap,
+            child: Padding(
+              padding: const EdgeInsets.all(AppTheme.spacingMd),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    'Probability: ${(market.suggestedProbability * 100).toStringAsFixed(1)}%',
-                    style: TextStyle(color: AppTheme.textMuted, fontSize: AppTheme.sizeSm),
+                    market.question,
+                    style: Theme.of(context).textTheme.bodyLarge,
                   ),
-                  if (market.resolved)
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: AppTheme.spacingSm,
-                        vertical: AppTheme.spacingXs,
-                      ),
-                      decoration: BoxDecoration(
-                        color: AppTheme.yes.withOpacity(0.2),
-                        borderRadius: BorderRadius.circular(AppTheme.radiusSm),
-                      ),
-                      child: Text(
-                        'Resolved',
-                        style: TextStyle(
-                          color: AppTheme.yes,
-                          fontSize: AppTheme.sizeSm,
+                  const SizedBox(height: AppTheme.spacingSm),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          'Probability: ${(market.yesProbability * 100).toStringAsFixed(1)}%',
+                          style: const TextStyle(color: AppTheme.textMuted, fontSize: AppTheme.sizeSm),
                         ),
                       ),
-                    ),
+                      if (tags.isNotEmpty)
+                        Wrap(
+                          spacing: AppTheme.spacingXs,
+                          children: tags,
+                        ),
+                    ],
+                  ),
                 ],
               ),
-            ],
+            ),
           ),
-        ),
+          if (wildcards.isNotEmpty) ...[
+            const Divider(height: 1, color: AppTheme.border),
+            for (final wildcard in wildcards)
+              InkWell(
+                onTap: onWildcardTap == null ? null : () => onWildcardTap!(wildcard),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: AppTheme.spacingMd,
+                    vertical: AppTheme.spacingSm,
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.subdirectory_arrow_right, size: 16, color: AppTheme.textMuted),
+                      const SizedBox(width: AppTheme.spacingSm),
+                      Expanded(
+                        child: Text(
+                          wildcard.question,
+                          style: Theme.of(context).textTheme.bodyMedium,
+                        ),
+                      ),
+                      const SizedBox(width: AppTheme.spacingSm),
+                      Text(
+                        '${(wildcard.yesProbability * 100).toStringAsFixed(0)}%',
+                        style: const TextStyle(color: AppTheme.textMuted, fontSize: AppTheme.sizeSm),
+                      ),
+                      if (wildcard.resolved || wildcard.isTradingClosed(now)) ...[
+                        const SizedBox(width: AppTheme.spacingXs),
+                        Icon(
+                          wildcard.resolved ? Icons.check_circle : Icons.lock_clock,
+                          size: 16,
+                          color: wildcard.resolved ? AppTheme.yes : AppTheme.warning,
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ),
+          ],
+        ],
       ),
     );
   }

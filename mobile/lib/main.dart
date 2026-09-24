@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'config/app_config.dart';
 import 'theme/app_theme.dart';
 import 'services/api_client.dart';
 import 'providers/wallet_provider.dart';
@@ -42,9 +43,8 @@ class _MainScreenState extends State<MainScreen> with SingleTickerProviderStateM
   void initState() {
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
-    // Default to localhost for local development
-    // Production would read from environment or config
-    _apiClient = ApiClient(baseUrl: 'http://127.0.0.1:8000');
+    // API_BASE_URL via --dart-define; defaults to localhost for local development
+    _apiClient = ApiClient(baseUrl: AppConfig.apiBaseUrl);
   }
 
   @override

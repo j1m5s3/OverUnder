@@ -11,7 +11,7 @@ import re
 from dataclasses import asdict, dataclass, field
 
 from agents.base import MockSearch, SearchHit, hits_from_search, should_use_mock
-from agents.cursor_runtime import model_id, prompt_json
+from agents.cursor_runtime import game_date_matches, kickoff_line, model_id, prompt_json
 
 _VS = re.compile(r"^([^:?]+?)\s+vs\.?\s+([^:?]+?)(?::|$)", re.IGNORECASE)
 _PAIR = re.compile(r"(\d{1,3})\s*[-–]\s*(\d{1,3})")
@@ -35,6 +35,8 @@ class ScoreReport:
     summary: str
     evidence_urls: list[str]
     facts: dict = field(default_factory=dict)
+    # Date of the game the report describes (live runs with a kickoff); not part of key().
+    game_date: str | None = None
 
     def key(self) -> tuple:
         return (
@@ -59,6 +61,11 @@ class ScoreReport:
 
 
 _STATUSES = {"scheduled", "in_progress", "final", "postponed", "cancelled"}
+# Statuses that describe a game that was played (or called off) on its date: the report's
+# game_date must match the kickoff. A postponed or scheduled game may carry a new date.
+_DATED = frozenset({"in_progress", "final", "cancelled"})
+# Statuses with no meaningful score: numbers and facts stay null.
+_SCORELESS = frozenset({"scheduled", "postponed", "cancelled"})
 
 
 def canonicalize(report: ScoreReport, question: str) -> ScoreReport:
@@ -76,7 +83,7 @@ def canonicalize(report: ScoreReport, question: str) -> ScoreReport:
         elif value is None and key == "away_score":
             value = away_score
         facts[key] = value
-    if status == "scheduled":
+    if status in _SCORELESS:
         home_score, away_score = None, None
         facts = {key: None for key in keys}
     return ScoreReport(
@@ -89,6 +96,7 @@ def canonicalize(report: ScoreReport, question: str) -> ScoreReport:
         summary=report.summary,
         evidence_urls=report.evidence_urls,
         facts=facts,
+        game_date=report.game_date,
     )
 
 
@@ -166,7 +174,7 @@ def _facts_from_blob(question: str, blob: str, home: str, away: str, home_score:
 
 
 def _require_facts(question: str, status: str, facts: dict) -> None:
-    if status == "scheduled":
+    if status in _SCORELESS:
         return
     for key in requested_facts(question):
         if facts.get(key) is None:
@@ -219,12 +227,26 @@ def _heuristic_extract(question: str, hits: list[SearchHit]) -> ScoreReport:
     )
 
 
-def _cursor_extract(question: str, slot: str) -> ScoreReport:
+def check_game_date(status: str, game_date, kickoff: str | None) -> None:
+    """Reject a played/called-off report whose game_date is missing or not the kickoff's date.
+
+    The question text repeats across seasons and rematches, so an agent can pick up an
+    earlier meeting of the same teams; without this both resolve gates could agree on it.
+    """
+    if not kickoff or status not in _DATED:
+        return
+    if not game_date_matches(game_date, kickoff):
+        reported = str(game_date or "missing")[:32]
+        raise RuntimeError(f"score report game_date {reported} does not match kickoff {kickoff}")
+
+
+def _cursor_extract(question: str, slot: str, kickoff: str | None = None) -> ScoreReport:
     home, away = parse_teams(question)
     keys = list(requested_facts(question))
+    date_field = "- game_date: YYYY-MM-DD of the game you report (required)\n" if kickoff else ""
     prompt = f"""Use the search MCP to extract the current or final sports facts for this market.
 
-Question: "{question}"
+{kickoff_line(kickoff)}Question: "{question}"
 Expected home team: {home}
 Expected away team: {away}
 Requested fact keys: {keys}
@@ -232,14 +254,14 @@ Requested fact keys: {keys}
 Respond with JSON only:
 - home_label, away_label (strings)
 - home_score, away_score (integers or null if the game has not started / score unknown)
-- status: scheduled | in_progress | final
+- status: scheduled | in_progress | final | postponed | cancelled
 - period_label: short string or null
 - facts: object containing every requested key (number, string, or null)
 - summary: max 280 chars
 - search_hits: list of {{url, content}} actually returned by search tools
 - evidence_urls: subset of search_hits urls
-
-Never invent a 0-0 score for a scheduled game. Use nulls instead. Never invent URLs.
+{date_field}
+Never invent a 0-0 score for a scheduled, postponed or cancelled game. Use nulls instead. Never invent URLs.
 """
     data = prompt_json(prompt, model_id(slot))
     raw_hits = data.get("search_hits")
@@ -253,7 +275,9 @@ Never invent a 0-0 score for a scheduled game. Use nulls instead. Never invent U
     home_score = _int_or_none(data.get("home_score"))
     away_score = _int_or_none(data.get("away_score"))
     status = data.get("status") or "scheduled"
-    if status == "scheduled":
+    if status not in _STATUSES:
+        status = "scheduled"
+    if status in _SCORELESS:
         home_score, away_score = None, None
     facts = data.get("facts") if isinstance(data.get("facts"), dict) else {}
     for key in keys:
@@ -262,10 +286,12 @@ Never invent a 0-0 score for a scheduled game. Use nulls instead. Never invent U
             facts[key] = home_score if facts.get(key) is None else facts[key]
         elif key == "away_score":
             facts[key] = away_score if facts.get(key) is None else facts[key]
-    if status == "scheduled":
+    if status in _SCORELESS:
         facts = {k: None for k in keys}
         home_score, away_score = None, None
     _require_facts(question, status, facts)
+    game_date = data.get("game_date")
+    check_game_date(status, game_date, kickoff)
     report = ScoreReport(
         home_label=str(data.get("home_label") or home),
         away_label=str(data.get("away_label") or away),
@@ -276,6 +302,7 @@ Never invent a 0-0 score for a scheduled game. Use nulls instead. Never invent U
         summary=str(data.get("summary") or "")[:280],
         evidence_urls=evidence_urls,
         facts=facts,
+        game_date=str(game_date)[:32] if game_date else None,
     )
     for url in report.evidence_urls:
         if url not in hit_urls:
@@ -292,12 +319,13 @@ def extract_score(question: str, hits: list[SearchHit]) -> ScoreReport:
     return report
 
 
-def scout(question: str, search=None, slot: str = "alpha") -> ScoreReport:
+def scout(question: str, search=None, slot: str = "alpha", kickoff: str | None = None) -> ScoreReport:
+    """`kickoff` (ISO UTC) pins a live scout to that game: see check_game_date."""
     if search is not None or should_use_mock():
         hits = hits_from_search(search, f"{question} score box score")
         report = extract_score(question, hits)
     else:
-        report = _cursor_extract(question, slot)
+        report = _cursor_extract(question, slot, kickoff)
     return canonicalize(report, question)
 
 
@@ -313,11 +341,11 @@ class ScoreCoordinator:
             self.searches = searches
             self.slots = None
 
-    def run(self, question: str, condition_id: str | None = None) -> dict:
+    def run(self, question: str, condition_id: str | None = None, kickoff: str | None = None) -> dict:
         if self.searches is not None:
-            reports = [scout(question, search=s) for s in self.searches]
+            reports = [scout(question, search=s, kickoff=kickoff) for s in self.searches]
         else:
-            reports = [scout(question, slot=slot) for slot in self.slots]
+            reports = [scout(question, slot=slot, kickoff=kickoff) for slot in self.slots]
         keys = {r.key() for r in reports}
         unanimous = len(keys) == 1
         chosen = reports[0] if unanimous else None

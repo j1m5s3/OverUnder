@@ -1,9 +1,20 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { api } from "@/shared/api/client";
+import { api, apiErrorDetail, apiErrorStatus } from "@/shared/api/client";
 import { useCurrentUser, useIsSignedIn, useSendUserOperation } from "@coinbase/cdp-hooks";
 import { encodeFunctionData, parseAbi } from "viem";
+import { smartAccountOf } from "@/features/wallet/account";
+import { useUserOpOutcome } from "@/features/wallet/useUserOpOutcome";
+import {
+  closedLabel,
+  closedReasonFromError,
+  effectiveClosedReason,
+  msUntilHalt,
+  quoteErrorMessage,
+  tradingState,
+  type ClosedReason,
+} from "./tradingWindow";
 
 const AMM_ABI = parseAbi([
   "function buyWithUSDC(bytes32 conditionId, bool buyYes, uint256 usdcIn, uint256 minOut) external returns (uint256)",
@@ -40,22 +51,22 @@ function calculateImpliedProbability(quote: any, mode: "buy" | "sell", outcome: 
   return null;
 }
 
-function smartAccountOf(
-  user: { evmSmartAccounts?: Array<string | { address?: string }> } | null | undefined,
-): `0x${string}` | undefined {
-  const account = user?.evmSmartAccounts?.[0];
-  const address = typeof account === "string" ? account : account?.address;
-  return address as `0x${string}` | undefined;
-}
-
 export function AmmSwap({
   conditionId,
   initialSide,
   question,
+  closeTime,
+  resolved,
+  tradingHaltsAt,
+  tradingOpen,
 }: {
   conditionId: string;
   initialSide?: "yes" | "no";
   question?: string;
+  closeTime?: number;
+  resolved?: boolean;
+  tradingHaltsAt?: number | null;
+  tradingOpen?: boolean;
 }) {
   const [mode, setMode] = useState<"buy" | "sell">("buy");
   const [outcome, setOutcome] = useState<"yes" | "no">(initialSide || "yes");
@@ -65,11 +76,58 @@ export function AmmSwap({
   const [slippage, setSlippage] = useState("0.5");
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [quoting, setQuoting] = useState(false);
-  
+  const [nowSec, setNowSec] = useState(() => Math.floor(Date.now() / 1000));
+  const [serverClosed, setServerClosed] = useState<ClosedReason | null>(null);
+  const [sending, setSending] = useState(false);
+  const pendingKindRef = useRef<"buy" | "sell">("buy");
+
   const { isSignedIn } = useIsSignedIn();
   const { currentUser } = useCurrentUser();
-  const { sendUserOperation } = useSendUserOperation();
+  const sendOp = useSendUserOperation();
+  const { sendUserOperation } = sendOp;
+  const { outcome: opOutcome, track: trackOp } = useUserOpOutcome(sendOp);
   const address = smartAccountOf(currentUser);
+
+  const tradeWindow = tradingState({ closeTime, resolved, tradingHaltsAt, tradingOpen }, nowSec);
+  const tradingClosed = tradeWindow.closed || serverClosed !== null;
+  const closedReason: ClosedReason = effectiveClosedReason(serverClosed, tradeWindow.reason);
+  // "unknown" = submitted but we lost track of it; it may still land, so the
+  // ticket stays locked until our re-poll settles it or gives up.
+  const opPending =
+    sending || opOutcome.state === "pending" || (opOutcome.state === "unknown" && !opOutcome.gaveUp);
+  const opWarning =
+    opOutcome.state === "unknown"
+      ? opOutcome.gaveUp
+        ? "We couldn't confirm your last trade. Check your positions before trading again."
+        : "Submitted, still confirming. Check your positions before trading again."
+      : null;
+
+  // Flip to closed at haltsAt without a reload.
+  useEffect(() => {
+    const delay = msUntilHalt(tradeWindow.haltsAt, Date.now());
+    if (delay === null) return;
+    const timer = setTimeout(() => setNowSec(Math.floor(Date.now() / 1000)), delay);
+    return () => clearTimeout(timer);
+  }, [tradeWindow.haltsAt]);
+
+  // Status follows inclusion, not submission; an on-chain "market closed" revert
+  // switches the ticket to the closed state. Only a definitive failure is shown
+  // as one; a lost status poll shows opWarning instead of the transport error.
+  useEffect(() => {
+    if (opOutcome.state === "unknown") {
+      setStatus("");
+    } else if (opOutcome.state === "success") {
+      setStatus(pendingKindRef.current === "buy" ? "success! tokens received" : "success! usdc received");
+    } else if (opOutcome.state === "error") {
+      const reason = closedReasonFromError(opOutcome.message);
+      if (reason) {
+        setServerClosed(reason);
+        setStatus("");
+      } else {
+        setStatus(opOutcome.message || "transaction failed");
+      }
+    }
+  }, [opOutcome]);
 
   const ammAddress = process.env.NEXT_PUBLIC_AMM_ADDRESS as `0x${string}` | undefined;
   const usdcAddress = process.env.NEXT_PUBLIC_USDC_ADDRESS as `0x${string}` | undefined;
@@ -82,14 +140,18 @@ export function AmmSwap({
   useEffect(() => {
     requestIdRef.current++;
     setQuote(null);
+    if (tradingClosed) {
+      setQuoting(false);
+      return;
+    }
     setQuoting(true);
-    
+
     const debounceTimer = setTimeout(() => {
       refresh();
     }, 300);
-    
+
     return () => clearTimeout(debounceTimer);
-  }, [amount, outcome, mode, conditionId]);
+  }, [amount, outcome, mode, conditionId, tradingClosed]);
 
   async function refresh() {
     if (!envConfigured) {
@@ -130,7 +192,13 @@ export function AmmSwap({
     } catch (e: any) {
       if (requestId === requestIdRef.current) {
         setQuote(null);
-        setStatus(e.message);
+        const reason = closedReasonFromError(e?.message);
+        if (reason) {
+          setServerClosed(reason);
+          setStatus("");
+        } else {
+          setStatus(quoteErrorMessage(apiErrorStatus(e), apiErrorDetail(e)));
+        }
       }
     } finally {
       if (requestId === requestIdRef.current) {
@@ -140,6 +208,13 @@ export function AmmSwap({
   }
 
   function handleExecute() {
+    if (tradingClosed) {
+      setStatus(closedLabel(closedReason).toLowerCase());
+      return;
+    }
+
+    if (opPending) return;
+
     if (!isSignedIn || !address) {
       setStatus("sign in to trade");
       return;
@@ -187,7 +262,9 @@ export function AmmSwap({
       }
 
       setStatus("buying...");
-      await sendUserOperation({
+      setSending(true);
+      pendingKindRef.current = "buy";
+      const { userOperationHash } = await sendUserOperation({
         evmSmartAccount: address!,
         network: "base-sepolia",
         calls: [
@@ -212,9 +289,23 @@ export function AmmSwap({
         ],
         useCdpPaymaster: true,
       });
-      setStatus("success! tokens received");
+      trackOp(userOperationHash, { evmSmartAccount: address!, network: "base-sepolia" });
+      setStatus("submitted, waiting for confirmation...");
     } catch (e: any) {
-      setStatus(e.message || "transaction failed");
+      reportSendError(e);
+    } finally {
+      setSending(false);
+    }
+  }
+
+  function reportSendError(e: any) {
+    const message = e?.message || "transaction failed";
+    const reason = closedReasonFromError(message);
+    if (reason) {
+      setServerClosed(reason);
+      setStatus("");
+    } else {
+      setStatus(message);
     }
   }
 
@@ -239,7 +330,9 @@ export function AmmSwap({
       const tokenAmount = BigInt(Math.round(amountNum * 1_000_000));
 
       setStatus("selling...");
-      await sendUserOperation({
+      setSending(true);
+      pendingKindRef.current = "sell";
+      const { userOperationHash } = await sendUserOperation({
         evmSmartAccount: address!,
         network: "base-sepolia",
         calls: [
@@ -264,9 +357,12 @@ export function AmmSwap({
         ],
         useCdpPaymaster: true,
       });
-      setStatus("success! usdc received");
+      trackOp(userOperationHash, { evmSmartAccount: address!, network: "base-sepolia" });
+      setStatus("submitted, waiting for confirmation...");
     } catch (e: any) {
-      setStatus(e.message || "transaction failed");
+      reportSendError(e);
+    } finally {
+      setSending(false);
     }
   }
 
@@ -288,8 +384,10 @@ export function AmmSwap({
     return null;
   }
 
-  const executeLabel = !address 
-    ? mode === "buy" 
+  const executeLabel = tradingClosed
+    ? closedLabel(closedReason)
+    : !address
+    ? mode === "buy"
       ? `sign in to buy ${outcome}`
       : `sign in to sell ${outcome}`
     : mode === "buy"
@@ -314,6 +412,15 @@ export function AmmSwap({
       <h3>Trade</h3>
       {question ? <p className="muted" style={{ marginTop: 0 }}>{question}</p> : null}
       <p className="muted">1% fee</p>
+      {tradingClosed && (
+        <p className="banner" role="status">
+          {closedReason === "resolved"
+            ? "This market has resolved. Trading is closed."
+            : closedReason === "unlisted"
+              ? "This market isn't open for trading here: its listing hasn't been confirmed."
+              : `Trading closed${tradeWindow.haltsAt ? ` at ${new Date(tradeWindow.haltsAt * 1000).toLocaleString()}` : ""}. Awaiting resolution.`}
+        </p>
+      )}
 
       <div className="row">
         <button 
@@ -343,9 +450,9 @@ export function AmmSwap({
       </div>
 
       <label className="muted">{amountLabel}</label>
-      <input value={amount} onChange={(e) => setAmount(e.target.value)} />
-      
-      {mode === "buy" && (
+      <input value={amount} onChange={(e) => setAmount(e.target.value)} disabled={tradingClosed} />
+
+      {mode === "buy" && !tradingClosed && (
         <div className="row" style={{ marginTop: 8 }}>
           <button className="btn ghost" style={{ fontSize: 12, padding: "6px 10px" }} onClick={() => addStake(5)}>
             +$5
@@ -363,7 +470,7 @@ export function AmmSwap({
         <p className="muted" style={{ marginTop: 12 }}>quoting...</p>
       )}
       
-      {!quoting && formatPayout() && (
+      {!quoting && !tradingClosed && formatPayout() && (
         <>
           <p className="muted" style={{ marginTop: 12 }}>{formatPayout()}</p>
           <p className="muted" style={{ marginTop: 4, fontSize: 12 }}>includes 1% fee</p>
@@ -374,7 +481,7 @@ export function AmmSwap({
         className="btn" 
         style={{ marginTop: 12 }} 
         onClick={handleExecute} 
-        disabled={!envConfigured || (Boolean(address) && (!quote || quoting))}
+        disabled={tradingClosed || opPending || !envConfigured || (Boolean(address) && (!quote || quoting))}
       >
         {executeLabel}
       </button>
@@ -403,6 +510,11 @@ export function AmmSwap({
         )}
       </div>
       
+      {opWarning && (
+        <p className="banner" role="status" style={{ marginTop: 12 }}>
+          {opWarning}
+        </p>
+      )}
       {status && <p className="muted" style={{ marginTop: 12 }}>{status}</p>}
     </div>
   );

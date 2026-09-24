@@ -3,13 +3,14 @@ title: Prediction AMM literature
 status: MIXED
 area: contracts
 summary: Stance box plus literature on uniform-LVR AMMs. Literature is not spec.
-last_verified: 2026-09-20
+last_verified: 2026-09-23
 pointers:
-  - "[docs/adr/0007-amm-first-uniform-lvr.md : L14-36]"
-  - "[contracts/src/MarketAMM.vy : L40]"
+  - "[contracts/src/MarketAMM.vy : L1-12]"
+  - "[contracts/src/MarketAMM.vy : L105-119]"
+  - "[contracts/src/lib/NormalMath.vy : L140-159]"
 ---
 
-> OverUnder stance ([ADR-0007](../adr/0007-amm-first-uniform-lvr.md)): **adopt** the uniform-LVR family (pm-AMM 2024 as the Gaussian-score case; Moallemi–Robinson–Zhu 2026 as the general theory). Default pool is a static uniform invariant; time-based liquidity and dynamic spreads are LP/fee policy, not a second book. Shipped `MarketAMM` CPMM stays until OU-T008. Literature below is not spec.
+> OverUnder stance ([ADR-0007](../adr/0007-amm-first-uniform-lvr.md)): **adopt** the uniform-LVR family (pm-AMM 2024 as the Gaussian-score case; Moallemi–Robinson–Zhu 2026 as the general theory). Default pool is a static uniform invariant; time-based liquidity and dynamic spreads are LP/fee policy, not a second book. Implemented by [ADR-0011](../adr/0011-pm-amm-v2-close-gate.md): `MarketAMM` v2 is the static pm-AMM (YES price Φ((no − yes)/L)) with an on-chain closeTime halt; dynamic L_t is OU-T015. Spike numbers: [uniform-lvr-spike.md](uniform-lvr-spike.md). Literature below is not spec.
 
 Yes, automated market maker (AMM) technology and methods have improved dramatically since Polymarket abandoned its original design.
 When Polymarket transitioned away from AMMs, the broader industry realized that standard DeFi formulas (like the ones used for swapping tokens) and traditional prediction-market rules (like the standard Logarithmic Market Scoring Rule, or LMSR) were structurally flawed for event contracts.

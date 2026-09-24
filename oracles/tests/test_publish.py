@@ -96,3 +96,58 @@ def test_coordinator_unanimous_posts_and_disagree_does_not():
         assert result["apiBody"] is None
     finally:
         os.environ.pop("OU_ORACLE_MOCK", None)
+
+
+
+# --- resolve/publish: /oracle/attest is operator-only ------------------------
+
+
+def _pub_env(monkeypatch):
+    monkeypatch.setenv("JWT_SECRET", "test-secret-please-use-32b-min!!")
+    monkeypatch.setenv("OPERATOR_PRIVATE_KEY", ANVIL_0)
+    monkeypatch.setenv("OU_API_URL", "http://api.test")
+
+
+def test_persist_attestations_sends_operator_bearer(monkeypatch):
+    from resolve.publish import persist_attestations, persist_research
+
+    _pub_env(monkeypatch)
+    seen = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append((str(request.url), request.headers.get("authorization"), json.loads(request.content)))
+        return httpx.Response(200, json={"ok": True, "id": len(seen)})
+
+    reports = [
+        {"agent": "alpha", "outcome": 1, "evidenceHash": "0x" + "a1" * 32, "summary": "s"},
+        {"agent": "beta", "outcome": 2, "evidenceHash": "0x" + "b2" * 32, "summary": ""},
+    ]
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        persist_attestations("0xabc", reports, client=client)
+        persist_research("0xabc", reports[:1], "research split", client=client)
+    assert [url for url, _, _ in seen] == ["http://api.test/api/v1/oracle/attest"] * 3
+    for _, auth, _ in seen:
+        token = auth.split(" ", 1)[1]
+        assert jwt.decode(token, "test-secret-please-use-32b-min!!", algorithms=["HS256"])["op"] is True
+    assert seen[0][2] == {"conditionId": "0xabc", "agent": "alpha", "outcome": 1, "evidenceHash": "0x" + "a1" * 32, "summary": "s"}
+    assert json.loads(seen[2][2]["evidenceJson"]) == [{"kind": "research", "reason": "research split"}]
+
+
+def test_persist_attestations_401_fails_closed(monkeypatch):
+    from resolve.publish import persist_attestations
+
+    _pub_env(monkeypatch)
+    transport = httpx.MockTransport(lambda request: httpx.Response(401, json={"detail": "unknown user"}))
+    with httpx.Client(transport=transport) as client:
+        with pytest.raises(RuntimeError, match="operator User missing"):
+            persist_attestations("0xabc", [{"agent": "alpha", "outcome": 0}], client=client)
+
+
+def test_persist_attestations_requires_jwt_secret(monkeypatch):
+    from resolve.publish import persist_attestations
+
+    _pub_env(monkeypatch)
+    monkeypatch.delenv("JWT_SECRET")
+    with pytest.raises(RuntimeError, match="JWT_SECRET"):
+        persist_attestations("0xabc", [{"agent": "alpha", "outcome": 0}])
+    persist_attestations("0xabc", [])

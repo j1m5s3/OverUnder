@@ -1,5 +1,5 @@
 # Multi-stage Dockerfile for FastAPI backend
-FROM python:3.11-slim as builder
+FROM python:3.11-slim AS builder
 
 WORKDIR /app
 
@@ -25,6 +25,9 @@ COPY . .
 
 # Make sure scripts in .local are usable
 ENV PATH=/root/.local/bin:$PATH
+
+# Flush logs straight to Cloud Logging
+ENV PYTHONUNBUFFERED=1
 
 # Cloud Run sets PORT env; default to 8080
 ENV PORT=8080

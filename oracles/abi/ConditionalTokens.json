@@ -1,0 +1,5 @@
+[
+  {"stateMutability": "view", "type": "function", "name": "payoutNumerators", "inputs": [{"name": "arg0", "type": "bytes32"}, {"name": "arg1", "type": "uint256"}], "outputs": [{"name": "", "type": "uint256"}]},
+  {"stateMutability": "view", "type": "function", "name": "payoutDenominator", "inputs": [{"name": "arg0", "type": "bytes32"}], "outputs": [{"name": "", "type": "uint256"}]},
+  {"stateMutability": "view", "type": "function", "name": "isResolved", "inputs": [{"name": "conditionId", "type": "bytes32"}], "outputs": [{"name": "", "type": "bool"}]}
+]

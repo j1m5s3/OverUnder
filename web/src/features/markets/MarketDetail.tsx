@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { api } from "@/shared/api/client";
+import { api, apiErrorStatus } from "@/shared/api/client";
 import { AmmSwap } from "@/features/trade/AmmSwap";
 import { OraclePanel } from "@/features/oracle/OraclePanel";
 import { MatchupHero } from "./MatchupHero";
@@ -11,8 +11,11 @@ import { PriceChart } from "./PriceChart";
 import { isSportsMarket } from "@/shared/utils/categorize";
 import {
   applyActiveMarketQuery,
+  detailFailureKind,
   hubRoster,
   resolveActiveConditionId,
+  yesProbability,
+  type DetailFailure,
   type Market,
   type MarketDetailData,
 } from "./eventHub";
@@ -42,12 +45,13 @@ function demoDetail(conditionId: string): MarketDetailData {
   };
 }
 
-function yesPct(probability: number): string {
-  return `${Math.round((probability || 0.5) * 100)}%`;
+function yesPct(market: Market): string {
+  return `${Math.round(yesProbability(market) * 100)}%`;
 }
 
 export function MarketDetail({ conditionId }: { conditionId: string }) {
   const [market, setMarket] = useState<MarketDetailData | null>(null);
+  const [failure, setFailure] = useState<Exclude<DetailFailure, "demo"> | null>(null);
   const [activeConditionId, setActiveConditionId] = useState(conditionId);
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -57,15 +61,41 @@ export function MarketDetail({ conditionId }: { conditionId: string }) {
   const initialSide = (sideParam === "yes" || sideParam === "no") ? sideParam : undefined;
 
   useEffect(() => {
+    let live = true;
+    setMarket(null);
+    setFailure(null);
     api(`/api/v1/markets/${encodeURIComponent(conditionId)}`)
-      .then(setMarket)
-      .catch(() => setMarket(demoDetail(conditionId)));
+      .then((detail: MarketDetailData) => {
+        if (live) setMarket(detail);
+      })
+      .catch((err) => {
+        if (!live) return;
+        const kind = detailFailureKind(apiErrorStatus(err));
+        if (kind === "demo") setMarket(demoDetail(conditionId));
+        else setFailure(kind);
+      });
+    return () => {
+      live = false;
+    };
   }, [conditionId]);
 
   useEffect(() => {
     if (!market || market.conditionId !== conditionId) return;
     setActiveConditionId(resolveActiveConditionId(market, mParam));
   }, [market, mParam, conditionId]);
+
+  if (failure) {
+    return (
+      <div className="card" role="status">
+        <h2 style={{ marginTop: 0 }}>{failure === "not-found" ? "Market not found" : "Couldn't load this market"}</h2>
+        <p className="muted" style={{ marginBottom: 0 }}>
+          {failure === "not-found"
+            ? "If you just listed it, it shows up here once its listing is confirmed. Rejected listings are not shown."
+            : "The API had a problem. Try again in a moment."}
+        </p>
+      </div>
+    );
+  }
 
   if (!market) {
     return (
@@ -108,6 +138,10 @@ export function MarketDetail({ conditionId }: { conditionId: string }) {
             conditionId={activeConditionId}
             initialSide={initialSide}
             question={activeMarket.question}
+            closeTime={activeMarket.closeTime}
+            resolved={activeMarket.resolved}
+            tradingHaltsAt={activeMarket.tradingHaltsAt}
+            tradingOpen={activeMarket.tradingOpen}
           />
         </div>
       </div>
@@ -127,7 +161,7 @@ export function MarketDetail({ conditionId }: { conditionId: string }) {
                   onClick={() => selectRow(row.conditionId)}
                 >
                   <span>{row.question}</span>
-                  <span className="yes">{yesPct(row.suggestedProbability)}</span>
+                  <span className="yes">{yesPct(row)}</span>
                 </button>
               );
             })}

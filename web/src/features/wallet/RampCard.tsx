@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { api } from "@/shared/api/client";
+import { api, apiErrorDetail } from "@/shared/api/client";
+import { parseRampAmount } from "./rampAmount";
 
 interface KycStatus {
   status: string;
@@ -38,13 +39,19 @@ export function RampCard({ address }: { address: string }) {
   }, [address]);
 
   const handleBuyUSDC = async () => {
+    // The API 400/422s a non-finite, zero or oversized amount; say so up front.
+    const usd = parseRampAmount(amount);
+    if (usd === null) {
+      setError("Enter an amount between $1 and $1,000,000.");
+      return;
+    }
     setLoading(true);
     setError("");
 
     try {
       const checkResponse = await api(`/api/v1/kyc/check`, {
         method: "POST",
-        body: JSON.stringify({ notional_usdc: parseFloat(amount) }),
+        body: JSON.stringify({ notional_usdc: usd }),
       });
 
       setKycCheck(checkResponse);
@@ -60,7 +67,7 @@ export function RampCard({ address }: { address: string }) {
       try {
         const moonpayResponse = await api(`/api/v1/ramps/moonpay/session`, {
           method: "POST",
-          body: JSON.stringify({ usdc_amount: amount }),
+          body: JSON.stringify({ usdc_amount: String(usd) }),
         });
 
         if (moonpayResponse.url) {
@@ -73,7 +80,8 @@ export function RampCard({ address }: { address: string }) {
       }
 
       try {
-        const coinbaseResponse = await api(`/api/v1/ramps/onramp-url?address=${address}&usdc_amount=${amount}`);
+        const query = new URLSearchParams({ address, usdc_amount: String(usd) });
+        const coinbaseResponse = await api(`/api/v1/ramps/onramp-url?${query.toString()}`);
         if (coinbaseResponse.url) {
           window.open(coinbaseResponse.url, "_blank");
         } else {
@@ -83,7 +91,7 @@ export function RampCard({ address }: { address: string }) {
         setError("No ramp providers available");
       }
     } catch (err) {
-      setError(`Error: ${err instanceof Error ? err.message : "Unknown error"}`);
+      setError(`Error: ${apiErrorDetail(err) || "Unknown error"}`);
     } finally {
       setLoading(false);
     }

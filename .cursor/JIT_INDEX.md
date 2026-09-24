@@ -1,77 +1,138 @@
-# OverUnder JIT index — living graph after T001 paymaster
+# OverUnder JIT index — living graph after lifecycle hardening + Phase 2 completion (T003, T008–T010)
 
-last_verified: 2026-09-21
+last_verified: 2026-09-23
 
 ## Subsystems
 
-- [contracts/src/ConditionalTokens.vy] - binary ERC-1155 CTF split/merge/redeem
-- [contracts/src/MarketFactory.vy] - permissioned primaries (required seed) + wildcard children
-- [contracts/src/MarketAMM.vy] - seeded CPMM on all types, 50/50 fee split, quoteSell
-- [contracts/src/Exchange.vy] - leftover EIP-712 CLOB overlay, unused by happy path
-- [contracts/src/ConsensusOracle.vy] - 3-agent unanimity + 24h fallback
+- [contracts/src/ConditionalTokens.vy : L52-60] - cid = keccak(oracle, questionId); prepareCondition
+- [contracts/src/ConditionalTokens.vy : L97-105] - reportPayouts accepts any nonzero denominator; oracle only sends [1,0]/[0,1] (OU-T014)
+- [contracts/src/lib/NormalMath.vy : L35-229] - stateless WAD math: exp/ln, Phi, g_cdf, hybrid solver solve_g
+- [contracts/src/MarketAMM.vy : L60-88] - Pool (reserves, lpSupply, liquidity L, lpFees, closeTime), 100 bps fee (50 vault / 50 LP), price bound, MIN_LP, closeGate, seedLocked
+- [contracts/src/MarketAMM.vy : L105-119] - operator setCloseGate; _assert_open reverts "market closed" at/after closeTime (gate default on)
+- [contracts/src/MarketAMM.vy : L126-157] - _seed caches oracle closeTime ("not registered" if 0); seedPoolFor credits LP to provider
+- [contracts/src/MarketAMM.vy : L159-238] - static pm-AMM _buy/_sell (u = (no-yes)/L, YES price = Phi(u)); quote == execution
+- [contracts/src/MarketAMM.vy : L263-317] - priceYes (WAD); buyWithUSDC / sellToUSDC gated by _assert_open
+- [contracts/src/MarketAMM.vy : L319-414] - addLiquidity (gated), lpLocked, removeLiquidity (seed locked until close/resolution; MIN_LP forever)
+- [contracts/src/MarketFactory.vy : L115-159] - _create, _seed via amm.seedPoolFor(cid, seed, msg.sender); primary/wildcard ABI unchanged
+- [contracts/src/MarketFactory.vy : L177-199] - createPermissionlessMarket (0x4e7d1a32): gates, qid = keccak(sender, salt), marketType 2, fee to feeRecipient
+- [contracts/src/MarketFactory.vy : L201-227] - setListingConfig / setPermissionless / setLister (operator)
+- [contracts/src/MarketFactory.vy : L229-241] - importLegacyMarkets (v1 -> v2 migration)
+- [contracts/src/Exchange.vy : L92-100] - leftover CLOB: ecrecover-only signatures (no EIP-1271 makers, OU-T016)
+- [contracts/src/Exchange.vy : L116-159] - cancelOrder (maker or operator; no automated cancel job, OU-T016) + permissionless matchOrders (the API relayer submits)
+- [contracts/src/ConsensusOracle.vy : L120-127] - _payouts only [1,0] / [0,1]; no invalid outcome (OU-T014)
+- [contracts/src/ConsensusOracle.vy : L196-226] - resolveFallback / resolveArbitrated (job calls them under OU_FALLBACK_POLICY)
 - [contracts/src/FeeVault.vy] - OU NAV redeem + 24h cooldown
-- [contracts/src/OverUnderPaymaster.vy : L106-108] - operator addFactory (still callable)
-- [contracts/src/OverUnderPaymaster.vy : L322-355] - validatePaymasterUserOp bytes context; factory/initCode; fee fail-closed
-- [contracts/src/OverUnderPaymaster.vy : L358-368] - postOp entrypoint-only USDC fee
-- [contracts/src/SimpleAccount.vy : L40-59] - validateUserOp + execute
-- [contracts/src/SimpleAccountFactory.vy : L46-53] - createAccount / getAddress salt 0
-- [contracts/src/MockEntryPoint.vy : L94-120] - anvil handleOps + postOp
-- [contracts/script/deploy.py : L48-72] - 84532 canonical EP; 31337 MockEntryPoint; addFactory + deposit
-- [backend/app/main.py : L22-39] - FastAPI lifespan; LiveScore facts migrate after create_all
-- [backend/app/markets/router.py : L100-131] - EventCard list
-- [backend/app/markets/router.py : L134-197] - GET/POST NFL schedule
-- [backend/app/markets/router.py : L232-273] - LiveScore.facts JSON upsert
-- [backend/app/markets/router.py : L277-419] - operator createPrimaryMarket
-- [backend/app/oracle/router.py : L51-73] - operator POST /oracle/resolved
-- [backend/app/models.py : L119-129] - NflScheduleGame unique week/home/away
-- [backend/app/aa/router.py : L177-238] - POST /aa/userop two-phase stamp then handleOps
-- [backend/app/aa/bundler.py : L82-165] - v0.7 paymasterAndData stamp + operator verify
-- [backend/app/amm/router.py] - quoteBuy / quoteSell proxy
-- [backend/app/orderbook/matcher.py] - leftover CLOB crossing + relayer
-- [oracles/agents/cursor_runtime.py : L26-77] - lazy cursor-sdk; local vs cloud; HTTP MCP
-- [oracles/agents/cursor_runtime.py : L145-156] - prompt_json lazy Agent.prompt
-- [oracles/agents/alpha.py : L9-27] - Cursor alpha (composer-2.5); mock heuristic for tests
-- [oracles/consensus/coordinator.py : L27-43] - collect attestations; no submitConsensus
-- [oracles/consensus/coordinator.py : L45-53] - sign_unanimous returns deadline plus sigs
-- [oracles/resolve/run.py : L33-119] - dual-gate submitConsensus
-- [oracles/resolve/winner.py : L26-48] - score-derived YES/NO
-- [oracles/schedule/scout.py : L128-157] - 3/3 NFL week extract
-- [oracles/listing/run.py : L58-137] - week-complete then POST W+1 winners
-- [oracles/job.py : L14-50] - scores then resolve then schedule then listing
-- [oracles/scores/scout.py : L268-302] - ScoreReport.facts; 3/3 auto-POST
-- [oracles/scores/publish.py : L15-52] - mint HS256 operator JWT matching _issue
-- [oracles/scores/job.py : L116-150] - score scout loop; cap OU_SCOUT_MAX_MARKETS
-- [oracles/wildcard/generator.py] - child market proposals
+- [contracts/src/OverUnderPaymaster.vy : L322-355] - leftover validatePaymasterUserOp (app uses CDP, ADR-0010)
+- [contracts/script/deploy.py : L150-180] - 84532 canonical EP / 31337 MockEntryPoint; 31337 opens permissionless listing; addFactory + deposit
+- [contracts/script/deploy.py : L74-89] - in-memory fork cache for 31337 (restarted anvils)
+- [contracts/script/deploy_v2.py : L178-268] - migrate_v2: checks first, deploy AMM v2 + Factory v2, import legacy, cut oracle over
+- [contracts/script/deploy_ci.py : L311-341] - preflight_v2: code at addresses, operator owns factory/oracle, refuses v2 -> v2
+- [contracts/script/deploy_ci.py : L548-699] - deploy-contracts CLI: verify | v2 | core, simulate vs broadcast, balance floor, summary
+- [backend/app/main.py : L27-61] - lifespan: run_migrations, indexer task, maybe_start_relayer
+- [backend/app/db.py : L242-272] - lock_migrations + run_migrations: one locked schema entry point (Postgres advisory xact lock)
+- [backend/app/config.py : L46-155] - Settings: TRADING_HALT_AT_CLOSE, RPC timeouts, INDEXER_*, RELAYER_* (off by default)
+- [backend/app/indexer/listener.py : L67-118] - indexer leader lock (Postgres)
+- [backend/app/indexer/listener.py : L136-155] - pm-AMM price Phi((no-yes)/L) from pools(cid), CPMM fallback
+- [backend/app/indexer/listener.py : L188-215] - INDEXER_START_BLOCK floor, lookback, chunked ranges
+- [backend/app/indexer/listener.py : L454-523] - index user listings (MarketCreated type 2) with listing review
+- [backend/app/markets/trading.py : L32-67] - halts_at / trading_open / trading_halt_reason
+- [backend/app/markets/visibility.py : L28-49] - type 2 public only when listing confirmed; paused hidden
+- [backend/app/markets/router.py : L177-229] - EventCard list (types 0 and 2 are primaries)
+- [backend/app/markets/router.py : L385-413] - operator create_market, idempotent when the factory already has the cid
+- [backend/app/markets/router.py : L557-660] - operator pause (factory tx) and archive (DB-only, only when oracle closeTime == 0)
+- [backend/app/markets/listing.py : L237-424] - listing config / eligibility / prepare / confirm
+- [backend/app/markets/listing.py : L492-526] - operator listing review (hidden type-2 markets)
+- [backend/app/markets/listing_gates.py : L58-167] - question/criteria/close/seed/pending gates; duplicate rule
+- [backend/app/amm/router.py : L46-86] - quote: 409 halted, 422 revert reason, 503 RPC
+- [backend/app/aa/router.py : L75-104] - cdp-send allowlist (USDC approve to AMM/factory, CTF approval, buy/sell, createPermissionlessMarket)
+- [backend/app/aa/router.py : L163-222] - /aa/userop 410; cdp_send: 409 on halted trades, prepared-listing check
+- [backend/app/chain/router.py : L36-48] - GET /chain/addresses from Settings (mobile trade targets)
+- [backend/app/oracle/router.py : L78-97] - operator-only POST /oracle/attest
+- [backend/app/oracle/router.py : L124-151] - status: attestations[].kind + createdAt; unanimous counts resolution rows only
+- [backend/app/oracle/router.py : L180-221] - vote with server-side position weight
+- [backend/app/orderbook/eip712.py : L124-196] - Exchange domain, order digest, fail-closed signature recovery
+- [backend/app/orderbook/router.py : L94-213] - POST /orders (halt 409, EIP-712 at edge) and off-chain cancel (onchainCancelRequired)
+- [backend/app/orderbook/matcher.py : L71-149] - try_match: no crossing after halt; enqueue relay job
+- [backend/app/relayer/queue.py : L30-38] - relayer_ready: RELAYER_ENABLED + key + Exchange
+- [backend/app/relayer/worker.py : L69-872] - relay job state machine: nonce, EIP-1559 bumps, receipts, rollback
+- [backend/app/relayer/worker.py : L916-929] - maybe_start_relayer (RELAYER_ENABLED and RELAYER_WORKER_ENABLED)
+- [backend/app/relayer/router.py : L55-106] - operator relayer status + manual tick
+- [backend/app/auth/router.py : L50-71] - 401 unknown user / invalid token; 403 operator only
+- [backend/app/auth/router.py : L74-141] - nonce + SIWE; operator flag from OPERATOR_PRIVATE_KEY
 - [backend/app/cdp.py : L137-166] - CDP email OTP init and verify
-- [backend/app/aa/router.py : L97-142] - /aa/userop 410; cdp-send allowlist
-- [web/src/features/wallet/ConnectBar.tsx : L19-75] - CDP email OTP then session JWT
-- [web/src/features/trade/AmmSwap.tsx : L189-214] - CDP sponsored buy user operation
-- [web/src/features/markets/MarketInfo.tsx : L15-60] - event hub + one muted facts line
-- [shared/design-tokens/tokens.json] - Flutter theme contract
-- [shared/openapi.json] - Flutter API contract
+- [backend/app/models.py : L150-160] - NflScheduleGame unique week/home/away
+- [backend/app/models.py : L182-240] - MarketListing + RelayJob
+- [oracles/job.py : L136-177] - run_tick: lease -> budget -> scores, resolve, resolve_general, schedule, listing
+- [oracles/job.py : L242-250] - exit 1 on preflight or any stage ok: false
+- [oracles/operator_auth.py : L140-185] - auth preflight; SIWE bootstrap once
+- [oracles/tick_lease.py : L70-102] - single-flight guard (skip while an older execution runs; fails open)
+- [oracles/budget.py : L42-101] - OU_TICK_BUDGET_SECONDS (780); task timeout = budget + 60 s
+- [oracles/redact.py : L99-112] - redact + log_error for every stage line
+- [oracles/agents/cursor_runtime.py : L49-87] - local = MCP-only tools (default); cloud needs non-empty CloudEnvironment
+- [oracles/agents/cursor_runtime.py : L302-384] - _run_agent budget watchdog; prompt_json surfaces run errors
+- [oracles/consensus/coordinator.py : L31-57] - Coordinator.run research-only (confidence per report)
+- [oracles/consensus/coordinator.py : L68-86] - sign_one (fallback) / sign_unanimous (chain-clock deadline)
+- [oracles/resolve/chain.py : L102-121] - config_check: chain id, oracle code, agent keys registered, operator
+- [oracles/resolve/chain.py : L158-261] - fallback_state; preflighted sends (consensus, attestation, fallback, arbitrate)
+- [oracles/resolve/run.py : L77-92] - dual-gate owns only "<team> win?" sports primaries
+- [oracles/resolve/run.py : L147-348] - dual gate: not-registered skip, mirror, oldest first, fallback
+- [oracles/resolve/fallback.py : L48-156] - run_fallback: attest matching agents, resolveFallback, arbitrate
+- [oracles/resolve/general.py : L99-120] - general candidates: wildcards, type 2, non-sports type 0
+- [oracles/resolve/general.py : L219-438] - general resolver: delays, gates, 3/3 + confidence floor, fallback
+- [oracles/resolve/cooldown.py : L78-121] - research cooldown (OU_RESEARCH_RETRY_SECONDS) + research records
+- [oracles/scores/job.py : L120-172] - select_targets: recent kickoffs first (oldest first), then a rotating backlog; skips resolved, final/cancelled and not-kicked-off games
+- [oracles/scores/scout.py : L332-364] - ScoreCoordinator 3/3 extract
+- [oracles/scores/publish.py : L15-52] - mint HS256 operator JWT; publish score
+- [oracles/schedule/scout.py : L147-169] - agreed_games: per-game 3/3 schedule consensus
+- [oracles/listing/run.py : L85-97] - week_complete: final/postponed/cancelled, stale grace
+- [oracles/listing/run.py : L172-379] - week-roll listing; per-game isolation; 600 s min lead
+- [oracles/listing/questions.py : L21-26] - question_id: HMAC under OU_QUESTION_ID_KEY, else public sha256
+- [oracles/wildcard/generator.py : L15-31] - child market proposals
+- [web/src/features/wallet/ConnectBar.tsx : L20-89] - CDP email OTP then session JWT
+- [web/src/features/trade/AmmSwap.tsx : L244-299] - CDP sponsored buy user operation
+- [web/src/features/trade/tradingWindow.ts : L29-99] - halt state, closed reasons, quote error text
+- [web/src/features/listing/ListMarketForm.tsx : L66-541] - /list form: eligibility, CDP batch, confirm, send guard
+- [web/src/features/listing/listing.ts : L276-349] - classifyConfirmError + confirmWithRetry (422 terminal; 409/5xx retried)
+- [web/src/features/markets/MarketInfo.tsx : L31-103] - event hub, criteria and creator for type 2
+- [mobile/lib/models/models.dart : L151-165] - isPrimary (0, 2), isUserListed, isTradingClosed
+- [mobile/lib/models/deployments.dart : L77-130] - Deployments.resolve: API addresses, else bundled asset
+- [scripts/audit_markets.py : L72-138] - audit buckets and hints (archive hint for not_registered)
+- [scripts/audit_markets.py : L1419-1516] - audit main: exit 0/1/2, --json
+- [scripts/sync_mobile_deployments.py : L176-225] - regenerate / --check the mobile deployments asset
 - [scripts/e2e_local.py] - AMM buy+sell happy path + fallback; MockSearch
-- [scripts/list_chiefs_primary.py : L76-119] - Chiefs vs Broncos winner primary + 31-10 final; idempotent
-- [oracles/Dockerfile] - python -m job
-- [docs/adr/0008-cursor-runtime-oracles.md : L18-32] - Cursor-runtime oracles; remote HTTP MCP
-- [docs/adr/0009-dual-gate-sports-resolve-and-week-listing.md : L18-32] - dual-gate resolve + week-roll listing
-- [.github/workflows/deploy-gcp.yml : L85-96] - preflight Cursor + AGENT secrets
-- [.github/workflows/deploy-gcp.yml : L152-162] - overunder-oracle Job secrets including AGENT keys
+- [scripts/list_chiefs_primary.py : L76-121] - Chiefs vs Broncos winner primary + 31-10 final; idempotent
+- [.github/workflows/ci.yml : L17-128] - CI: contracts, backend, oracles, scripts, web
+- [.github/workflows/deploy-contracts.yml : L183-265] - pause scheduler, wait executions, run deploy_ci
+- [.github/workflows/deploy-gcp.yml : L26-31] - secret maps (one source for preflight and --set-secrets)
+- [.github/workflows/deploy-gcp.yml : L60-229] - secret preflight; relayer key required when RELAYER_ENABLED
+- [.github/workflows/deploy-gcp.yml : L231-342] - oracle job env: always-passed vs only-when-set; task timeout
+- [.github/workflows/deploy-gcp.yml : L434-446] - API deploy via deploy_wait.sh (halt, indexer, relayer env)
+- [.github/workflows/deploy-gcp.yml : L518-594] - oracle job deploy + */15 scheduler
+- [.github/workflows/deploy-gcp.yml : L637-671] - diagnose on failure (conditions only)
+- [infra/gcp/deploy_wait.sh] - readiness-deadline wait + one async retry
+- [shared/design-tokens/tokens.json] - Flutter theme contract
+- [shared/openapi.json] - Flutter API contract (regenerated for listing, relayer, halt)
+- [oracles/Dockerfile] - python -m job; OU_CURSOR_RUNTIME=local, OU_FALLBACK_POLICY=attest
 
 ## Decisions
 
-- ADR-0007: AMM-first; uniform-LVR is PHASE2 target; CLOB is leftover overlay
+- ADR-0007: AMM-first book of record; CLOB is leftover overlay
 - ADR-0008: Cursor-runtime oracles; Coordinator.run does not submitConsensus
 - ADR-0009: dual-gate sports auto-resolve; week N complete then list week N+1 winner primaries
+- ADR-0010: app login and gas sponsorship use Coinbase CDP; OverUnderPaymaster stays unused by the app
+- ADR-0011: MarketAMM v2 is a static pm-AMM with an on-chain close gate; targeted AMM + Factory redeploy
+- ADR-0012: loosely gated user listing (createPermissionlessMarket; backend gates and confirmed-only visibility)
 - ADR-0001 superseded (historical hybrid CLOB-primary / AMM-wildcard)
 - OU is fixed-supply NAV token, not a public savings vault
 - Trusted operator/relayer/oracle keys in MVP
-- Do not invent uniform-LVR as shipped
-- ADR-0010: app login and gas sponsorship use Coinbase CDP; OverUnderPaymaster stays unused by the app
-- T001 and T002 done; T003 and T008–T010 stay open; T004–T007 and T011–T013 done
+- 2026-09-23: OU-T001–T013 done (T003 relayer, T008 spike, T009 pm-AMM, T010 listing done in code). OU-T014 invalid/refund outcome, OU-T015 dynamic L_t, OU-T016 EIP-1271 makers + on-chain cancel stay open; do not invent them as shipped
+- 2026-09-23 user decisions: OU_FALLBACK_POLICY=attest default (arbitrate, manual selectable); trading halts at closeTime on chain (closeGate default true) and in UI/API (TRADING_HALT_AT_CLOSE=true); targeted AMM + Factory redeploy via deploy-contracts.yml (verify, then v2), then repo vars, then deploy-gcp
+- 2026-09-23 authority: agents may push, open PRs, dispatch the repo's workflows and change GCP resources with gcloud (supersedes the earlier "agents never push/dispatch/run gcloud/send tx"); never print, log or commit a secret value
+- 2026-09-23 oracle runtime: OU_CURSOR_RUNTIME=local with tools=["mcp"]; run errors surfaced; cursor-sdk==1.0.32 pinned. Old cloud mode silently ran local agents with the full toolset
+- Base Sepolia runs v1 AMM/Factory until the ops redeploy; addresses come from the deploy-contracts run summary, never from docs
 - T005 retargeted to Cursor agents
-- Exchange remains deployed leftover overlay
+- Exchange remains deployed leftover overlay; relayer off by default
 - 2026-09-20 Stage 4: mock pytest does not need cursor_sdk; live smoke skipif no key
-- 2026-09-21: resolve module submits; score scout still data-only; factory permissioned
 
 ## Docs
 
@@ -82,15 +143,26 @@ last_verified: 2026-09-21
 - [docs/architecture/backend.md] — FastAPI MIXED map
 - [docs/architecture/oracles.md] — Cursor-runtime consensus MIXED map
 - [docs/architecture/web.md] — Next.js MIXED map
-- [docs/architecture/data-flow.md] — AMM traces + leftover CLOB
+- [docs/architecture/data-flow.md] — AMM traces, user listing, leftover CLOB
 - [docs/intent/vision.md] — product intent
 - [docs/intent/glossary.md] — domain terms
-- [docs/adr/0001-hybrid-clob-amm.md] … [docs/adr/0009-dual-gate-sports-resolve-and-week-listing.md]
+- [docs/adr/0001-hybrid-clob-amm.md] … [docs/adr/0010-cdp-embedded-wallets.md]
+- [docs/adr/0011-pm-amm-v2-close-gate.md] — static pm-AMM + on-chain close gate
+- [docs/adr/0012-loosely-gated-user-listing.md] — loosely gated user listing
+- [docs/explore/uniform-lvr-spike.md] — OU-T008 spike (formula, math, gas, LP sims)
 - [docs/explore/amm.md] [docs/explore/edge_opportunities.md] — literature, not spec
 - [docs/roadmap/phase-1-mvp.md] — seeded AMM checklist
-- [docs/roadmap/phase-2.md] — remaining PHASE2 + shipped T001/T004–T007/T011–T013
-- [docs/TODOS.md] — YAML registry OU-T001–T013
-- [docs/runbooks/local-dev.md] — run/test/stop + Cursor oracle secrets
+- [docs/roadmap/phase-2.md] — phase-2 items; T001–T013 shipped
+- [docs/TODOS.md] — YAML registry OU-T001–T016 (T014–T016 open)
+- [docs/runbooks/local-dev.md] — run/test/stop, test isolation, local relayer, mock tick
+- [docs/runbooks/operations.md] — deploy order, audit, overdue/orphaned markets, fallback, Cursor quota, relayer, CDP Portal
+- [infra/gcp/README.md] — GCP secrets, IAM, workflows, error lines
 - [.cursor/rules/ai-docs.mdc] — always-on pointer hygiene
+- [.cursor/jit_history/2026-09-16-overunder-mvp.md] — archived MVP plan
+- [.cursor/jit_history/2026-09-18-amm-first-docs-pivot.md] — archived AMM-first docs pivot
+- [.cursor/jit_history/2026-09-18-amm-first-phase-1-slice.md] — archived AMM-first phase 1 slice
+- [.cursor/jit_history/2026-09-20-amm-first-phase-1-closeout.md] — archived phase 1 closeout
 - [.cursor/jit_history/2026-09-20-cursor-runtime-scouts.md] — archived Cursor-runtime scouts plan
+- [.cursor/jit_history/2026-09-21-ai-resolve-nfl-listing.md] — archived AI resolve + NFL listing plan
 - [.cursor/jit_history/2026-09-21-ou-t001-paymaster.md] — archived T001 paymaster closeout
+- [.cursor/JIT_PLAN.md] — ACTIVE: lifecycle hardening + Phase 2 completion (2026-09-23); steps 15 ship and 16 ops pending

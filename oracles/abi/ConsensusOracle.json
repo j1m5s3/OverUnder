@@ -1,29 +1,17 @@
 [
-  {
-    "name": "submitConsensus",
-    "type": "function",
-    "stateMutability": "nonpayable",
-    "inputs": [
-      {"name": "conditionId", "type": "bytes32"},
-      {"name": "outcome", "type": "uint8"},
-      {"name": "evidenceHash", "type": "bytes32"},
-      {"name": "deadline", "type": "uint256"},
-      {"name": "sigs", "type": "bytes[]"}
-    ],
-    "outputs": []
-  },
-  {
-    "name": "resolved",
-    "type": "function",
-    "stateMutability": "view",
-    "inputs": [{"name": "arg0", "type": "bytes32"}],
-    "outputs": [{"name": "", "type": "bool"}]
-  },
-  {
-    "name": "closeTime",
-    "type": "function",
-    "stateMutability": "view",
-    "inputs": [{"name": "arg0", "type": "bytes32"}],
-    "outputs": [{"name": "", "type": "uint256"}]
-  }
+  {"stateMutability": "nonpayable", "type": "function", "name": "submitConsensus", "inputs": [{"name": "conditionId", "type": "bytes32"}, {"name": "outcome", "type": "uint8"}, {"name": "evidenceHash", "type": "bytes32"}, {"name": "deadline", "type": "uint256"}, {"name": "sigs", "type": "bytes[]"}], "outputs": []},
+  {"stateMutability": "view", "type": "function", "name": "resolved", "inputs": [{"name": "arg0", "type": "bytes32"}], "outputs": [{"name": "", "type": "bool"}]},
+  {"stateMutability": "view", "type": "function", "name": "closeTime", "inputs": [{"name": "arg0", "type": "bytes32"}], "outputs": [{"name": "", "type": "uint256"}]},
+  {"stateMutability": "view", "type": "function", "name": "agents", "inputs": [{"name": "arg0", "type": "uint256"}], "outputs": [{"name": "", "type": "address"}]},
+  {"stateMutability": "view", "type": "function", "name": "operator", "inputs": [], "outputs": [{"name": "", "type": "address"}]},
+  {"stateMutability": "view", "type": "function", "name": "ctf", "inputs": [], "outputs": [{"name": "", "type": "address"}]},
+  {"stateMutability": "view", "type": "function", "name": "isAgent", "inputs": [{"name": "arg0", "type": "address"}], "outputs": [{"name": "", "type": "bool"}]},
+  {"stateMutability": "nonpayable", "type": "function", "name": "submitAttestation", "inputs": [{"name": "conditionId", "type": "bytes32"}, {"name": "outcome", "type": "uint8"}, {"name": "evidenceHash", "type": "bytes32"}, {"name": "deadline", "type": "uint256"}, {"name": "sig", "type": "bytes"}], "outputs": []},
+  {"stateMutability": "nonpayable", "type": "function", "name": "resolveFallback", "inputs": [{"name": "conditionId", "type": "bytes32"}], "outputs": []},
+  {"stateMutability": "nonpayable", "type": "function", "name": "resolveArbitrated", "inputs": [{"name": "conditionId", "type": "bytes32"}, {"name": "outcome", "type": "uint8"}], "outputs": []},
+  {"stateMutability": "view", "type": "function", "name": "WINDOW", "inputs": [], "outputs": [{"name": "", "type": "uint256"}]},
+  {"stateMutability": "view", "type": "function", "name": "agentSubmitted", "inputs": [{"name": "arg0", "type": "bytes32"}, {"name": "arg1", "type": "address"}], "outputs": [{"name": "", "type": "bool"}]},
+  {"stateMutability": "view", "type": "function", "name": "agentOutcome", "inputs": [{"name": "arg0", "type": "bytes32"}, {"name": "arg1", "type": "address"}], "outputs": [{"name": "", "type": "uint8"}]},
+  {"stateMutability": "view", "type": "function", "name": "attestationCount", "inputs": [{"name": "arg0", "type": "bytes32"}], "outputs": [{"name": "", "type": "uint8"}]},
+  {"stateMutability": "view", "type": "function", "name": "voteWeight", "inputs": [{"name": "arg0", "type": "bytes32"}, {"name": "arg1", "type": "uint256"}], "outputs": [{"name": "", "type": "uint256"}]}
 ]

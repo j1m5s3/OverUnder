@@ -1,3 +1,6 @@
+import math
+from statistics import NormalDist
+
 import pytest
 from httpx import ASGITransport, AsyncClient
 from types import SimpleNamespace
@@ -8,6 +11,8 @@ from app.indexer.listener import (
     build_seed_point,
     build_swap_point,
     mid_to_micros,
+    pm_price_micros,
+    pool_price_micros,
 )
 from app.main import create_app
 from app.models import Market, PricePoint
@@ -214,3 +219,130 @@ async def test_amm_history_happy_path_writes_inverted_mid(history_tables):
         for row in rows:
             await session.delete(row)
         await session.commit()
+
+
+# --- MarketAMM v2 (pm-AMM): YES = Phi((no - yes) / L) from pools(cid)[4] ----------------
+
+
+def test_pm_price_balanced_pool_is_half():
+    s = 1_000_000_000
+    assert pm_price_micros(s, s, round(s * math.sqrt(2 * math.pi))) == 500_000
+
+
+def test_pm_price_matches_normal_cdf():
+    assert pm_price_micros(100, 300, 200) == round(NormalDist().cdf(1.0) * 1_000_000) == 841_345
+    assert pm_price_micros(300, 100, 200) == 158_655
+
+
+def test_pm_price_rises_after_yes_buy_drains_yes_reserve():
+    liquidity = 2_506_628
+    before = pm_price_micros(1_000_000, 1_000_000, liquidity)
+    after_yes_buy = pm_price_micros(800_000, 1_150_000, liquidity)
+    assert after_yes_buy > before
+    assert pm_price_micros(1_150_000, 800_000, liquidity) < before
+
+
+def test_pm_price_without_liquidity_falls_back_to_cpmm_mid():
+    assert pm_price_micros(75, 25, 0) == mid_to_micros(75, 25) == 250_000
+
+
+def test_pool_price_uses_liquidity_field_only_when_present():
+    v2_pool = (100, 300, 1_000, True, 200, 0, 2_000_000_000)
+    assert pool_price_micros(v2_pool) == 841_345
+    assert pool_price_micros((100, 300, 1_000, True, 0, 0, 0)) == 750_000
+    assert pool_price_micros((100, 300, 1_000, True)) == 750_000
+    assert pool_price_micros((100, 300)) == 750_000
+
+
+def test_swap_point_with_liquidity_uses_pm_price():
+    assert build_swap_point(COND, 1, 1, 0, 100, 300, 200).yes_price_micros == 841_345
+    assert build_swap_point(COND, 1, 1, 0, 100, 300).yes_price_micros == 750_000
+
+
+@pytest.mark.asyncio
+async def test_amm_history_v2_pool_writes_pm_price(history_tables):
+    amm = _fake_amm(
+        swaps=_FakeEventFilter(logs=[_fake_log(21, 0)]),
+        pools=_FakePools(result=(100, 300, 1_000, True, 200, 0, 2_000_000_000)),
+    )
+    async with SessionLocal() as session:
+        assert await _index_amm_history(_fake_w3(), amm, session, 20, 21) is True
+        rows = (
+            await session.execute(
+                __import__("sqlalchemy").select(PricePoint).where(PricePoint.condition_id == FAKE_COND)
+            )
+        ).scalars().all()
+        assert [r.yes_price_micros for r in rows] == [841_345]
+        for row in rows:
+            await session.delete(row)
+        await session.commit()
+
+
+# --- unique (condition_id, block_number, log_index) + ON CONFLICT DO NOTHING ---------------
+
+
+@pytest.mark.asyncio
+async def test_amm_history_concurrent_writers_store_one_point_per_event(history_tables, monkeypatch):
+    """Two indexers whose pre-check both missed (concurrent instances) still store one row per event."""
+    from sqlalchemy import func, select
+
+    from app.indexer import listener
+
+    def amm():
+        return _fake_amm(
+            seeded=_FakeEventFilter(logs=[_fake_log(30, 0)]),
+            swaps=_FakeEventFilter(logs=[_fake_log(31, 1), _fake_log(31, 4)]),
+            pools=_FakePools(result=(100, 300)),
+        )
+
+    async with SessionLocal() as first:
+        assert await _index_amm_history(_fake_w3(), amm(), first, 30, 31) is True
+        await first.commit()
+
+    async def never_seen(*_a):
+        return False
+
+    monkeypatch.setattr(listener, "_point_exists", never_seen)
+    async with SessionLocal() as second:
+        assert await _index_amm_history(_fake_w3(), amm(), second, 30, 31) is True
+        await second.commit()
+
+    async with SessionLocal() as session:
+        rows = (
+            await session.execute(
+                select(PricePoint.block_number, PricePoint.log_index, func.count())
+                .where(PricePoint.condition_id == FAKE_COND)
+                .group_by(PricePoint.block_number, PricePoint.log_index)
+            )
+        ).all()
+    assert sorted(rows) == [(30, 0, 1), (31, 1, 1), (31, 4, 1)]
+
+
+def test_price_point_unique_migration_dedupes_legacy_rows(tmp_path):
+    from sqlalchemy import create_engine, inspect, text
+
+    from app.db import PRICE_POINT_UNIQUE, ensure_price_point_unique
+
+    eng = create_engine(f"sqlite:///{(tmp_path / 'pp.db').as_posix()}")
+    try:
+        with eng.begin() as conn:
+            conn.execute(
+                text(
+                    "CREATE TABLE price_points (id INTEGER PRIMARY KEY, condition_id VARCHAR(66), ts INTEGER, "
+                    "block_number INTEGER, log_index INTEGER, yes_price_micros INTEGER)"
+                )
+            )
+            for pid, block, idx in ((1, 5, 0), (2, 5, 0), (3, 5, 1), (4, 5, 0)):
+                conn.execute(
+                    text("INSERT INTO price_points VALUES (:id, '0xaa', 1, :b, :i, 500000)"),
+                    {"id": pid, "b": block, "i": idx},
+                )
+        for _ in range(2):
+            with eng.begin() as conn:
+                ensure_price_point_unique(conn)
+        with eng.connect() as conn:
+            ids = [r[0] for r in conn.execute(text("SELECT id FROM price_points ORDER BY id"))]
+            assert ids == [1, 3]
+            assert PRICE_POINT_UNIQUE in {i["name"] for i in inspect(conn).get_indexes("price_points")}
+    finally:
+        eng.dispose()
