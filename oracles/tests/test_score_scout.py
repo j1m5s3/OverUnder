@@ -117,3 +117,36 @@ def test_vs_box_facts_populated():
         assert report.as_api_body()["facts"]["home_score"] == 27
     finally:
         os.environ.pop("OU_ORACLE_MOCK", None)
+
+
+def test_cursor_extract_postponed_and_cancelled_are_scoreless(monkeypatch):
+    import importlib
+
+    scout_mod = importlib.import_module("scores.scout")
+
+    prompts = []
+
+    def fake_prompt(prompt, model):
+        prompts.append(prompt)
+        return {
+            "home_label": "Chiefs",
+            "away_label": "Broncos",
+            "home_score": 7,
+            "away_score": 3,
+            "status": status_box[0],
+            "facts": {},
+            "search_hits": [{"url": "https://ex.test/1", "content": "postponed"}],
+            "evidence_urls": ["https://ex.test/1"],
+        }
+
+    monkeypatch.setattr(scout_mod, "prompt_json", fake_prompt)
+    for status in ("postponed", "cancelled"):
+        status_box = [status]
+        report = scout_mod._cursor_extract("Chiefs vs Broncos: Kelce to fumble?", "alpha")
+        assert report.status == status
+        assert report.home_score is None and report.away_score is None
+        assert report.facts == {"fumbles": None}
+        assert scout_mod.canonicalize(report, "Chiefs vs Broncos: Kelce to fumble?").status == status
+    assert "scheduled | in_progress | final | postponed | cancelled" in prompts[0]
+    status_box = ["halftime-ish"]
+    assert scout_mod._cursor_extract("Chiefs vs Broncos: Chiefs win?", "alpha").status == "scheduled"

@@ -12,12 +12,12 @@ class BetaAgent:
     def __init__(self, search=None):
         self.search = search
 
-    def research(self, question: str) -> Attestation:
+    def research(self, question: str, context: str | None = None, as_of: str | None = None) -> Attestation:
         if self.search is not None or should_use_mock():
             hits = hits_from_search(self.search, question)
             outcome, confidence, summary, evidence_urls = heuristic_infer(question, hits, 0.8)
         else:
-            hits, outcome, confidence, summary, evidence_urls = live_research(question, "beta")
+            hits, outcome, confidence, summary, evidence_urls = live_research(question, "beta", context=context, as_of=as_of)
 
         hit_urls = {h.url for h in hits}
         for url in evidence_urls:

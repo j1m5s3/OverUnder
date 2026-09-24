@@ -3,16 +3,23 @@
 from __future__ import annotations
 
 import os
-import sys
 from datetime import datetime, timezone
 from typing import Any, Callable
 
 import httpx
 
+import budget
+from redact import log_error, redact
 from scores.scout import ScoreCoordinator
 
 DEFAULT_MAX_MARKETS = 5
 DEFAULT_STALE_SECONDS = 600
+DEFAULT_MAX_AGE_SECONDS = 0
+# Games that kicked off within this window are scouted before the backlog.
+DEFAULT_RECENT_SECONDS = 36 * 3600
+# Backlog rotation step: the scheduled tick interval.
+BACKLOG_ROTATE_SECONDS = 900
+DONE_SCORE_STATUSES = frozenset({"final", "cancelled"})
 
 
 def _api_url() -> str:
@@ -37,6 +44,24 @@ def stale_seconds() -> int:
         value = int(raw)
     except ValueError as exc:
         raise RuntimeError("OU_SCOUT_STALE_SECONDS must be an integer") from exc
+    return max(0, value)
+
+
+def max_age_seconds() -> int:
+    raw = os.getenv("OU_SCOUT_MAX_AGE_SECONDS", str(DEFAULT_MAX_AGE_SECONDS)).strip()
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise RuntimeError("OU_SCOUT_MAX_AGE_SECONDS must be an integer") from exc
+    return max(0, value)
+
+
+def recent_seconds() -> int:
+    raw = os.getenv("OU_SCOUT_RECENT_SECONDS", str(DEFAULT_RECENT_SECONDS)).strip()
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise RuntimeError("OU_SCOUT_RECENT_SECONDS must be an integer") from exc
     return max(0, value)
 
 
@@ -85,22 +110,63 @@ def sports_primaries(cards: list[dict]) -> list[dict]:
     return out
 
 
+def _close_time(primary: dict) -> int:
+    try:
+        return int(primary.get("closeTime") or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
 def select_targets(
     primaries: list[dict],
     fetch_detail: Callable[[str], dict],
     now: datetime,
     cap: int,
     window: int,
+    max_age: int = 0,
+    recent: int = DEFAULT_RECENT_SECONDS,
 ) -> list[dict]:
+    """Recent kickoffs first, then the backlog; card-level filters run before any detail GET.
+
+    Tier 1: games that kicked off within `recent` seconds (or have no closeTime),
+    oldest first. Tier 2: older games, oldest first, rotated each tick so a few
+    games that never reach a done status (postponed, never 3/3, legacy) cannot hold
+    the leftover slots either. A stuck backlog therefore never starves new games,
+    and old games still catch up in quiet periods. `max_age` > 0 is an opt-in hard
+    cutoff that drops games closed longer ago than that.
+    """
+    clock = now.timestamp()
+    eligible: list[dict] = []
+    for primary in sorted(primaries, key=lambda p: (_close_time(p), p.get("conditionId") or "")):
+        if not (primary.get("conditionId") or "") or primary.get("resolved"):
+            continue
+        close = _close_time(primary)
+        if close > clock:
+            continue
+        if max_age and close and clock - close > max_age:
+            continue
+        eligible.append(primary)
+    fresh_tier = [p for p in eligible if not _close_time(p) or clock - _close_time(p) <= recent]
+    backlog = [p for p in eligible if _close_time(p) and clock - _close_time(p) > recent]
+    if backlog:
+        shift = int(clock // BACKLOG_ROTATE_SECONDS) % len(backlog)
+        backlog = backlog[shift:] + backlog[:shift]
     selected: list[dict] = []
-    for primary in primaries:
+    for primary in fresh_tier + backlog:
         if len(selected) >= cap:
             break
-        condition_id = primary.get("conditionId") or ""
-        if not condition_id:
+        condition_id = primary["conditionId"]
+        try:
+            detail = fetch_detail(condition_id) or {}
+        except Exception as exc:
+            log_error(f"scout detail failed {condition_id}: {exc}")
             continue
-        detail = fetch_detail(condition_id) or {}
-        if skip_fresh(detail.get("score"), now, window):
+        if detail.get("resolved"):
+            continue
+        score = detail.get("score") if isinstance(detail.get("score"), dict) else None
+        if score and score.get("status") in DONE_SCORE_STATUSES:
+            continue
+        if skip_fresh(score, now, window):
             continue
         selected.append(primary)
     return selected
@@ -134,12 +200,15 @@ def run_job(
         payload = getter(f"{base}/api/v1/markets/{condition_id}")
         return payload if isinstance(payload, dict) else {}
 
-    targets = select_targets(primaries, fetch_detail, clock, cap, window)
+    targets = select_targets(primaries, fetch_detail, clock, cap, window, max_age_seconds(), recent_seconds())
     factory = coordinator_factory or (lambda: ScoreCoordinator(publisher=publisher))
     results = []
     for primary in targets:
         cid = primary["conditionId"]
         question = primary.get("question") or ""
+        if budget.exhausted():
+            results.append({"conditionId": cid, "ok": True, "skipped": "budget"})
+            continue
         try:
             coord = factory()
             outcome = coord.run(question, condition_id=cid)
@@ -154,7 +223,7 @@ def run_job(
                 }
                 for r in (outcome.get("reports") or [])
             ]
-            print(f"scout {cid} unanimous={outcome.get('unanimous')} reports={compact}", file=sys.stderr)
+            log_error(f"scout {cid} unanimous={outcome.get('unanimous')} reports={compact}")
             results.append(
                 {
                     "conditionId": cid,
@@ -164,14 +233,14 @@ def run_job(
                 }
             )
         except Exception as exc:
-            print(f"scout failed {cid}: {exc}", file=sys.stderr)
+            log_error(f"scout failed {cid}: {exc}")
             results.append({"conditionId": cid, "ok": False, "error": str(exc)})
-    return {"attempted": len(targets), "results": results}
+    return {"ok": True, "attempted": len(targets), "results": results}
 
 
 def main() -> int:
     summary = run_job()
-    print(summary)
+    print(redact(summary))
     return 0
 
 

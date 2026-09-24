@@ -59,6 +59,8 @@ class ScoreReport:
 
 
 _STATUSES = {"scheduled", "in_progress", "final", "postponed", "cancelled"}
+# Statuses with no meaningful score: numbers and facts stay null.
+_SCORELESS = frozenset({"scheduled", "postponed", "cancelled"})
 
 
 def canonicalize(report: ScoreReport, question: str) -> ScoreReport:
@@ -76,7 +78,7 @@ def canonicalize(report: ScoreReport, question: str) -> ScoreReport:
         elif value is None and key == "away_score":
             value = away_score
         facts[key] = value
-    if status == "scheduled":
+    if status in _SCORELESS:
         home_score, away_score = None, None
         facts = {key: None for key in keys}
     return ScoreReport(
@@ -166,7 +168,7 @@ def _facts_from_blob(question: str, blob: str, home: str, away: str, home_score:
 
 
 def _require_facts(question: str, status: str, facts: dict) -> None:
-    if status == "scheduled":
+    if status in _SCORELESS:
         return
     for key in requested_facts(question):
         if facts.get(key) is None:
@@ -232,14 +234,14 @@ Requested fact keys: {keys}
 Respond with JSON only:
 - home_label, away_label (strings)
 - home_score, away_score (integers or null if the game has not started / score unknown)
-- status: scheduled | in_progress | final
+- status: scheduled | in_progress | final | postponed | cancelled
 - period_label: short string or null
 - facts: object containing every requested key (number, string, or null)
 - summary: max 280 chars
 - search_hits: list of {{url, content}} actually returned by search tools
 - evidence_urls: subset of search_hits urls
 
-Never invent a 0-0 score for a scheduled game. Use nulls instead. Never invent URLs.
+Never invent a 0-0 score for a scheduled, postponed or cancelled game. Use nulls instead. Never invent URLs.
 """
     data = prompt_json(prompt, model_id(slot))
     raw_hits = data.get("search_hits")
@@ -253,7 +255,9 @@ Never invent a 0-0 score for a scheduled game. Use nulls instead. Never invent U
     home_score = _int_or_none(data.get("home_score"))
     away_score = _int_or_none(data.get("away_score"))
     status = data.get("status") or "scheduled"
-    if status == "scheduled":
+    if status not in _STATUSES:
+        status = "scheduled"
+    if status in _SCORELESS:
         home_score, away_score = None, None
     facts = data.get("facts") if isinstance(data.get("facts"), dict) else {}
     for key in keys:
@@ -262,7 +266,7 @@ Never invent a 0-0 score for a scheduled game. Use nulls instead. Never invent U
             facts[key] = home_score if facts.get(key) is None else facts[key]
         elif key == "away_score":
             facts[key] = away_score if facts.get(key) is None else facts[key]
-    if status == "scheduled":
+    if status in _SCORELESS:
         facts = {k: None for k in keys}
         home_score, away_score = None, None
     _require_facts(question, status, facts)
